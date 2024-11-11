@@ -1,0 +1,48 @@
+/home/viciopoli/.local/share/JetBrains/Toolbox/apps/clion/bin/cmake/linux/x64/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_MAKE_PROGRAM=/home/viciopoli/.local/share/JetBrains/Toolbox/apps/clion/bin/ninja/linux/x64/ninja -G Ninja -S "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project" -B "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-debug"
+CMake Warning (dev) at /home/viciopoli/.local/share/JetBrains/Toolbox/apps/clion/bin/cmake/linux/x64/share/cmake-3.26/Modules/FindPackageHandleStandardArgs.cmake:438 (message):
+  The package name passed to `find_package_handle_standard_args` (PkgConfig)
+  does not match the name of the calling package (dv-processing).  This can
+  lead to problems in calling code that expects `find_package` result
+  variables (e.g., `_FOUND`) to follow a certain pattern.
+Call Stack (most recent call first):
+  /home/viciopoli/.local/share/JetBrains/Toolbox/apps/clion/bin/cmake/linux/x64/share/cmake-3.26/Modules/FindPkgConfig.cmake:99 (find_package_handle_standard_args)
+  /usr/lib/x86_64-linux-gnu/cmake/dv-processing/dv-processing-config.cmake:54 (INCLUDE)
+  CMakeLists.txt:5 (find_package)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at /home/viciopoli/.local/share/JetBrains/Toolbox/apps/clion/bin/cmake/linux/x64/share/cmake-3.26/Modules/FindPackageHandleStandardArgs.cmake:438 (message):
+  The package name passed to `find_package_handle_standard_args` (PkgConfig)
+  does not match the name of the calling package (dv-processing).  This can
+  lead to problems in calling code that expects `find_package` result
+  variables (e.g., `_FOUND`) to follow a certain pattern.
+Call Stack (most recent call first):
+  /home/viciopoli/.local/share/JetBrains/Toolbox/apps/clion/bin/cmake/linux/x64/share/cmake-3.26/Modules/FindPkgConfig.cmake:99 (find_package_handle_standard_args)
+  /usr/lib/x86_64-linux-gnu/cmake/dv-processing/dv-processing-config.cmake:70 (INCLUDE)
+  CMakeLists.txt:5 (find_package)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+-- Extra stdlibc++ debug flags enabled
+-- Linker flag --as-needed enabled
+-- Project name is: project
+-- Project version is: 
+-- Build type is: Debug
+-- Compiler is Clang: FALSE
+-- Compiler is GCC: TRUE
+-- Compiler is IntelCC: FALSE
+-- Compiler is MS VisualC: FALSE
+-- OS is Unix: TRUE
+-- OS is Linux: TRUE
+-- OS is MacOS: FALSE
+-- OS is Windows: FALSE
+-- System is big-endian: 0
+-- Thread support is PThreads: TRUE
+-- Thread support is Win32 Threads: FALSE
+-- Thread support libraries: 
+-- Current C flags are: 
+-- Current CXX flags are: 
+-- Final install bindir is: /usr/local/bin
+-- Final install libdir is: /usr/local/lib
+-- Final install includedir is: /usr/local/include
+-- Configuring done (0.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-debug

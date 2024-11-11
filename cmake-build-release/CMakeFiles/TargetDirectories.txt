@@ -1,0 +1,7 @@
+/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-release/CMakeFiles/project.dir
+/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-release/CMakeFiles/main_ekf.dir
+/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-release/CMakeFiles/main_ekf_ini.dir
+/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-release/CMakeFiles/features.dir
+/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-release/CMakeFiles/freq_est.dir
+/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-release/CMakeFiles/edit_cache.dir
+/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-release/CMakeFiles/rebuild_cache.dir
