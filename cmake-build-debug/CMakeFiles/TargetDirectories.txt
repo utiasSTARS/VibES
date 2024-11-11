@@ -1,7 +1,0 @@
-/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-debug/CMakeFiles/project.dir
-/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-debug/CMakeFiles/main_ekf.dir
-/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-debug/CMakeFiles/main_ekf_ini.dir
-/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-debug/CMakeFiles/features.dir
-/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-debug/CMakeFiles/freq_est.dir
-/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-debug/CMakeFiles/edit_cache.dir
-/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/cmake-build-debug/CMakeFiles/rebuild_cache.dir
