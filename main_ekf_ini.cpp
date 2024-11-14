@@ -8,6 +8,45 @@
 
 #include <dv-processing/io/mono_camera_recording.hpp>
 #include <open3d/Open3D.h>
+#include <dv-processing/io/camera_capture.hpp>
+
+struct Point {
+    int x;
+    int y;
+    int64_t timestamp;
+};
+
+class RingBuffer : public std::deque<Point> {
+public:
+    RingBuffer(size_t capacity) : capacity(capacity) {}
+
+    void push_back(const Point &value) {
+        if (this->size() == capacity) {
+            this->pop_front();
+        }
+        std::deque<Point>::push_back(value);
+    }
+
+    size_t getCapacity() const {
+        return capacity;
+    }
+
+    int64_t getHighestTime() const {
+        return this->back().timestamp;
+    }
+
+    void writeOut(std::vector<Eigen::Vector3d> &data) {
+        data.clear();
+        auto last_time = this->back().timestamp;
+        for (const auto &d: *this) {
+            Eigen::Vector3d point(d.x, d.y, static_cast<double>(last_time - d.timestamp));
+            data.push_back(point);
+        }
+    }
+
+private:
+    size_t capacity;
+};
 
 
 // Function to generate synthetic sinusoidal data
@@ -64,24 +103,23 @@ void windowedEKF(const dv::EventStore &events, Eigen::VectorXd &x, Eigen::Matrix
 int main() {
     dv::io::MonoCameraRecording reader(
             "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
-
+    // dv::io::CameraCapture reader;
     // Get and print the camera name that data from recorded from
     std::cout << "Opened an AEDAT4 file which contains data from [" << reader.getCameraName() << "] camera"
               << std::endl;
-    cv::Size resolution;
-    if (reader.isEventStreamAvailable()) {
-        // Check the resolution of event stream. Since the getEventResolution() method returns
-        // a std::optional, we use *operator to get the value. The method returns std::nullopt
-        // only in case the stream is unavailable, which is already checked.
-        resolution = *reader.getEventResolution();
+    cv::Size resolution = *reader.getEventResolution();
+    cv::Size resolution_half(resolution.width / 2, resolution.height / 2);
 
-        // Print that the stream is present and its resolution
-        std::cout << "  * Event stream with resolution " << resolution << std::endl;
+    // hashmap to track time over pixels
+    std::unordered_map<int64_t, int64_t> time_over_pixels;
+    time_over_pixels.reserve(static_cast<int>(resolution_half.width * resolution_half.height));
+    // init to 0
+    for (int i = 0; i < resolution_half.width * resolution_half.height; i++) {
+        time_over_pixels[i] = 0;
     }
 
     open3d::visualization::Visualizer vis;
     vis.CreateVisualizerWindow("Event Camera Visualization", 800, 600);
-
 
     // Initial state: [A, omega, phi, C]
     Eigen::VectorXd x(3);
@@ -106,7 +144,7 @@ int main() {
     // Define 3D bounding box for last 10 seconds with visible z-axis size
     auto bounding_box = std::make_shared<open3d::geometry::AxisAlignedBoundingBox>(
             Eigen::Vector3d(x_min, y_min, 0.0),
-            Eigen::Vector3d(x_max, y_max, time_window_micro / 1e6));
+            Eigen::Vector3d(x_max, y_max, 10));
 
     // Set bounding box color for visibility
     bounding_box->color_ = Eigen::Vector3d(0.0, 1.0, 0.0);  // Green color
@@ -116,8 +154,8 @@ int main() {
 
     // Point cloud setup and sliding buffer for events
     auto point_cloud = std::make_shared<open3d::geometry::PointCloud>();
-    std::deque<Eigen::Vector3d> points_buffer;  // Sliding window buffer for points
-    std::deque<Eigen::Vector3d> colors_buffer;  // Buffer for point colors
+    RingBuffer points_buffer(100'000);
+
     bool is_geometry_added = false;
 
     Eigen::Vector3d color_1(1, 0, 0);
@@ -130,39 +168,7 @@ int main() {
 
     while (reader.isRunning()) {
         if (const auto events = reader.getNextEventBatch(); events.has_value()) {
-
-            auto latest_timestamp = events.value().back().timestamp();
-
-            // Remove outdated points from buffer
-            while (!points_buffer.empty() &&
-                   static_cast<double>(latest_timestamp - points_buffer.front().z() * 1e6) > time_window_micro) {
-                points_buffer.pop_front();
-                colors_buffer.pop_front();
-            }
-
-            // Add new events to the point cloud within the sliding window
-            for (const auto &event: events.value()) {
-                if (t0 == 0) {
-                    t0 = event.timestamp();
-                }
-                auto relative_time = static_cast<double>(event.timestamp() - t0);
-                if (t0 == event.timestamp()) {
-                    std::cout << "relative_time: " << relative_time << std::endl;
-                }
-                Eigen::Vector3d point(event.x(), event.y(), relative_time);  // Scale to seconds
-
-                point_cloud->points_.push_back(point);
-                if (i % 2 == 0) {
-                    colors_buffer.push_back(event.polarity() ? color_3 : color_4);
-                } else {
-                    point_cloud->colors_.push_back(event.polarity() ? color_1 : color_2);
-                }
-            }
-
-            // Update point cloud with current points in the sliding window
-            // point_cloud->points_.assign(points_buffer.begin(), points_buffer.end());
-            // point_cloud->colors_.assign(colors_buffer.begin(), colors_buffer.end());
-
+            std::cout << "Received " << *events << " events" << std::endl;
             // Add or update point cloud in the visualizer
             if (!is_geometry_added) {
                 vis.AddGeometry(point_cloud);
@@ -170,23 +176,47 @@ int main() {
 
                 // Set camera view to focus on bounding box area
                 vis.GetViewControl().SetLookat(
-                        Eigen::Vector3d((x_max - x_min) / 2, (y_max - y_min) / 2, -time_window_micro / 2 / 1e6));
+                        Eigen::Vector3d((x_max - x_min) / 2, (y_max - y_min) / 2, time_window_micro / 2 / 1e6));
                 vis.GetViewControl().SetZoom(0.8);
                 vis.GetRenderOption().point_size_ = 2.0;
-            } else {
-                vis.UpdateGeometry(point_cloud);
             }
 
-            std::this_thread::sleep_for(std::chrono::microseconds(100000));
-            vis.PollEvents();
-            vis.UpdateRender();
-            i++;
-            if (i == 2) {
-                while (vis.PollEvents()) {
-                    vis.UpdateRender();
+            for (const auto &event: events.value()) {
+                if (event.x() < 0 || event.y() < 0 || event.x() >= resolution_half.width ||
+                    event.y() >= resolution_half.height) {
+                    auto value = time_over_pixels[event.y() * resolution_half.width + event.x()];
+                    time_over_pixels[event.y() * resolution_half.width + event.x()] =
+                            value == 0 ? event.timestamp() : value-event.timestamp();
+                    if (value != 0) {
+                        std::cout << "time value: " << -time_over_pixels[event.y() * resolution_half.width + event.x()]
+                                  << std::endl;
+                        time_over_pixels[event.y() * resolution_half.width + event.x()] = 0;
+                    }
                 }
+
+                points_buffer.push_back({event.x(), event.y(), event.timestamp()});
+                points_buffer.writeOut(point_cloud->points_);
+
+                vis.UpdateGeometry(point_cloud);
+                vis.PollEvents();
+                vis.UpdateRender();
+
+
+                std::this_thread::sleep_for(std::chrono::microseconds(1));
             }
+
+            // std::this_thread::sleep_for(std::chrono::microseconds(100000));
+            // vis.PollEvents();
+            // vis.UpdateRender();
         }
+        // if (i == 2) {
+        //     break;
+        // }
+    }
+
+
+    while (vis.PollEvents()) {
+        vis.UpdateRender();
     }
 
     vis.DestroyVisualizerWindow();
