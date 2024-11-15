@@ -4,7 +4,7 @@ project(project)
 find_package(Eigen3 REQUIRED)
 find_package(dv-processing REQUIRED)
 find_package(Open3D REQUIRED)
-
+find_package(FFTW3 REQUIRED)
 
 include_directories(${EIGEN3_INCLUDE_DIR})
 
@@ -17,8 +17,12 @@ add_executable(main_ekf_ini main_ekf_ini.cpp)
 add_executable(features features.cpp)
 add_executable(freq_est freq_est.cpp)
 add_executable(freq_est_multi freq_est_multi.cpp)
+add_executable(RANSAC_fitting RANSAC_fitting.cpp)
+add_executable(fft_fitting fft_fitting.cpp)
 
 target_link_libraries(main_ekf_ini dv::processing Open3D::Open3D)
 target_link_libraries(features dv::processing)
 target_link_libraries(freq_est dv::processing)
 target_link_libraries(freq_est_multi dv::processing)
+target_link_libraries(RANSAC_fitting dv::processing Open3D::Open3D)
+target_link_libraries(fft_fitting dv::processing Open3D::Open3D fftw3)

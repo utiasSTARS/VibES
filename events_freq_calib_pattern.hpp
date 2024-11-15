@@ -45,31 +45,26 @@ public:
 
     std::optional<dv::EventStore> get_events() {
         dv::EventStore event_store;
+        // event_store.reserve(9'999);
 
-        auto d_x = static_cast<int16_t>(amplitude_x * std::cos(omega * static_cast<double>(timestamp) / 1e6 + phi));
-        auto d_y = static_cast<int16_t>(amplitude_y * std::sin(omega * static_cast<double>(timestamp) / 1e6 + phi));
         while (event_store.size() < 10'000) {
-            for (const auto &event: vertical_line) {
-                // shift the vertical line
-                dv::Event shifted_event(timestamp, event.x() + d_x, event.y() + d_y, event.polarity());
-                // make sure the event is whitin the image
-                if (shifted_event.x() < 0 || shifted_event.x() >= size.width || shifted_event.y() < 0 ||
-                    shifted_event.y() >= size.height) {
-                    continue;
+            // Calculate d_x and d_y only once per loop iteration
+            double angle = omega * static_cast<double>(timestamp) / 1e6 + phi;
+            auto d_x = static_cast<int16_t>(amplitude_x * std::cos(angle));
+            auto d_y = static_cast<int16_t>(amplitude_y * std::sin(angle));
+
+            // Iterate over both lines and add events
+            for (const auto &line : {vertical_line, horizontal_line}) {
+                for (const auto &event : line) {
+                    // Shift event and check if it is within bounds
+                    int16_t new_x = event.x() + d_x;
+                    int16_t new_y = event.y() + d_y;
+                    if (new_x >= 0 && new_x < size.width && new_y >= 0 && new_y < size.height) {
+                        event_store.emplace_back(timestamp, new_x, new_y, event.polarity());
+                    }
                 }
-                event_store.push_back(shifted_event);
             }
-            for (const auto &event: horizontal_line) {
-                // shift the horizontal line
-                dv::Event shifted_event(timestamp, event.x() + d_x, event.y() + d_y, event.polarity());
-                // make sure the event is whitin the image
-                if (shifted_event.x() < 0 || shifted_event.x() >= size.width || shifted_event.y() < 0 ||
-                    shifted_event.y() >= size.height) {
-                    continue;
-                }
-                event_store.push_back(shifted_event);
-            }
-            timestamp += 10; // 10 us
+            timestamp += 10;  // Increment timestamp by 1 us
         }
 
         return event_store;

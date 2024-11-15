@@ -32,13 +32,13 @@ public:
                                                                             process_noise(process_noise),
                                                                             measurement_noise(measurement_noise) {
         // initial state guess
-        A = 1.0;
-        phi = 1.0;
-        C = center;
+        A_y = 1.0;
+        phi_y = 1.0;
+        C_y = center;
         P = Eigen::MatrixXd::Identity(4, 4) * 1000.0;
     }
 
-    void addData(int64_t time, double y) {
+    void addData(int64_t time, double y, double x) {
         if (prev_time == 0) {
             prev_time = time;
         }
@@ -63,8 +63,8 @@ public:
 
 
     friend std::ostream &operator<<(std::ostream &os, const BinSin &bin) {
-        os << "Bin ID: " << bin.bin_id << ", Amplitude (A): " << bin.A << ", Frequency (omega): "
-           << BinSin::omega << ", Phase (phi): " << bin.phi << ", Offset (C): " << bin.C << ", data size: "
+        os << "Bin ID: " << bin.bin_id << ", Amplitude (A): " << bin.A_y << ", Frequency (rad/sec): "
+           << BinSin::omega << ", Phase (phi): " << bin.phi_y << ", Offset (C): " << bin.C_y << ", data size: "
            << bin.counter;
         return os;
     }
@@ -78,13 +78,13 @@ private:
     static int64_t bin_counter;
     const int64_t bin_id;
     int counter = 0;
-    double y_mean = 0;
+    double y_mean = 0, x_mean = 0;
     int64_t time_mean = 0;
     std::deque<std::pair<double, double>> window_data;
-    double A = 0;
+    double A_y = 0, A_x = 0;
     static double omega;
-    double phi = 0;
-    double C = 0;
+    double phi_y = 0, phi_x = 0;
+    double C_y = 0, C_x = 0;
     Eigen::MatrixXd P;
     double process_noise;
     double measurement_noise;
@@ -105,13 +105,18 @@ private:
             double t = window_data[i].first;
             double y = window_data[i].second;
 
-            double y_pred = A * std::sin(omega * t + phi) + C;
+            double y_pred = A_y * std::sin(omega * t + phi_y) + C_y; // NOTE: better a sin(w t) + b cos(w t) + c
             residuals(i) = y - y_pred;
 
-            H(i, 0) = std::sin(omega * t + phi);
-            H(i, 1) = A * t * std::cos(omega * t + phi);
-            H(i, 2) = A * std::cos(omega * t + phi);
+            H(i, 0) = std::sin(omega * t + phi_y);
+            H(i, 1) = A_y * t * std::cos(omega * t + phi_y);
+            H(i, 2) = A_y * std::cos(omega * t + phi_y);
             H(i, 3) = 1;
+
+            // H(i, 0) = std::sin(omega * t + phi_y);
+            // H(i, 1) = A_y * t * std::cos(omega * t + phi_y);
+            // H(i, 2) = A_y * std::cos(omega * t + phi_y);
+            // H(i, 3) = 1;
         }
 
         // Measurement update
@@ -132,10 +137,10 @@ private:
         colors = GREEN;
 
         Eigen::Vector4d state = K * residuals;
-        A += state(0);
+        A_y += state(0);
         omega += state(1);
-        phi += state(2);
-        C += state(3);
+        phi_y += state(2);
+        C_y += state(3);
         P = (Eigen::MatrixXd::Identity(4, 4) - K * H) * P;
         P = 0.5 * (P + P.transpose());
     }
@@ -291,7 +296,7 @@ int main() {
                          cv::Scalar(0, 255, 255));
             }
             cv::imshow("Accumulator", acc_frame.image);
-
+            continue;
             for (const auto &event: *events) {
                 // Determine the bin row and column
                 int bin_row = static_cast<int>(event.y() / win_h);
@@ -301,7 +306,7 @@ int main() {
                 int bin_index = bin_row * num_bins_w + bin_col;
 
                 // Add the event to the corresponding bin
-                bins[bin_index].addData(event.timestamp(), event.y());
+                bins[bin_index].addData(event.timestamp(), event.y(), event.x());
 
                 // color image bins
                 cv::rectangle(colored_image, cv::Rect(bin_col * win_w, bin_row * win_h, win_w, win_h),
@@ -354,7 +359,7 @@ int main() {
                 int bin_index = bin_row * num_bins_w + bin_col;
 
                 // Add the event to the corresponding bin
-                bins[bin_index].addData(event.timestamp(), event.y());
+                bins[bin_index].addData(event.timestamp(), event.y(), event.x());
 
                 // color image bins
                 cv::rectangle(colored_image, cv::Rect(bin_col * win_w, bin_row * win_h, win_w, win_h),
