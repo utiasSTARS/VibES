@@ -17,7 +17,7 @@ int main() {
 
     cv::Size resolution = *reader.getEventResolution();
 
-    int N = 1024;  // Number of samples to accumulate for FFT
+    int N = 10'000;  // Number of samples to accumulate for FFT
 
     // FFT setup
     std::vector<double> x_data(N), y_data(N);
@@ -30,7 +30,7 @@ int main() {
     int counter = 0;
 
     int index = 0;
-    double samplingRate = 100'000;   // Fixed sampling rate (Hz)
+    double samplingRate = 8'333;   // Fixed sampling rate (Hz)
     double deltaTime = 1.0 / samplingRate; // Time interval between samples (in seconds)
     double lastTimestamp = 0.0; // Track last event timestamp for interpolation
     std::deque<std::tuple<double, double, double>> events_buffer; // Buffer for events with (x, y, t)
@@ -49,7 +49,7 @@ int main() {
                 y_mean += event.y();
                 timestamp_mean += (event.timestamp() - timestamp);
 
-                if (counter++ == 50) {
+                if (counter++ == 100) {
 
                     events_buffer.emplace_back(x_mean / counter, y_mean / counter, timestamp_mean / 1e6);
                     x_mean = 0;
@@ -114,9 +114,16 @@ int main() {
                 double maxMagnitudeX = 0.0, maxMagnitudeY = 0.0;
                 int peakIndexX = -1, peakIndexY = -1;
 
+                std::vector<double> magnitudesX(N / 2), magnitudesY(N / 2);
                 for (int i = 0; i < N / 2; ++i) {
                     double magnitudeX = std::sqrt(outX[i][0] * outX[i][0] + outX[i][1] * outX[i][1]);
                     double magnitudeY = std::sqrt(outY[i][0] * outY[i][0] + outY[i][1] * outY[i][1]);
+                    magnitudesX[i] = magnitudeX;
+                    magnitudesY[i] = magnitudeY;
+
+                    std::cout << "Magnitude X: " << magnitudeX << std::endl;
+                    std::cout << "Magnitude Y: " << magnitudeY << std::endl;
+
                     if (magnitudeX > maxMagnitudeX) {
                         maxMagnitudeX = magnitudeX;
                         peakIndexX = i;
@@ -127,6 +134,25 @@ int main() {
                     }
                 }
 
+                if (peakIndexX != -1 || peakIndexY != -1) {
+                    cv::Mat peak_x = cv::Mat::zeros(100, int(N / 2), CV_8UC1);
+                    for (int i = 0; i < N / 2; i++) {
+                        cv::line(peak_x, cv::Point(i, 0), cv::Point(i, int(100 * magnitudesX[i] / maxMagnitudeX)),
+                                 cv::Scalar(255));
+                    }
+
+                    cv::Mat peak_y = cv::Mat::zeros(100, int(N / 2), CV_8UC1);
+                    for (int i = 0; i < N / 2; i++) {
+                        cv::line(peak_y, cv::Point(i, 0), cv::Point(i, int(100 * magnitudesY[i] / maxMagnitudeY)),
+                                 cv::Scalar(255));
+                    }
+                    cv::imshow("Peak X", peak_x);
+                    cv::imshow("Peak Y", peak_y);
+                    cv::waitKey(0);
+
+
+                }
+
                 double peakFrequencyX = peakIndexX * samplingRate / N;
                 double peakFrequencyY = peakIndexY * samplingRate / N;
 
@@ -135,6 +161,10 @@ int main() {
 
                 x_data.assign(N, 0.0);
                 y_data.assign(N, 0.0);
+
+                // if (peakFrequencyX > 0 && peakFrequencyY > 0) {
+                //     break;
+                // }
             }
         }
     }
