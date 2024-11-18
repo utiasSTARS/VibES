@@ -124,9 +124,10 @@ void windowedEKF(std::deque<std::pair<double, double>> &window_data, Eigen::Vect
 int main() {
     // Initialize state, covariance, and noise parameters
     Eigen::VectorXd x(4);
-    x << 5.0, 700.0, 0.0, 227.0;
+    x << 5.0, 693.0, 0.0, 227.0;
     Eigen::MatrixXd P = Eigen::MatrixXd::Identity(4, 4) * 1000.0;
-    double process_noise = 1., measurement_noise = 0.5;
+    P(1, 1) = 1.0;
+    double process_noise = 1., measurement_noise = 5.;
 
     std::deque<std::pair<double, double>> window_data;
 
@@ -201,7 +202,7 @@ int main() {
                         min = y_mass / counter;
                     }
 
-                    if (window_data.size() > 10) {
+                    if (window_data.size() > 100) {
 
                         // draw window_data on a plot
                         // for (int i = 0; i < window_data.size(); i++) {
