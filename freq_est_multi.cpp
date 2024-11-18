@@ -28,9 +28,9 @@ std::map<Colors, cv::Scalar> color_map = {
 
 class BinSin {
 public:
-    BinSin(double process_noise, double measurement_noise, double center) : bin_id(bin_counter++),
-                                                                            process_noise(process_noise),
-                                                                            measurement_noise(measurement_noise) {
+    BinSin(double process_noise, double measurement_noise, double center, double sampling_time) :
+            bin_id(bin_counter++), process_noise(process_noise), measurement_noise(measurement_noise),
+            sampling_time(sampling_time) {
         // init window data with all 0
         for (int i = 0; i < N_samples; i++) {
             window_data.emplace_back(0, 0, 0);
@@ -38,10 +38,12 @@ public:
 
         // initial state guess
         A_y = 1.0;
-        phi_y = 1.0;
+        B_y = 1.0;
         C_y = center;
         P = Eigen::MatrixXd::Identity(4, 4) * 1000.0;
         P(0, 0) = 1.0;
+
+        plot_frame = cv::Mat::zeros(480, 800, CV_8UC3);
     }
 
     void addData(int64_t time, double y, double x) {
@@ -52,8 +54,10 @@ public:
         x_mean += x;
         time_mean += (time - prev_time);
         counter++;
-        if (counter >= 3) {
-            events_buffer.emplace_back(x_mean / counter, y_mean / counter, time_mean / 1e6);
+        if (counter >= 3'000) {
+            events_buffer.emplace_back(x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6);
+            // window_data[index] = {x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6};
+            index++;
             x_mean = 0;
             y_mean = 0;
             time_mean = 0;
@@ -67,23 +71,30 @@ public:
             if (lastTimestamp == 0.0) lastTimestamp = t1;
 
             // Interpolate to fill data at regular intervals
-            while (lastTimestamp + deltaTime <= t2 && index < N_samples) {
-                double ratio = (lastTimestamp + deltaTime - t1) / (t2 - t1);
+            while (lastTimestamp + sampling_time <= t2 && index < N_samples) {
+                double ratio = (lastTimestamp + sampling_time - t1) / (t2 - t1);
 
-                window_data[index] = {x1 + ratio * (x2 - x1), y1 + ratio * (y2 - y1), lastTimestamp + deltaTime};
+                window_data[index] = {x1 + ratio * (x2 - x1), y1 + ratio * (y2 - y1), lastTimestamp + sampling_time};
 
-                lastTimestamp += deltaTime;
+                lastTimestamp += sampling_time;
                 index++;
             }
 
             // Remove processed events
+            //if (!sampling) {
+            //    events_buffer.pop_back();
+            //} else {
             events_buffer.pop_front();
+            //}
         }
 
 
         if (index >= N_samples) {
             index = 0;
             windowedEKF();
+            auto dy = A_y * std::sin(omega * time_mean / 1e6) + B_y * std::cos(omega * time_mean / 1e6);
+            plotOneEvent(x - dy, y - dy);
+            // plot();
         }
     }
 
@@ -91,10 +102,34 @@ public:
         return y_mean;
     }
 
+    double getX() {
+        return x_mean;
+    }
+
+    void plotOneEvent(double x, double y) {
+        cv::circle(plot_frame, cv::Point(int(x), int(y)), 1, cv::Scalar(0, 255, 0), -1);
+        cv::imshow("One Event", plot_frame);
+        cv::waitKey(1);
+    }
+
+    void plot() {
+        for (auto [x, y, t]: window_data) {
+            cv::circle(plot_frame, cv::Point(int(x), int(y)), 1, cv::Scalar(0, 255, 0), -1);
+
+            auto est_y = A_y * std::sin(omega * t) + B_y * std::cos(omega * t) + C_y;
+            cv::circle(plot_frame, cv::Point(int(x), int(est_y)), 1, cv::Scalar(0, 0, 255), -1);
+        }
+        std::string text = "Bin ID: " + std::to_string(bin_id);
+        std::cout << text << std::endl;
+        cv::imshow(text, plot_frame);
+        cv::waitKey(1);
+    }
 
     friend std::ostream &operator<<(std::ostream &os, const BinSin &bin) {
-        os << "Bin ID: " << bin.bin_id << ", Amplitude (A): " << bin.A_y << ", Frequency (rad/sec): "
-           << BinSin::omega << ", Phase (phi): " << bin.phi_y << ", Offset (C): " << bin.C_y << ", data size: "
+        os << "Bin ID: " << bin.bin_id << ", Amplitude (A): " << std::sqrt(std::pow(bin.A_y, 2) + std::pow(bin.B_y, 2))
+           << ", Frequency (rad/sec): "
+           << BinSin::omega << ", Phase (phi): " << std::atan2(bin.B_y, bin.A_y) << ", Offset (C): " << bin.C_y
+           << ", data size: "
            << bin.counter;
         return os;
     }
@@ -105,7 +140,7 @@ public:
 
 
 private:
-    const int N_samples = 1024;
+    const int N_samples = 10;
     static int64_t bin_counter;
     const int64_t bin_id;
     int counter = 0, index = 0;
@@ -115,7 +150,7 @@ private:
     std::deque<std::tuple<double, double, double>> events_buffer;
     double A_y = 0, A_x = 0;
     static double omega;
-    double phi_y = 0, phi_x = 0;
+    double B_y = 0, phi_x = 0;
     double C_y = 0, C_x = 0;
     Eigen::MatrixXd P;
     double process_noise;
@@ -123,6 +158,9 @@ private:
     int64_t prev_time = 0;
     double lastTimestamp = 0.0;
     double deltaTime = 1.0 / 100'000;
+    const double sampling_time = 0;
+
+    cv::Mat plot_frame;
 
     Colors colors = BLUE;
 
@@ -134,31 +172,31 @@ private:
         // Compute the Jacobian matrix for each data point and residuals
         for (int i = 0; i < N_samples; ++i) {
             auto [x, y, t] = window_data[i];
-            // double y_pred = A_y * std::sin(omega * t + phi_y) + C_y; // NOTE: better a sin(w t) + b cos(w t) + c
-            double y_pred = A_y * std::sin(omega * t) + phi_y * std::cos(omega * t) + C_y;
+            // double y_pred = A_y * std::sin(omega * t + B_y) + C_y; // NOTE: better a sin(w t) + b cos(w t) + c
+            double y_pred = A_y * std::sin(omega * t) + B_y * std::cos(omega * t) + C_y;
             residuals(i) = y - y_pred;
 
             H(i, 0) = std::sin(omega * t);
-            H(i, 1) = A_y * t * std::cos(omega * t) - phi_y * t * std::sin(omega * t);
+            H(i, 1) = A_y * t * std::cos(omega * t) - B_y * t * std::sin(omega * t);
             H(i, 2) = std::cos(omega * t);
             H(i, 3) = 1;
 
-            // H(i, 0) = std::sin(omega * t + phi_y);
-            // H(i, 1) = A_y * t * std::cos(omega * t + phi_y);
-            // H(i, 2) = A_y * std::cos(omega * t + phi_y);
+            // H(i, 0) = std::sin(omega * t + B_y);
+            // H(i, 1) = A_y * t * std::cos(omega * t + B_y);
+            // H(i, 2) = A_y * std::cos(omega * t + B_y);
             // H(i, 3) = 1;
         }
 
         // Measurement update
         Eigen::MatrixXd H_transpose = H.transpose();
         Eigen::MatrixXd S = H * P * H_transpose + Eigen::MatrixXd::Identity(N_samples, N_samples) * measurement_noise;
-        Eigen::MatrixXd K = P * H_transpose * S.inverse();
+        Eigen::MatrixXd S_inv = S.inverse();
+        Eigen::MatrixXd K = P * H_transpose * S_inv;
 
         // Mahalanobis distance
-        double mahalanobis = residuals.transpose() * S.inverse() * residuals;
+        double mahalanobis = residuals.transpose() * S_inv * residuals;
         // chi-squared test with N degrees of freedom
-        const boost::math::chi_squared_distribution<> my_chisqr(N_samples *
-        4);  // 2*Mj-3 DOFs
+        const boost::math::chi_squared_distribution<> my_chisqr(N_samples);  // N DOFs
         const double chi = quantile(my_chisqr, 0.95);
 
         if (mahalanobis > chi) {
@@ -170,11 +208,14 @@ private:
         Eigen::Vector4d state = K * residuals;
         A_y += state(0);
         omega += state(1);
-        phi_y += state(2);
+        B_y += state(2);
         C_y += state(3);
         P = (Eigen::MatrixXd::Identity(4, 4) - K * H) * P;
         P = 0.5 * (P + P.transpose());
+
+        // plot();
     }
+
 
 };
 
@@ -182,41 +223,6 @@ private:
 int64_t BinSin::bin_counter = 0;
 double BinSin::omega = 700.0;
 
-
-void visualizeSinusoid(std::deque<std::pair<double, double>> &data, cv::Mat &image) {
-    // Set up variables
-    int width = image.cols;
-    int height = image.rows;
-    double timeWindow = .01; // Time window to display in seconds
-    double timeScale = width / timeWindow; // Scale time to fit within the defined window width
-
-    // Clear the image to start fresh for each frame
-    image.setTo(cv::Scalar(0, 0, 0));
-
-    // Determine the minimum time value to display (oldest time that still fits within timeWindow)
-    double latestTime = data.back().first;
-    double minTime = latestTime - timeWindow;
-
-    // Draw sinusoid points within the time window
-    for (const auto &[time, y]: data) {
-        if (time >= minTime) {
-            int x = static_cast<int>((time - minTime) * timeScale); // Position x based on the scaled time
-            int yPos = static_cast<int>(y); // Scale y to fit in the image height
-
-            // Ensure (x, yPos) is within bounds and draw the point
-            if (yPos >= 0 && yPos < height && x < width) {
-                //image.at<cv::Vec3b>(yPos, x) = cv::Vec3b(0, 0, 255); // Red color for the sinusoid point
-                cv::circle(image, cv::Point(x, yPos), 1, cv::Scalar(0, 255, 255),
-                           -1); // White circle for visualization
-            }
-        }
-        // Display the updated image
-        cv::imshow("Sinusoid Visualization", image);
-        cv::waitKey(1);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-}
 
 void visualizeSinusoids(std::deque<std::pair<double, double>> &data1, std::deque<std::pair<double, double>> &data2,
                         cv::Mat &image) {
@@ -234,7 +240,6 @@ void visualizeSinusoids(std::deque<std::pair<double, double>> &data1, std::deque
     double minTime = latestTime - timeWindow;
 
     // Draw first sinusoid points within the time window
-    // In `visualizeSinusoids`, ensure both datasets are of equal size:
     for (int i = 0; i < std::min(data1.size(), data2.size()); i++) {
         const auto &[time, y] = data1[i];
         const auto &[time2, y2] = data2[i];
@@ -271,7 +276,7 @@ int main() {
 
     // Set up event reader
     dv::io::MonoCameraRecording reader(
-            "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
+            "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/dvSave-2024_11_11_15_36_53.aedat4");
     // dv::io::CameraCapture reader;
     std::cout << "Opened AEDAT4 file from [" << reader.getCameraName() << "] camera\n";
 
@@ -289,7 +294,8 @@ int main() {
 
     std::vector<BinSin> bins;
 
-    int win_h = 80, win_w = 80;
+    // int win_h = 80, win_w = 80;
+    int win_h = 480, win_w = 640;
 
     // make sure we have an integer number of bins in each direction
     if (resolution.height % win_h != 0 || resolution.width % win_w != 0) {
@@ -301,12 +307,12 @@ int main() {
     int num_bins_w = resolution.width / win_w;
 
     // Create bins for the entire camera plane
+    double sampling_time = 1.0 / 100'000;
     for (int i = 0; i < num_bins_h; ++i) {
         for (int j = 0; j < num_bins_w; ++j) {
-            bins.emplace_back(process_noise, measurement_noise, i * win_h + win_h / 2);
+            bins.emplace_back(process_noise, measurement_noise, i * win_h + win_h / 2, sampling_time);
         }
     }
-
 
     /////// test event generation
     while (reader.isRunning()) {
@@ -335,7 +341,7 @@ int main() {
                 int bin_index = bin_row * num_bins_w + bin_col;
 
                 // Add the event to the corresponding bin
-                // bins[bin_index].addData(event.timestamp(), event.y(), event.x());
+                bins[bin_index].addData(event.timestamp(), event.y(), event.x());
 
                 // color image bins
                 cv::rectangle(colored_image, cv::Rect(bin_col * win_w, bin_row * win_h, win_w, win_h),
@@ -344,8 +350,8 @@ int main() {
                 // cv::circle(colored_image, cv::Point(int(bin_col * win_w + win_w / 2), bins[bin_index].getY()), 3,
                 //            cv::Scalar(0, 255, 255),
                 //            -1);
+                cv::imshow("Colored Image", colored_image);
             }
-            cv::imshow("Colored Image", colored_image);
             cv::imshow("Accumulator", acc_frame.image);
             cv::waitKey(1);
             if (cv::waitKey(1) == 27) {
