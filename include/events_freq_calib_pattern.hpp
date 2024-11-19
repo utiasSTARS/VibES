@@ -22,10 +22,18 @@ public:
     EventsFreqCalibPattern() = delete;
 
     EventsFreqCalibPattern(const int64_t &timestamp, const cv::Size &size, double omega, double amplitude_x,
-                           double amplitude_y, double phi, int delta_time)
+                           double amplitude_y, double phi, int delta_time, bool noise = true)
             : timestamp(timestamp), size(size), omega(omega), amplitude_x(amplitude_x), amplitude_y(amplitude_y),
-              phi(phi), delta_t(delta_time) {
+              phi(phi), delta_t(delta_time), noise(noise) {
         initialize_lines();
+
+        // generate random noise over the image plane
+
+        x_dist = std::uniform_int_distribution<int16_t>(0, size.width - 1);
+        y_dist = std::uniform_int_distribution<int16_t>(0, size.height - 1);
+        polarity_dist = std::uniform_int_distribution<int>(0, 1);
+        t_dist = std::uniform_int_distribution<int>(0, 10);
+
     }
 
     [[nodiscard]] int64_t get_timestamp() const {
@@ -116,6 +124,7 @@ public:
                     }
                 }
             }
+            if (noise)generate_noise_events(timestamp, delta_t, event_store);
             timestamp += delta_t;  // Increment timestamp by 1 μs
             time_all += delta_t;
         }
@@ -124,6 +133,7 @@ public:
     }
 
 private:
+    bool noise = true;
     bool running = true;
     int64_t timestamp, initial_timestamp{};
     cv::Size size;
@@ -150,6 +160,31 @@ private:
             horizontal_line.push_back(
                     {timestamp, static_cast<int16_t>(i), static_cast<int16_t>(size.height / 2), true});
         }
+    }
+
+
+    std::random_device rd;
+    std::mt19937 gen;
+    std::uniform_int_distribution<int16_t> x_dist;
+    std::uniform_int_distribution<int16_t> y_dist;
+    std::uniform_int_distribution<int> t_dist;
+    std::uniform_int_distribution<int> polarity_dist;
+
+    void
+    generate_noise_events(int64_t start_time, int64_t delta_time, dv::EventStore &events) {
+
+
+        // Generate events
+        for (int i = 0; i < delta_time; ++i) {
+            for (int j = 0; j < t_dist(gen); ++j) {
+                int16_t x = x_dist(gen); // Random x-coordinate
+                int16_t y = y_dist(gen); // Random y-coordinate
+                bool polarity = polarity_dist(gen) == 1; // Random polarity
+
+                events.push_back({start_time + i, x, y, polarity});
+            }
+        }
+
     }
 };
 

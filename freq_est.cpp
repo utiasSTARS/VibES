@@ -9,7 +9,7 @@
 #include <thread>
 #include <chrono>
 #include "include/events_freq_calib_pattern.hpp"
-
+#include "include/helpers.h"
 
 void visualizeSinusoid(std::deque<std::pair<double, double>> &data, cv::Mat &image) {
     // Set up variables
@@ -133,9 +133,9 @@ int main() {
     std::deque<std::pair<double, double>> window_data;
 
     // Set up event reader
-    dv::io::MonoCameraRecording reader(
-            "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
-    // EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01);
+    // dv::io::MonoCameraRecording reader(
+    //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10);
 
 
     // dv::io::CameraCapture reader;
@@ -143,6 +143,9 @@ int main() {
 
     const cv::Size resolution = *reader.getEventResolution();
     const cv::Size half_resolution = cv::Size(resolution.width / 2, resolution.height / 2);
+
+    // visualizer
+    Open3DVisualizer vis;
 
     // Set up accumulators and display windows
     dv::EdgeMapAccumulator accumulator(resolution);
@@ -200,6 +203,9 @@ int main() {
                     window_data.emplace_back(static_cast<double>(e.timestamp() - initial_time) / 1e6,
                                              static_cast<double>(y_mass) / counter);
 
+                    vis.addPoint(static_cast<double>(x_mass) / counter, static_cast<double>(y_mass) / counter,
+                                 static_cast<double>(e.timestamp() - initial_time)/counter, e.polarity());
+
                     if (max < y_mass / counter) {
                         max = y_mass / counter;
                     }
@@ -247,6 +253,7 @@ int main() {
                     estimates++;
                 }
             }
+            vis.update();
         }
         cv::waitKey(1);
         if (cv::waitKey(1) == 27) {

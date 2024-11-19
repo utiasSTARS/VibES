@@ -15,7 +15,7 @@
 int main() {
     // dv::io::MonoCameraRecording reader(
     //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
-    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 700, 40, 40, 0.01, 100);
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 700, 40, 40, 0.01, 100, false);
 
     std::cout << "Opened an AEDAT4 file which contains data from [" << reader.getCameraName() << "] camera"
               << std::endl;
@@ -23,22 +23,7 @@ int main() {
     cv::Size resolution = *reader.getEventResolution();
 
     // visualizer
-    open3d::visualization::Visualizer vis;
-    vis.CreateVisualizerWindow("Event Camera Visualization", 800, 600);
-    auto point_cloud = std::make_shared<open3d::geometry::PointCloud>();
-
-    vis.AddGeometry(point_cloud);
-
-    auto bounding_box = std::make_shared<open3d::geometry::AxisAlignedBoundingBox>(
-            Eigen::Vector3d(0, 0, 0.0),
-            Eigen::Vector3d(640, 480, 10));
-
-    // Set bounding box color for visibility
-    bounding_box->color_ = Eigen::Vector3d(0.0, 1.0, 0.0);  // Green color
-
-    // Add the box to the visualizer
-    vis.AddGeometry(bounding_box);
-
+    Open3DVisualizer vis;
 
     std::vector<std::tuple<double, double, int64_t>> events_buffer;
     int64_t x_mean = 0, y_mean = 0, timestamp_mean = 0, timestamp = 0;
@@ -69,11 +54,16 @@ int main() {
                         if (interpolated.has_value()) {
                             for (const auto &e: *interpolated) {
                                 freqEst.feed(std::get<0>(e), std::get<1>(e));
+
+
+                                if (iters < 100) {
+                                    vis.addPoint(std::get<0>(e), std::get<1>(e), std::get<2>(e), event.polarity());
+                                }
                             }
                         }
                     }
 
-                    // if (iters < 1000) {
+                    // if (iters < 100) {
                     //     point_cloud->points_.emplace_back(x_mean / counter, y_mean / counter, d_t / (counter));
                     //     point_cloud->colors_.emplace_back(Eigen::Vector3d(0.1, 0.1, event.polarity()));
                     // }
@@ -90,18 +80,12 @@ int main() {
                 counter++;
             }
         }
-
-        vis.UpdateGeometry(point_cloud);
-        vis.PollEvents();
-        vis.UpdateRender();
+        vis.update();
         iters++;
     }
 
-    while (vis.PollEvents()) {
-        vis.UpdateRender();
-    }
+    vis.loop();
 
-    vis.DestroyVisualizerWindow();
 
     return 0;
 }
