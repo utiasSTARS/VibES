@@ -9,6 +9,7 @@
 #include <Eigen/Dense>
 #include <thread>
 #include <chrono>
+#include "include/events_freq_calib_pattern.hpp"
 
 int main() {
     // Load the scripted model
@@ -24,7 +25,7 @@ int main() {
 
     // start with dv camera
     dv::io::MonoCameraRecording reader(
-            "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/circle3.aedat4");
+            "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
 
     // dv::io::CameraCapture reader;
     std::cout << "Opened AEDAT4 file from [" << reader.getCameraName() << "] camera\n";
@@ -44,8 +45,14 @@ int main() {
     int n_samples = 100;
     // read
     int square = 150;
-    while (reader.isRunning()) {
-        if (const auto events = reader.getNextEventBatch(); events.has_value()) {
+    // while (reader.isRunning()) {
+    //     if (const auto events = reader.getNextEventBatch(); events.has_value()) {
+    EventsFreqCalibPattern pattern(0, resolution, 100, 10, 10, 0.01);
+
+    for (int i=0; i<1000; i++) {
+        // Generate events for 10 ms
+        auto events = pattern.get_events();
+        if (events) {
             for (const auto &e: *events) {
                 // consider the events that are at the center only according to square
                 if (e.x() < half_resolution.width - square || e.x() > half_resolution.width + square ||
@@ -91,7 +98,7 @@ int main() {
 
                         at::Tensor output = model.forward({input_tensor}).toTensor();
                         std::cout << "Model output: A = " << output[0][0].item<float>() << ", f = "
-                                  << output[0][1].item<float>() * 2 * M_PI << " rad/s, phi = "
+                                  << output[0][1].item<float>() << " rad/s, phi = "
                                   << output[0][2].item<float>()
                                   << std::endl;
                         std::cout.flush();

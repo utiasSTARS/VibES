@@ -3,7 +3,7 @@
 //
 
 #include <iostream>
-#include "events_freq_calib_pattern.hpp"
+#include "include/events_freq_calib_pattern.hpp"
 #include <dv-processing/io/mono_camera_recording.hpp>
 #include <dv-processing/io/camera_capture.hpp>
 #include <opencv2/imgproc.hpp>
@@ -20,7 +20,7 @@ int main() {
     // Initialize test parameters
     int64_t initial_timestamp = 0; // Start at 0 microseconds
     cv::Size size(640, 480);       // Event frame size: 640x480
-    double omega = 400;   // 700 Hz sinusoidal motion
+    double omega = 100;             // 700 Hz sinusoidal motion
     double amplitude_x = 10.0;     // X amplitude of 10 pixels
     double amplitude_y = 5.0;      // Y amplitude of 5 pixels
     double phi = 0.0;              // No phase shift
@@ -34,13 +34,12 @@ int main() {
 
 
     // Create an instance of the class
-    EventsFreqCalibPattern pattern(initial_timestamp, size, omega, amplitude_x, amplitude_y, phi);
+    EventsFreqCalibPattern reader(initial_timestamp, size, omega, amplitude_x, amplitude_y, phi, 5);
 
-    for (int i=0; i<1000; i++) {
-        // Generate events for 10 ms
-        auto events = pattern.get_events();
 
-        if (events) {
+    while (reader.isRunning()) {
+        if (const auto events = reader.getNextEventBatch(); events.has_value()) {
+
             std::cout << "Generated " << events->size() << " events over 10 ms.\n";
             std::cout << "Timestamp: " << events->getLowestTime() << " to " << events->getHighestTime() << '\n';
 

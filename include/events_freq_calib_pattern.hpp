@@ -7,6 +7,7 @@
 #include <opencv2/core.hpp>
 
 #include <dv-processing/core/core.hpp>
+#include <dv-processing/io/camera_input_base.hpp>
 
 // Define EventStruct to store individual events
 struct EventStruct {
@@ -16,14 +17,14 @@ struct EventStruct {
     bool polarity;
 };
 
-class EventsFreqCalibPattern {
+class EventsFreqCalibPattern : public dv::io::CameraInputBase {
 public:
     EventsFreqCalibPattern() = delete;
 
     EventsFreqCalibPattern(const int64_t &timestamp, const cv::Size &size, double omega, double amplitude_x,
-                           double amplitude_y, double phi)
+                           double amplitude_y, double phi, int delta_time)
             : timestamp(timestamp), size(size), omega(omega), amplitude_x(amplitude_x), amplitude_y(amplitude_y),
-              phi(phi) {
+              phi(phi), delta_t(delta_time) {
         initialize_lines();
     }
 
@@ -35,9 +36,56 @@ public:
         return size;
     }
 
-    std::optional<dv::EventStore> get_events() {
+    std::optional<dv::cvector<dv::IMU>> getNextImuBatch() override {
+        return std::nullopt;
+    }
+
+    std::optional<dv::cvector<dv::Trigger>> getNextTriggerBatch() override {
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<cv::Size> getEventResolution() const override {
+        return size;
+    }
+
+    [[nodiscard]] std::optional<cv::Size> getFrameResolution() const override {
+        return std::nullopt;
+    }
+
+    [[nodiscard]] bool isEventStreamAvailable() const override {
+        return true;
+    }
+
+    [[nodiscard]] bool isFrameStreamAvailable() const override {
+        return false;
+    }
+
+    [[nodiscard]] bool isImuStreamAvailable() const override {
+        return false;
+    }
+
+    [[nodiscard]] bool isTriggerStreamAvailable() const override {
+        return false;
+    }
+
+    [[nodiscard]] std::string getCameraName() const override {
+        return "EventsFreqCalibPattern";
+    }
+
+    [[nodiscard]] bool isRunning() const override {
+        return running;
+    }
+
+    std::optional<dv::Frame> getNextFrame() override {
+        return std::nullopt;
+    }
+
+    void stop() {
+        running = false;
+    }
+
+    std::optional<dv::EventStore> getNextEventBatch() override {
         dv::EventStore event_store;
-        int delta_t = 5;
         int time_all = 0;
 
         while (time_all < 10'000) {  // Generate events for 10 ms
@@ -76,8 +124,10 @@ public:
     }
 
 private:
-    int64_t timestamp, initial_timestamp;
+    bool running = true;
+    int64_t timestamp, initial_timestamp{};
     cv::Size size;
+    int delta_t = 1;  // 1 μs
 
     double omega = 0;
     double phi = 0;

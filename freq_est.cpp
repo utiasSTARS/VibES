@@ -8,6 +8,7 @@
 #include <Eigen/Dense>
 #include <thread>
 #include <chrono>
+#include "include/events_freq_calib_pattern.hpp"
 
 
 void visualizeSinusoid(std::deque<std::pair<double, double>> &data, cv::Mat &image) {
@@ -50,7 +51,7 @@ void visualizeSinusoids(std::deque<std::pair<double, double>> &data1, std::deque
     // Set up variables
     int width = image.cols;
     int height = image.rows;
-    double timeWindow = .01; // Time window to display in seconds
+    double timeWindow = .0001; // Time window to display in seconds
     double timeScale = width / timeWindow; // Scale time to fit within the defined window width
 
     // Clear the image to start fresh for each frame
@@ -134,6 +135,8 @@ int main() {
     // Set up event reader
     dv::io::MonoCameraRecording reader(
             "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
+    // EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01);
+
 
     // dv::io::CameraCapture reader;
     std::cout << "Opened AEDAT4 file from [" << reader.getCameraName() << "] camera\n";
@@ -162,6 +165,8 @@ int main() {
     int min = 1000;
 
     int square = 150;
+    // EventsFreqCalibPattern pattern(0, resolution, 400, 10, 10, 0.01);
+
     while (reader.isRunning() && continue_running) {
         if (const auto events = reader.getNextEventBatch(); events.has_value()) {
             accumulator.accumulate(events.value());
@@ -181,7 +186,7 @@ int main() {
                     initial_time = e.timestamp();
                 }
 
-                if (++counter == 10000) {
+                if (++counter == 10'000) {
                     // cv::circle(center_of_mass,
                     //            cv::Point(static_cast<int>(x_mass / counter), static_cast<int>(y_mass / counter)),
                     //            1, cv::Scalar(std::max(255, static_cast<int>(estimates / 6.2)), 255,
@@ -240,16 +245,10 @@ int main() {
                     counter = 0;
                     x_mass = y_mass = 0;
                     estimates++;
-                    // if (estimates > 1000) {
-                    //     std::cout << "STOP\n";
-                    //     cv::waitKey(15);
-                    //     continue_running = false;
-                    //     break;
-                    // }
                 }
             }
         }
-        cv::waitKey(0);
+        cv::waitKey(1);
         if (cv::waitKey(1) == 27) {
             break;
         } else if (cv::waitKey(1) == 32) {

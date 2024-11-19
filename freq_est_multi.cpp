@@ -11,7 +11,7 @@
 
 #include <boost/math/distributions/chi_squared.hpp>
 
-#include "events_freq_calib_pattern.hpp"
+#include "include/events_freq_calib_pattern.hpp"
 
 enum Colors {
     RED = 0,

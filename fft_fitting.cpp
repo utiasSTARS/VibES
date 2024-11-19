@@ -1,4 +1,3 @@
-#include <fftw3.h>
 #include <unordered_map>
 #include <deque>
 #include <iostream>
@@ -6,237 +5,86 @@
 #include <dv-processing/io/mono_camera_recording.hpp>
 #include <dv-processing/io/camera_capture.hpp>
 #include <opencv2/highgui.hpp>
+#include "include/fourier.hpp"
+#include "include/events_freq_calib_pattern.hpp"
+
+#include <open3d/Open3D.h>
 
 
 int main() {
-    dv::io::MonoCameraRecording reader(
-            "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
+    // dv::io::MonoCameraRecording reader(
+    //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 40, 40, 0.01, 100);
 
     std::cout << "Opened an AEDAT4 file which contains data from [" << reader.getCameraName() << "] camera"
               << std::endl;
 
     cv::Size resolution = *reader.getEventResolution();
 
-    int N = 10'000;  // Number of samples to accumulate for FFT
+    // visualizer
 
-    // FFT setup
-    std::vector<double> x_data(N), y_data(N);
-    fftw_complex *outX = (fftw_complex *) fftw_malloc(sizeof(fftw_complex) * N);
-    fftw_complex *outY = (fftw_complex *) fftw_malloc(sizeof(fftw_complex) * N);
-    fftw_plan planX = fftw_plan_dft_r2c_1d(N, x_data.data(), outX, FFTW_ESTIMATE);
-    fftw_plan planY = fftw_plan_dft_r2c_1d(N, y_data.data(), outY, FFTW_ESTIMATE);
+    open3d::visualization::Visualizer vis;
+    vis.CreateVisualizerWindow("Event Camera Visualization", 800, 600);
+    auto point_cloud = std::make_shared<open3d::geometry::PointCloud>();
+
+    vis.AddGeometry(point_cloud);
+
+    auto bounding_box = std::make_shared<open3d::geometry::AxisAlignedBoundingBox>(
+            Eigen::Vector3d(0, 0, 0.0),
+            Eigen::Vector3d(640, 480, 10));
+
+    // Set bounding box color for visibility
+    bounding_box->color_ = Eigen::Vector3d(0.0, 1.0, 0.0);  // Green color
+
+    // Add the box to the visualizer
+    vis.AddGeometry(bounding_box);
+
 
     int64_t x_mean = 0, y_mean = 0, timestamp_mean = 0, timestamp = 0;
     int counter = 0;
 
-    int index = 0;
-    double samplingRate = 8'333;   // Fixed sampling rate (Hz)
-    double deltaTime = 1.0 / samplingRate; // Time interval between samples (in seconds)
-    double lastTimestamp = 0.0; // Track last event timestamp for interpolation
-    std::deque<std::tuple<double, double, double>> events_buffer; // Buffer for events with (x, y, t)
+    int N = 1e6;  // Number of samples to accumulate for FFT
+    double samplingRate = 1e6;   // Fixed sampling rate (Hz)
 
-    cv::Mat img = cv::Mat::zeros(resolution, CV_8UC1);
-    double max_x = std::numeric_limits<double>::min(), max_y = std::numeric_limits<double>::min();
-    double min_x = std::numeric_limits<double>::max(), min_y = std::numeric_limits<double>::max();
+    FourierFreqEst freqEst(N, samplingRate);
 
+    int iters = 0;
     while (reader.isRunning()) {
         if (const auto events = reader.getNextEventBatch(); events.has_value()) {
 
             // Collect events in a buffer with timestamp normalization to seconds
             for (const auto &event: events.value()) {
-                if (timestamp == 0) timestamp = event.timestamp();
-                x_mean += event.x();
-                y_mean += event.y();
-                timestamp_mean += (event.timestamp() - timestamp);
-
-                if (counter++ == 100) {
-
-                    events_buffer.emplace_back(x_mean / counter, y_mean / counter, timestamp_mean / 1e6);
-                    x_mean = 0;
-                    y_mean = 0;
-                    counter = 0;
+                if (timestamp == 0) {
+                    timestamp = event.timestamp();
                 }
-
-            }
-
-            // Interpolation for fixed sampling
-            while (events_buffer.size() > 1 && index < N) {
-                auto [x1, y1, t1] = events_buffer.front();
-                auto [x2, y2, t2] = *(++events_buffer.begin());
-
-                if (lastTimestamp == 0.0) lastTimestamp = t1;
-
-                // Interpolate to fill data at regular intervals
-                while (lastTimestamp + deltaTime <= t2 && index < N) {
-                    double ratio = (lastTimestamp + deltaTime - t1) / (t2 - t1);
-                    x_data[index] = x1 + ratio * (x2 - x1);
-                    y_data[index] = y1 + ratio * (y2 - y1);
-                    // check max min
-                    if (x_data[index] > max_x) max_x = x_data[index];
-                    if (x_data[index] < min_x) min_x = x_data[index];
-                    if (y_data[index] > max_y) max_y = y_data[index];
-                    if (y_data[index] < min_y) min_y = y_data[index];
-
-                    lastTimestamp += deltaTime;
-                    index++;
-                }
-
-                // Remove processed events
-                events_buffer.pop_front();
-            }
-
-            // visualize the interpolated x on cv::Mat
-            // for (int i = 0; i < N; i++) {
-            //     int x = x_data[i];
-            //     int y = y_data[i];
-            //     img.at<uchar>(y, x) = 255;
-            // }
-            // cv::imshow("Interpolated X", img);
-            // cv::waitKey(0);
-
-            // Execute FFT when we have N interpolated samples
-            if (index >= N) {
-                index = 0;  // Reset index after filling N samples
-
-                // remove the mean max min from data
-                double mean_x = (max_x + min_x) / 2;
-                double mean_y = (max_y + min_y) / 2;
-
-                for (int i = 0; i < N; i++) {
-                    x_data[i] -= mean_x;
-                    y_data[i] -= mean_y;
-                }
-
-                fftw_execute(planX);
-                fftw_execute(planY);
-
-                // Analyze FFT results to find peak frequency for both X and Y
-                double maxMagnitudeX = 0.0, maxMagnitudeY = 0.0;
-                int peakIndexX = -1, peakIndexY = -1;
-
-                std::vector<double> magnitudesX(N / 2), magnitudesY(N / 2);
-                for (int i = 0; i < N / 2; ++i) {
-                    double magnitudeX = std::sqrt(outX[i][0] * outX[i][0] + outX[i][1] * outX[i][1]);
-                    double magnitudeY = std::sqrt(outY[i][0] * outY[i][0] + outY[i][1] * outY[i][1]);
-                    magnitudesX[i] = magnitudeX;
-                    magnitudesY[i] = magnitudeY;
-
-                    std::cout << "Magnitude X: " << magnitudeX << std::endl;
-                    std::cout << "Magnitude Y: " << magnitudeY << std::endl;
-
-                    if (magnitudeX > maxMagnitudeX) {
-                        maxMagnitudeX = magnitudeX;
-                        peakIndexX = i;
-                    }
-                    if (magnitudeY > maxMagnitudeY) {
-                        maxMagnitudeY = magnitudeY;
-                        peakIndexY = i;
-                    }
-                }
-
-                if (peakIndexX != -1 || peakIndexY != -1) {
-                    cv::Mat peak_x = cv::Mat::zeros(100, int(N / 2), CV_8UC1);
-                    for (int i = 0; i < N / 2; i++) {
-                        cv::line(peak_x, cv::Point(i, 0), cv::Point(i, int(100 * magnitudesX[i] / maxMagnitudeX)),
-                                 cv::Scalar(255));
-                    }
-
-                    cv::Mat peak_y = cv::Mat::zeros(100, int(N / 2), CV_8UC1);
-                    for (int i = 0; i < N / 2; i++) {
-                        cv::line(peak_y, cv::Point(i, 0), cv::Point(i, int(100 * magnitudesY[i] / maxMagnitudeY)),
-                                 cv::Scalar(255));
-                    }
-                    cv::imshow("Peak X", peak_x);
-                    cv::imshow("Peak Y", peak_y);
-                    cv::waitKey(0);
-
-
-                }
-
-                double peakFrequencyX = peakIndexX * samplingRate / N;
-                double peakFrequencyY = peakIndexY * samplingRate / N;
-
-                std::cout << "Estimated " << peakIndexX << " Frequency for X: " << peakFrequencyX << " Hz" << std::endl;
-                std::cout << "Estimated " << peakIndexY << " Frequency for Y: " << peakFrequencyY << " Hz" << std::endl;
-
-                x_data.assign(N, 0.0);
-                y_data.assign(N, 0.0);
-
-                // if (peakFrequencyX > 0 && peakFrequencyY > 0) {
-                //     break;
+                // if (counter > 1000) {
+                //         freqEst.feed(x_mean / counter, y_mean / counter);
+                //         x_mean = 0;
+                //         y_mean = 0;
+                //         counter = 0;
                 // }
+                // x_mean += event.x();
+                // y_mean += event.y();
+
+                point_cloud->points_.emplace_back(event.x(), event.y(), (event.timestamp() - timestamp)/10);
+                point_cloud->colors_.emplace_back(Eigen::Vector3d(0.1, 0.1, event.polarity()));
+
+                counter++;
             }
         }
+
+        vis.UpdateGeometry(point_cloud);
+        vis.PollEvents();
+        vis.UpdateRender();
+        iters++;
+        if (iters > 1000) { break; }
     }
 
-    // Clean up
-    fftw_destroy_plan(planX);
-    fftw_destroy_plan(planY);
-    fftw_free(outX);
-    fftw_free(outY);
+    while (vis.PollEvents()) {
+        vis.UpdateRender();
+    }
+
+    vis.DestroyVisualizerWindow();
 
     return 0;
 }
-
-
-
-
-// // Function to generate a noisy helical signal
-// void generateNoisyHelix(int N, double frequency, double samplingRate, std::vector<double>& x, std::vector<double>& y) {
-//     for (int i = 0; i < N; ++i) {
-//         double time = i / samplingRate;
-//         x[i] = cos(2 * M_PI * frequency * time) + 1.5 * ((double) rand() / RAND_MAX - 0.5);
-//         y[i] = sin(2 * M_PI * frequency * time) + 1.5 * ((double) rand() / RAND_MAX - 0.5);
-//     }
-// }
-//
-// int main() {
-//     int N = 1024; // Number of samples
-//     double samplingRate = 1000.0; // in Hz
-//     double signalFrequency = 50.0; // Hz
-//
-//     std::vector<double> x(N), y(N);
-//     generateNoisyHelix(N, signalFrequency, samplingRate, x, y);
-//
-//     // Allocate memory for FFTW for X and Y components
-//     fftw_complex* outX = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
-//     fftw_complex* outY = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
-//     fftw_plan planX = fftw_plan_dft_r2c_1d(N, x.data(), outX, FFTW_ESTIMATE);
-//     fftw_plan planY = fftw_plan_dft_r2c_1d(N, y.data(), outY, FFTW_ESTIMATE);
-//
-//     // Perform FFT on both components
-//     fftw_execute(planX);
-//     fftw_execute(planY);
-//
-//     // Calculate magnitudes and find the peak frequencies
-//     double maxMagnitudeX = 0.0, maxMagnitudeY = 0.0;
-//     int peakIndexX = 0, peakIndexY = 0;
-//     for (int i = 0; i < N / 2; ++i) {
-//         double magnitudeX = sqrt(outX[i][0] * outX[i][0] + outX[i][1] * outX[i][1]);
-//         double magnitudeY = sqrt(outY[i][0] * outY[i][0] + outY[i][1] * outY[i][1]);
-//         if (magnitudeX > maxMagnitudeX) {
-//             maxMagnitudeX = magnitudeX;
-//             peakIndexX = i;
-//         }
-//         if (magnitudeY > maxMagnitudeY) {
-//             maxMagnitudeY = magnitudeY;
-//             peakIndexY = i;
-//         }
-//     }
-//
-//     // Calculate the frequencies corresponding to the peak indices
-//     double peakFrequencyX = peakIndexX * samplingRate / N;
-//     double peakFrequencyY = peakIndexY * samplingRate / N;
-//
-//     std::cout << "Estimated Frequency for X: " << peakFrequencyX << " Hz" << std::endl;
-//     std::cout << "Estimated Frequency for Y: " << peakFrequencyY << " Hz" << std::endl;
-//
-//     // Clean up
-//     fftw_destroy_plan(planX);
-//     fftw_destroy_plan(planY);
-//     fftw_free(outX);
-//     fftw_free(outY);
-//
-//     return 0;
-// }
-//
