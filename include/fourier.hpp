@@ -17,11 +17,11 @@ public:
     FourierFreqEst() = delete;
 
     FourierFreqEst(int n_samples, int sampling_rate) : N(n_samples), samplingRate(sampling_rate) {
-        x_data.reserve(N);
-        y_data.reserve(N);
+        x_data.resize(N);
+        y_data.resize(N);
 
-        outX = (fftw_complex *) fftw_malloc(sizeof(fftw_complex) * N);
-        outY = (fftw_complex *) fftw_malloc(sizeof(fftw_complex) * N);
+        outX = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * (N / 2 + 1));
+        outY = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * (N / 2 + 1));
 
         planX = fftw_plan_dft_r2c_1d(N, x_data.data(), outX, FFTW_ESTIMATE);
         planY = fftw_plan_dft_r2c_1d(N, y_data.data(), outY, FFTW_ESTIMATE);

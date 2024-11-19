@@ -7,6 +7,7 @@
 #include <opencv2/highgui.hpp>
 #include "include/fourier.hpp"
 #include "include/events_freq_calib_pattern.hpp"
+#include "include/helpers.h"
 
 #include <open3d/Open3D.h>
 
@@ -14,7 +15,7 @@
 int main() {
     // dv::io::MonoCameraRecording reader(
     //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
-    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 40, 40, 0.01, 100);
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 700, 40, 40, 0.01, 100);
 
     std::cout << "Opened an AEDAT4 file which contains data from [" << reader.getCameraName() << "] camera"
               << std::endl;
@@ -22,7 +23,6 @@ int main() {
     cv::Size resolution = *reader.getEventResolution();
 
     // visualizer
-
     open3d::visualization::Visualizer vis;
     vis.CreateVisualizerWindow("Event Camera Visualization", 800, 600);
     auto point_cloud = std::make_shared<open3d::geometry::PointCloud>();
@@ -40,15 +40,18 @@ int main() {
     vis.AddGeometry(bounding_box);
 
 
+    std::vector<std::tuple<double, double, int64_t>> events_buffer;
     int64_t x_mean = 0, y_mean = 0, timestamp_mean = 0, timestamp = 0;
     int counter = 0;
 
-    int N = 1e6;  // Number of samples to accumulate for FFT
-    double samplingRate = 1e6;   // Fixed sampling rate (Hz)
+    int N = 10'000;  // Number of samples to accumulate for FFT
+    int samplingRate = 1e5;   // Fixed sampling rate (Hz)
 
     FourierFreqEst freqEst(N, samplingRate);
 
     int iters = 0;
+    int d_t = 0;
+    int64_t prev_time = 0;
     while (reader.isRunning()) {
         if (const auto events = reader.getNextEventBatch(); events.has_value()) {
 
@@ -57,17 +60,32 @@ int main() {
                 if (timestamp == 0) {
                     timestamp = event.timestamp();
                 }
-                // if (counter > 1000) {
-                //         freqEst.feed(x_mean / counter, y_mean / counter);
-                //         x_mean = 0;
-                //         y_mean = 0;
-                //         counter = 0;
-                // }
-                // x_mean += event.x();
-                // y_mean += event.y();
+                if (prev_time != 0 && prev_time != event.timestamp()) {
+                    events_buffer.emplace_back(x_mean / counter, y_mean / counter, d_t / (counter));
 
-                point_cloud->points_.emplace_back(event.x(), event.y(), (event.timestamp() - timestamp)/10);
-                point_cloud->colors_.emplace_back(Eigen::Vector3d(0.1, 0.1, event.polarity()));
+                    // interpolate events_buffer at sampling rate
+                    if (events_buffer.size() > 1) {
+                        auto interpolated = interpolate_events(events_buffer, 1e6 / samplingRate);
+                        if (interpolated.has_value()) {
+                            for (const auto &e: *interpolated) {
+                                freqEst.feed(std::get<0>(e), std::get<1>(e));
+                            }
+                        }
+                    }
+
+                    // if (iters < 1000) {
+                    //     point_cloud->points_.emplace_back(x_mean / counter, y_mean / counter, d_t / (counter));
+                    //     point_cloud->colors_.emplace_back(Eigen::Vector3d(0.1, 0.1, event.polarity()));
+                    // }
+                    x_mean = 0;
+                    y_mean = 0;
+                    counter = 0;
+                }
+                x_mean += event.x();
+                y_mean += event.y();
+                d_t = event.timestamp() - timestamp;
+                if (d_t < 0)throw std::runtime_error("Negative time difference");
+                prev_time = event.timestamp();
 
                 counter++;
             }
@@ -77,7 +95,6 @@ int main() {
         vis.PollEvents();
         vis.UpdateRender();
         iters++;
-        if (iters > 1000) { break; }
     }
 
     while (vis.PollEvents()) {
