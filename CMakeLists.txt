@@ -1,17 +1,18 @@
 cmake_minimum_required(VERSION 3.26)
 project(project)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CUDA_STANDARD 17)
+
 find_package(Eigen3 REQUIRED)
 find_package(dv-processing REQUIRED)
+find_package(MetavisionSDK COMPONENTS core driver ui REQUIRED)
 find_package(Open3D REQUIRED)
 find_package(FFTW3 REQUIRED)
+
 find_package(Torch REQUIRED)
 
-find_package(MetavisionSDK COMPONENTS core driver ui REQUIRED)
-
 include_directories(${EIGEN3_INCLUDE_DIR} ${TORCH_INCLUDE_DIRS})
-
-set(CMAKE_CXX_STANDARD 20)
 
 add_executable(project main.cpp)
 add_executable(test_event_generation test_event_generation.cpp)
@@ -31,11 +32,11 @@ target_link_libraries(main_ekf_ini dv::processing Open3D::Open3D)
 target_link_libraries(test_event_generation dv::processing Open3D::Open3D)
 target_link_libraries(features dv::processing)
 target_link_libraries(freq_est dv::processing Open3D::Open3D)
-target_link_libraries(freq_est_multi dv::processing)
+target_link_libraries(freq_est_multi dv::processing Open3D::Open3D)
 target_link_libraries(RANSAC_fitting dv::processing Open3D::Open3D)
 target_link_libraries(fft_fitting dv::processing Open3D::Open3D fftw3)
 target_link_libraries(prophesee_ekf_fitting Open3D::Open3D MetavisionSDK::core MetavisionSDK::driver MetavisionSDK::ui)
-target_link_libraries(learned_approach dv::processing Open3D::Open3D fftw3 ${TORCH_LIBRARIES})
+target_link_libraries(learned_approach dv::processing ${TORCH_LIBRARIES} Open3D::Open3D)
 target_link_libraries(learned_approach_motion_comp dv::processing ${TORCH_LIBRARIES} Open3D::Open3D)
 target_link_libraries(fft_fitting2d dv::processing Open3D::Open3D fftw3)
 

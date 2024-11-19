@@ -8,8 +8,7 @@
 #include "include/fourier.hpp"
 #include "include/events_freq_calib_pattern.hpp"
 #include "include/helpers.h"
-
-#include <open3d/Open3D.h>
+#include "include/open3d_visualizer.hpp"
 
 
 int main() {

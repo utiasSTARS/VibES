@@ -10,6 +10,9 @@
 #include <chrono>
 #include "include/events_freq_calib_pattern.hpp"
 #include "include/helpers.h"
+#include "include/open3d_visualizer.hpp"
+#include <boost/math/distributions/chi_squared.hpp>
+
 
 void visualizeSinusoid(std::deque<std::pair<double, double>> &data, cv::Mat &image) {
     // Set up variables
@@ -117,6 +120,7 @@ void windowedEKF(std::deque<std::pair<double, double>> &window_data, Eigen::Vect
     Eigen::MatrixXd S = H * P * H_transpose + Eigen::MatrixXd::Identity(N, N) * measurement_noise;
     Eigen::MatrixXd K = P * H_transpose * S.inverse();
 
+
     x += K * residuals;
     P = (Eigen::MatrixXd::Identity(4, 4) - K * H) * P;
     P = 0.5 * (P + P.transpose());
@@ -134,8 +138,8 @@ int main() {
 
     // Set up event reader
     // dv::io::MonoCameraRecording reader(
-    //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
-    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10);
+    //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/circle2.aedat4");
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10, true);
 
 
     // dv::io::CameraCapture reader;
@@ -204,7 +208,7 @@ int main() {
                                              static_cast<double>(y_mass) / counter);
 
                     vis.addPoint(static_cast<double>(x_mass) / counter, static_cast<double>(y_mass) / counter,
-                                 static_cast<double>(e.timestamp() - initial_time)/counter, e.polarity());
+                                 static_cast<double>(e.timestamp() - initial_time) / counter, e.polarity());
 
                     if (max < y_mass / counter) {
                         max = y_mass / counter;

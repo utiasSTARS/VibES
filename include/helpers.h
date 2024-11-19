@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <vector>
 #include <tuple>
-#include <open3d/Open3D.h>
 
 template<typename T>
 inline T linear_interp(T alpha, T x0, T x1) {
@@ -43,51 +42,5 @@ interpolate_events(std::vector<std::tuple<double, double, int64_t>> &events,
 
     return out;
 }
-
-class Open3DVisualizer {
-public:
-    Open3DVisualizer() {
-        vis = std::make_shared<open3d::visualization::Visualizer>();
-        vis->CreateVisualizerWindow("Open3D", 1600, 900);
-        point_cloud = std::make_shared<open3d::geometry::PointCloud>();
-        vis->AddGeometry(point_cloud);
-
-        auto bounding_box = std::make_shared<open3d::geometry::AxisAlignedBoundingBox>(
-                Eigen::Vector3d(0, 0, 0.0),
-                Eigen::Vector3d(640, 480, 10));
-
-        // Set bounding box color for visibility
-        bounding_box->color_ = Eigen::Vector3d(0.0, 1.0, 0.0);  // Green color
-
-        vis->AddGeometry(bounding_box);
-    }
-
-    ~Open3DVisualizer() {
-        vis->DestroyVisualizerWindow();
-    }
-
-    void addPoint(double x, double y, double z, bool polarity) {
-        point_cloud->points_.emplace_back(x, y, z);
-        point_cloud->colors_.emplace_back(0.1, 0.1, polarity);
-    }
-
-    void update() {
-        vis->UpdateGeometry(point_cloud);
-        vis->PollEvents();
-        vis->UpdateRender();
-    }
-
-    void loop() {
-        while (vis->PollEvents()) {
-            vis->UpdateRender();
-        }
-    }
-
-
-private:
-    std::shared_ptr<open3d::visualization::Visualizer> vis;
-    std::shared_ptr<open3d::geometry::PointCloud> point_cloud;
-
-};
 
 #endif //PROJECT_HELPERS_H

@@ -6,6 +6,7 @@
 
 #include <opencv2/imgproc.hpp>
 #include <chrono>
+#include "include/events_freq_calib_pattern.hpp"
 
 dv::EventStore compensate(const dv::EventStore &events, float A, float f, float phi, const cv::Size &res) {
     int start_time = events.front().timestamp();
@@ -35,8 +36,9 @@ int main() {
     std::cout << "Model loaded successfully\n";
 
     // start with dv camera
-    dv::io::MonoCameraRecording reader(
-            "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
+    // dv::io::MonoCameraRecording reader(
+    //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10);
 
     // dv::io::CameraCapture reader;
     std::cout << "Opened AEDAT4 file from [" << reader.getCameraName() << "] camera\n";
@@ -48,8 +50,9 @@ int main() {
     const auto config = dv::io::MonoCameraWriter::EventOnlyConfig("DVXplorer_sample", resolution);
 
     // Create the writer instance, it will only have a single event output stream.
-    dv::io::MonoCameraWriter writer("/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/mono_writer_sample.aedat4", config);
+    // dv::io::MonoCameraWriter writer("/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/mono_writer_sample.aedat4", config);
     // create accumulator
+
 
     // read the events
     std::vector<float> input_data;
@@ -67,11 +70,10 @@ int main() {
     int square = 150;
     while (reader.isRunning()) {
         if (const auto events = reader.getNextEventBatch(); events.has_value()) {
-            if (estimate) {
-                auto ev_c = compensate(*events, A, f, phi, resolution);
-
-                writer.writeEvents(ev_c);
-            }
+            // if (estimate) {
+            //     auto ev_c = compensate(*events, A, f, phi, resolution);
+            //     // writer.writeEvents(ev_c);
+            // }
 
             for (const auto &e: *events) {
                 if (e.x() < half_resolution.width - square || e.x() > half_resolution.width + square ||

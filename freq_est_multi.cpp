@@ -12,6 +12,7 @@
 #include <boost/math/distributions/chi_squared.hpp>
 
 #include "include/events_freq_calib_pattern.hpp"
+#include "include/open3d_visualizer.hpp"
 
 enum Colors {
     RED = 0,
@@ -28,9 +29,10 @@ std::map<Colors, cv::Scalar> color_map = {
 
 class BinSin {
 public:
-    BinSin(double process_noise, double measurement_noise, double center, double sampling_time) :
+    BinSin(double process_noise, double measurement_noise, double center, double sampling_time,
+           std::shared_ptr<Open3DVisualizer> vis = nullptr) :
             bin_id(bin_counter++), process_noise(process_noise), measurement_noise(measurement_noise),
-            sampling_time(sampling_time) {
+            sampling_time(sampling_time), vis(vis) {
         // init window data with all 0
         for (int i = 0; i < N_samples; i++) {
             window_data.emplace_back(0, 0, 0);
@@ -54,9 +56,13 @@ public:
         x_mean += x;
         time_mean += (time - prev_time);
         counter++;
-        if (counter >= 3'000) {
-            events_buffer.emplace_back(x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6);
-            // window_data[index] = {x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6};
+        if (counter >= 100) {
+            // events_buffer.emplace_back(x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6);
+            window_data[index] = {x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6};
+            if (vis) {
+                vis->addPoint(x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6, true);
+            }
+
             index++;
             x_mean = 0;
             y_mean = 0;
@@ -64,36 +70,36 @@ public:
             counter = 0;
         }
 
-        while (events_buffer.size() > 1 && index < N_samples) {
-            auto [x1, y1, t1] = events_buffer.front();
-            auto [x2, y2, t2] = *(++events_buffer.begin());
-
-            if (lastTimestamp == 0.0) lastTimestamp = t1;
-
-            // Interpolate to fill data at regular intervals
-            while (lastTimestamp + sampling_time <= t2 && index < N_samples) {
-                double ratio = (lastTimestamp + sampling_time - t1) / (t2 - t1);
-
-                window_data[index] = {x1 + ratio * (x2 - x1), y1 + ratio * (y2 - y1), lastTimestamp + sampling_time};
-
-                lastTimestamp += sampling_time;
-                index++;
-            }
-
-            // Remove processed events
-            //if (!sampling) {
-            //    events_buffer.pop_back();
-            //} else {
-            events_buffer.pop_front();
-            //}
-        }
-
+        // while (events_buffer.size() > 1 && index < N_samples) {
+        //     auto [x1, y1, t1] = events_buffer.front();
+        //     auto [x2, y2, t2] = *(++events_buffer.begin());
+//
+        //     if (lastTimestamp == 0.0) lastTimestamp = t1;
+//
+        //     // Interpolate to fill data at regular intervals
+        //     while (lastTimestamp + sampling_time <= t2 && index < N_samples) {
+        //         double ratio = (lastTimestamp + sampling_time - t1) / (t2 - t1);
+//
+        //         window_data[index] = {x1 + ratio * (x2 - x1), y1 + ratio * (y2 - y1), lastTimestamp + sampling_time};
+//
+        //         lastTimestamp += sampling_time;
+        //         index++;
+        //     }
+//
+        //     // Remove processed events
+        //     //if (!sampling) {
+        //     //    events_buffer.pop_back();
+        //     //} else {
+        //     events_buffer.pop_front();
+        //     //}
+        // }
+//
 
         if (index >= N_samples) {
             index = 0;
             windowedEKF();
             auto dy = A_y * std::sin(omega * time_mean / 1e6) + B_y * std::cos(omega * time_mean / 1e6);
-            plotOneEvent(x - dy, y - dy);
+            // plotOneEvent(x - dy, y - dy);
             // plot();
         }
     }
@@ -159,6 +165,8 @@ private:
     double lastTimestamp = 0.0;
     double deltaTime = 1.0 / 100'000;
     const double sampling_time = 0;
+
+    std::shared_ptr<Open3DVisualizer> vis;
 
     cv::Mat plot_frame;
 
@@ -275,14 +283,19 @@ int main() {
     std::deque<std::pair<double, double>> window_data;
 
     // Set up event reader
-    dv::io::MonoCameraRecording reader(
-            "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/dvSave-2024_11_11_15_36_53.aedat4");
+    // dv::io::MonoCameraRecording reader(
+    //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/dvSave-2024_11_11_15_36_53.aedat4");
     // dv::io::CameraCapture reader;
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10);
+
     std::cout << "Opened AEDAT4 file from [" << reader.getCameraName() << "] camera\n";
 
     const cv::Size resolution = *reader.getEventResolution();
     // output resolution
     std::cout << "Resolution: " << resolution << std::endl;
+
+    // visualizer
+    std::shared_ptr<Open3DVisualizer> vis;
 
     // colored image with bins colors
     cv::Mat colored_image(resolution, CV_8UC3, cv::Scalar(0, 0, 0));
@@ -292,10 +305,11 @@ int main() {
     accumulator.setEventContribution(0.25f);
     accumulator.setIgnorePolarity(false);
 
+
     std::vector<BinSin> bins;
 
     // int win_h = 80, win_w = 80;
-    int win_h = 480, win_w = 640;
+    int win_h = 40, win_w = 40;
 
     // make sure we have an integer number of bins in each direction
     if (resolution.height % win_h != 0 || resolution.width % win_w != 0) {
@@ -310,19 +324,16 @@ int main() {
     double sampling_time = 1.0 / 100'000;
     for (int i = 0; i < num_bins_h; ++i) {
         for (int j = 0; j < num_bins_w; ++j) {
-            bins.emplace_back(process_noise, measurement_noise, i * win_h + win_h / 2, sampling_time);
+            bins.emplace_back(process_noise, measurement_noise, i * win_h + win_h / 2, sampling_time, vis);
         }
     }
 
     /////// test event generation
     while (reader.isRunning()) {
         if (const auto events = reader.getNextEventBatch(); events.has_value()) {
-            // EventsFreqCalibPattern pattern(0, resolution, 700.0, 5, 5, 0.0);
-            // for (int i = 0; i < 10000; i++) {
-            //     auto events = pattern.get_events();
-            //     if (events.has_value()) {
             accumulator.accumulate(events.value());
             auto acc_frame = accumulator.generateFrame();
+
             //show bins grid on image
             for (int i = 0; i < num_bins_h; ++i) {
                 cv::line(acc_frame.image, cv::Point(0, i * win_h), cv::Point(resolution.width, i * win_h),
@@ -332,6 +343,8 @@ int main() {
                 cv::line(acc_frame.image, cv::Point(i * win_w, 0), cv::Point(i * win_w, resolution.height),
                          cv::Scalar(0, 255, 255));
             }
+            cv::imshow("Accumulator", acc_frame.image);
+
             for (const auto &event: *events) {
                 // Determine the bin row and column
                 int bin_row = static_cast<int>(event.y() / win_h);
@@ -352,7 +365,7 @@ int main() {
                 //            -1);
                 cv::imshow("Colored Image", colored_image);
             }
-            cv::imshow("Accumulator", acc_frame.image);
+            vis->update();
             cv::waitKey(1);
             if (cv::waitKey(1) == 27) {
                 break;
