@@ -12,20 +12,22 @@ class SinusoidSim {
 public:
     SinusoidSim() = delete;
 
-    SinusoidSim(const T amplitude, const T frequency, const T phase) : _amplitude(amplitude),
-                                                                       _frequency(frequency),
-                                                                       _phase(phase) {
+    SinusoidSim(const T amplitude, const T frequency, const T phase, const T shift = 0) : _amplitude(amplitude),
+                                                                                          _frequency(frequency),
+                                                                                          _phase(phase),
+                                                                                          _shift(shift) {
 
     }
 
     T operator()(const T x) {
-        return _amplitude * std::sin(_frequency * x + _phase);
+        return _amplitude * std::sin(_frequency * x + _phase) + _shift;
     }
 
 private:
     const T _amplitude;
     const T _frequency;
     const T _phase;
+    const T _shift;
 };
 
 #endif //PROJECT_SINUSOID_SIM_H

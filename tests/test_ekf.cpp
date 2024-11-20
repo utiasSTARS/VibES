@@ -2,7 +2,6 @@
 // Created by viciopoli on 20/11/24.
 //
 #include <gtest/gtest.h>
-#include <Eigen/Dense>
 #include <iostream>
 #include <vector>
 
@@ -43,6 +42,5 @@ TEST(EKF, Estimation) {
 
     EXPECT_NEAR(phi_x, phase, 1.);
     EXPECT_NEAR(phi_y, phase, 1.);
-
 }
 

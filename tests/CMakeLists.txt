@@ -11,3 +11,9 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(test_ekf ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ekf.cpp)
 target_link_libraries(test_ekf PRIVATE gtest_main)
+add_test(NAME test_ekf COMMAND test_ekf)
+
+add_executable(test_bin ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bin.cpp)
+target_link_libraries(test_bin PRIVATE gtest_main)
+add_test(NAME test_bin COMMAND test_bin)
+

@@ -9,7 +9,6 @@
 #include <thread>
 #include <chrono>
 #include "include/sim/ini_sim.hpp"
-#include "include/utils.h"
 #include "include/open3d_visualizer.hpp"
 #include <boost/math/distributions/chi_squared.hpp>
 
@@ -129,7 +128,7 @@ void windowedEKF(std::deque<std::pair<double, double>> &window_data, Eigen::Vect
 int main() {
     // Initialize state, covariance, and noise parameters
     Eigen::VectorXd x(4);
-    x << 5.0, 693.0, 0.0, 227.0;
+    x << 5.0, 2.0, 0.0, 227.0;
     Eigen::MatrixXd P = Eigen::MatrixXd::Identity(4, 4) * 1000.0;
     P(1, 1) = 1.0;
     double process_noise = 1., measurement_noise = 5.;
@@ -139,8 +138,9 @@ int main() {
     // Set up event reader
     // dv::io::MonoCameraRecording reader(
     //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/circle2.aedat4");
-    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10, true);
-
+    //EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10, true);
+    dv::io::MonoCameraRecording reader(
+            "/home/viciopoli/Downloads/synth_data_slow.aedat4");
 
     // dv::io::CameraCapture reader;
     std::cout << "Opened AEDAT4 file from [" << reader.getCameraName() << "] camera\n";
@@ -182,10 +182,10 @@ int main() {
 
             for (const auto &e: *events) {
                 // consider the events that are at the center only according to square
-                if (e.x() < half_resolution.width - square || e.x() > half_resolution.width + square ||
-                    e.y() < half_resolution.height - square || e.y() > half_resolution.height + square) {
-                    continue;
-                }
+                // if (e.x() < half_resolution.width - square || e.x() > half_resolution.width + square ||
+                //     e.y() < half_resolution.height - square || e.y() > half_resolution.height + square) {
+                //     continue;
+                // }
 
                 x_mass += e.x();
                 y_mass += e.y();

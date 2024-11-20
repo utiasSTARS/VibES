@@ -12,8 +12,7 @@ class EKF {
 public:
     EKF() = delete;
 
-    EKF(int n_samples, double process_noise, double measurement_noise) : n_samples(n_samples),
-                                                                         measurement_noise(measurement_noise) {
+    EKF(int n_samples, double process_noise, double measurement_noise) : n_samples(n_samples) {
         // the state is a 7x1 vector [omega, A_x, B_x, C_x, A_y, B_y, C_y]
         P = Eigen::MatrixXd::Identity(7, 7) * 1000.; // Initial covariance matrix
         Q = Eigen::MatrixXd::Identity(7, 7) * process_noise;
@@ -24,15 +23,14 @@ public:
 
     }
 
-    void initialize(double A, double omega, double phi, double C_x, double C_y) {
+    void initialize(double omega, double A, double phi, double C_x, double C_y) {
         A_x = A * std::cos(phi);
         B_x = A * std::sin(phi);
         B_x = A * std::cos(phi);
         B_y = A * std::sin(phi);
-        this->omega = omega;
         this->C_x = C_x;
         this->C_y = C_y;
-
+        this->omega = omega;
     }
 
     void update(double x, double y, double t) {
@@ -123,19 +121,18 @@ public:
         os << "Phase X: " << ekf.getPhaseX() << " rad, ";
         os << "Phase Y: " << ekf.getPhaseY() << " rad, ";
         os << "Shift X: " << ekf.getShiftX() << " px, ";
-        os << "Shift Y: " << ekf.getShiftY() << " px" << std::endl;
+        os << "Shift Y: " << ekf.getShiftY() << " px";
         return os;
     }
 
 
 private:
-    static double omega;
+    double omega;
     // sinusoids of the form A * sin(omega * t) + B * cos(omega * t) + C
     // where amplitude = sqrt(A^2 + B^2) and phase = atan2(B, A)
     double A_x = 0, A_y = 0, B_x = 0, B_y = 0;
     double C_x = 0, C_y = 0;
     const int n_samples;
-    const double measurement_noise;
 
     std::deque<std::tuple<double, double, double>> window_data;
 
@@ -157,6 +154,6 @@ private:
     }
 };
 
-double EKF::omega = 1.0;
+// double EKF::omega = 1.0;
 
 #endif //PROJECT_EKF_H

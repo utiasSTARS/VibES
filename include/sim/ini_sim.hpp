@@ -8,7 +8,7 @@
 
 #include <dv-processing/core/core.hpp>
 #include <dv-processing/io/camera_input_base.hpp>
-#include "include/utils.h"
+#include "../utils.h"
 
 
 class EventsFreqCalibPattern : public dv::io::CameraInputBase {

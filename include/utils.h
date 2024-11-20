@@ -16,6 +16,19 @@ struct EventStruct {
     bool polarity;
 };
 
+enum Colors {
+    RED = 0,
+    GREEN = 1,
+    BLUE = 2
+};
+
+std::map<Colors, std::tuple<int, int, int>> color_map = {
+        {RED,   std::tuple<int, int, int>(0, 0, 255)},
+        {GREEN, std::tuple<int, int, int>(0, 255, 0)},
+        {BLUE,  std::tuple<int, int, int>(255, 0, 0)}
+};
+
+
 template<typename T>
 inline T linear_interp(T alpha, T x0, T x1) {
     return x0 + alpha * (x1 - x0);
