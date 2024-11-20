@@ -1,12 +1,20 @@
 //
 // Created by viciopoli on 18/11/24.
 //
-#ifndef PROJECT_HELPERS_H
-#define PROJECT_HELPERS_H
+#ifndef PROJECT_UTILS_H
+#define PROJECT_UTILS_H
 
 #include <algorithm>
 #include <vector>
 #include <tuple>
+
+// Define EventStruct to store individual events
+struct EventStruct {
+    int64_t timestamp;
+    int16_t x;
+    int16_t y;
+    bool polarity;
+};
 
 template<typename T>
 inline T linear_interp(T alpha, T x0, T x1) {
@@ -43,4 +51,4 @@ interpolate_events(std::vector<std::tuple<double, double, int64_t>> &events,
     return out;
 }
 
-#endif //PROJECT_HELPERS_H
+#endif //PROJECT_UTILS_H

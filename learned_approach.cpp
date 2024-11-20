@@ -5,8 +5,8 @@
 
 #include <opencv2/imgproc.hpp>
 #include <chrono>
-#include "include/events_freq_calib_pattern.hpp"
-#include "include/helpers.h"
+#include "include/sim/ini_sim.hpp"
+#include "include/utils.h"
 // #include "include/open3d_visualizer.hpp"
 
 int main() {

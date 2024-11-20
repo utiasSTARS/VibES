@@ -3,7 +3,7 @@
 //
 
 #include <iostream>
-#include "include/events_freq_calib_pattern.hpp"
+#include "include/sim/ini_sim.hpp"
 #include <dv-processing/io/mono_camera_recording.hpp>
 #include <dv-processing/io/camera_capture.hpp>
 #include <opencv2/imgproc.hpp>

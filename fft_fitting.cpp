@@ -6,8 +6,8 @@
 #include <dv-processing/io/camera_capture.hpp>
 #include <opencv2/highgui.hpp>
 #include "include/fourier.hpp"
-#include "include/events_freq_calib_pattern.hpp"
-#include "include/helpers.h"
+#include "include/sim/ini_sim.hpp"
+#include "include/utils.h"
 #include "include/open3d_visualizer.hpp"
 
 

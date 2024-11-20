@@ -6,7 +6,7 @@
 
 #include <opencv2/imgproc.hpp>
 #include <chrono>
-#include "include/events_freq_calib_pattern.hpp"
+#include "include/sim/ini_sim.hpp"
 
 dv::EventStore compensate(const dv::EventStore &events, float A, float f, float phi, const cv::Size &res) {
     int start_time = events.front().timestamp();

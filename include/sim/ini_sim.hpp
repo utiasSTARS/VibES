@@ -8,14 +8,8 @@
 
 #include <dv-processing/core/core.hpp>
 #include <dv-processing/io/camera_input_base.hpp>
+#include "include/utils.h"
 
-// Define EventStruct to store individual events
-struct EventStruct {
-    int64_t timestamp;
-    int16_t x;
-    int16_t y;
-    bool polarity;
-};
 
 class EventsFreqCalibPattern : public dv::io::CameraInputBase {
 public:

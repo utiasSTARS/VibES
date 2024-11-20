@@ -11,8 +11,9 @@
 
 #include <boost/math/distributions/chi_squared.hpp>
 
-#include "include/events_freq_calib_pattern.hpp"
+#include "include/sim/ini_sim.hpp"
 #include "include/open3d_visualizer.hpp"
+#include "include/utils.h"
 
 enum Colors {
     RED = 0,
@@ -34,9 +35,7 @@ public:
             bin_id(bin_counter++), process_noise(process_noise), measurement_noise(measurement_noise),
             sampling_time(sampling_time), vis(vis) {
         // init window data with all 0
-        for (int i = 0; i < N_samples; i++) {
-            window_data.emplace_back(0, 0, 0);
-        }
+        window_data.resize(N_samples);
 
         // initial state guess
         A_y = 1.0;
@@ -56,51 +55,44 @@ public:
         x_mean += x;
         time_mean += (time - prev_time);
         counter++;
-        if (counter >= 100) {
-            // events_buffer.emplace_back(x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6);
-            window_data[index] = {x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6};
-            if (vis) {
-                vis->addPoint(x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6, true);
+        if (counter >= 10) {
+            events_buffer.emplace_back(x_mean / counter, y_mean / counter, time_mean);
+            // window_data[index] = {x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6};
+
+
+            // interpolate events_buffer at sampling rate
+            if (events_buffer.size() > 1) {
+                auto interpolated = interpolate_events(events_buffer, sampling_time);
+                if (interpolated.has_value()) {
+                    for (const auto &e: *interpolated) {
+                        auto [x, y, t] = e;
+                        window_data[index] = {x, y, t};
+
+
+                        if (vis) {
+                            vis->addPoint(x, y, t, true);
+
+                            //vis->addPoint(x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6, true);
+                        }
+
+
+
+                        index++;
+                        if (index >= N_samples) {
+                            index = 0;
+                            windowedEKF();
+                            auto dy = A_y * std::sin(omega * time_mean / 1e6) + B_y * std::cos(omega * time_mean / 1e6);
+                            // plotOneEvent(x - dy, y - dy);
+                            // plot();
+                        }
+                    }
+                }
             }
 
-            index++;
             x_mean = 0;
             y_mean = 0;
             time_mean = 0;
             counter = 0;
-        }
-
-        // while (events_buffer.size() > 1 && index < N_samples) {
-        //     auto [x1, y1, t1] = events_buffer.front();
-        //     auto [x2, y2, t2] = *(++events_buffer.begin());
-//
-        //     if (lastTimestamp == 0.0) lastTimestamp = t1;
-//
-        //     // Interpolate to fill data at regular intervals
-        //     while (lastTimestamp + sampling_time <= t2 && index < N_samples) {
-        //         double ratio = (lastTimestamp + sampling_time - t1) / (t2 - t1);
-//
-        //         window_data[index] = {x1 + ratio * (x2 - x1), y1 + ratio * (y2 - y1), lastTimestamp + sampling_time};
-//
-        //         lastTimestamp += sampling_time;
-        //         index++;
-        //     }
-//
-        //     // Remove processed events
-        //     //if (!sampling) {
-        //     //    events_buffer.pop_back();
-        //     //} else {
-        //     events_buffer.pop_front();
-        //     //}
-        // }
-//
-
-        if (index >= N_samples) {
-            index = 0;
-            windowedEKF();
-            auto dy = A_y * std::sin(omega * time_mean / 1e6) + B_y * std::cos(omega * time_mean / 1e6);
-            // plotOneEvent(x - dy, y - dy);
-            // plot();
         }
     }
 
@@ -152,8 +144,8 @@ private:
     int counter = 0, index = 0;
     double y_mean = 0, x_mean = 0;
     int64_t time_mean = 0;
-    std::deque<std::tuple<double, double, double>> window_data;
-    std::deque<std::tuple<double, double, double>> events_buffer;
+    std::vector<std::tuple<double, double, double>> window_data;
+    std::vector<std::tuple<double, double, int64_t>> events_buffer;
     double A_y = 0, A_x = 0;
     static double omega;
     double B_y = 0, phi_x = 0;
@@ -286,7 +278,7 @@ int main() {
     // dv::io::MonoCameraRecording reader(
     //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/dvSave-2024_11_11_15_36_53.aedat4");
     // dv::io::CameraCapture reader;
-    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10);
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10, false);
 
     std::cout << "Opened AEDAT4 file from [" << reader.getCameraName() << "] camera\n";
 
@@ -309,7 +301,7 @@ int main() {
     std::vector<BinSin> bins;
 
     // int win_h = 80, win_w = 80;
-    int win_h = 40, win_w = 40;
+    int win_h = 480, win_w = 640;
 
     // make sure we have an integer number of bins in each direction
     if (resolution.height % win_h != 0 || resolution.width % win_w != 0) {
