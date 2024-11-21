@@ -24,3 +24,5 @@ target_link_libraries(test_sim_bins PRIVATE gtest_main dv::processing)
 add_executable(test_dvs_bins ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dvs_bins.cpp)
 target_link_libraries(test_dvs_bins PRIVATE gtest_main dv::processing)
 
+add_executable(test_finuttf ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_finuttf.cpp)
+target_link_libraries(test_finuttf PRIVATE gtest_main dv::processing finufft)
