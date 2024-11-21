@@ -14,8 +14,7 @@ class FourierFreqEst {
 public:
     FourierFreqEst() = delete;
 
-    FourierFreqEst(int n_samples, int sampling_rate, double f_min, double f_max) : N(n_samples),
-                                                                                   samplingRate(sampling_rate) {
+    FourierFreqEst(int n_samples, double f_min, double f_max) : N(n_samples) {
         t_data.resize(N);
         cj.resize(N);
         freqs_t.resize(N);
@@ -128,7 +127,7 @@ public:
 
         std::cout << "Estimated Frequency for X: " << main_freq_t << " Hz, " << Hz2rad<double>(main_freq_t) << " rad/s"
                   << std::endl;
-        std::cout << "Amplitude: " << maxMagnitude / N << std::endl;
+        std::cout << "Amplitude: " << maxMagnitude / N << ", Phase Shift: " << phase_shift << " rad" << std::endl;
 
         // Reset data
         t_data.assign(N, 0.0);
@@ -171,7 +170,6 @@ public:
 
 private:
     const int N = 10'000;
-    const int samplingRate;
 
     std::vector<double> t_data;
     std::vector<double> freqs_t;

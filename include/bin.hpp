@@ -94,7 +94,7 @@ public:
     }
 
     [[nodiscard]] bool is_stable() const {
-        return updated && std::abs(ekf->getRadS() - target_omega) < 5.;
+        return updated && std::abs(ekf->getRadS() - target_omega) < Hz2rad(2);
     }
 
     [[nodiscard]] Colors getColor() const {

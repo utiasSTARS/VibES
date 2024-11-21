@@ -21,8 +21,9 @@ int main(int argc, char *argv[]) {
         int target_freq = 700;
         std::cout << "No file provided. Using simulator with freq " << target_freq << " rad/s, " << rad2Hz(target_freq)
                   << " Hz" << std::endl;
-        reader = std::make_unique<EventsFreqCalibPattern>(0, cv::Size(640, 480), target_freq, 3, 3, .01, false);
+        reader = std::make_unique<EventsFreqCalibPattern>(0, cv::Size(640, 480), target_freq, 4, 3, .01, false);
     }
+
     cv::Size resolution = reader->getEventResolution().value();
     std::cout << "Resolution: " << resolution << std::endl;
 
@@ -49,7 +50,7 @@ int main(int argc, char *argv[]) {
 
 
     // initiailize the NUFFT to estimate the frequency
-    FourierFreqEst fourierFreqEst(1000, 10, 500, 900);
+    FourierFreqEst fourierFreqEst(1000, 90, 110);
 
     // read the events
     bool estimate_freq = true;
@@ -69,8 +70,8 @@ int main(int argc, char *argv[]) {
 
     // create the bins for tracking regions in the image plane
     std::vector<Bin> bins;
-    int bin_h = 40, bin_w = 40;
-    // int bin_h = resolution.height, bin_w = resolution.width;
+    // int bin_h = 80, bin_w = 80;
+    int bin_h = resolution.height, bin_w = resolution.width;
 
 
     if (resolution.width % bin_w != 0 || resolution.height % bin_h != 0) {
@@ -85,7 +86,7 @@ int main(int argc, char *argv[]) {
             double c_y = i * bin_h + bin_h / 2;
             // process noise and measurement noise are set to 0.1
             // using the last 2 samples as window
-            bins.emplace_back(1, 0.1, 0.1, estimated_freq, c_x, c_y, phase_shift, amplitude);
+            bins.emplace_back(3, 0.1, 0.1, estimated_freq, c_x, c_y, phase_shift, amplitude);
         }
     }
 
@@ -132,7 +133,6 @@ int main(int argc, char *argv[]) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
-
 
     return 0;
 }
