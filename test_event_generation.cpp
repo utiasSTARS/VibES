@@ -34,7 +34,7 @@ int main() {
 
 
     // Create an instance of the class
-    EventsFreqCalibPattern reader(initial_timestamp, size, omega, amplitude_x, amplitude_y, phi, 5);
+    EventsFreqCalibPattern reader(initial_timestamp, size, omega, amplitude_x, amplitude_y, phi);
 
 
     while (reader.isRunning()) {

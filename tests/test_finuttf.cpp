@@ -47,7 +47,7 @@ TEST(FourierFreqEst, SinusoidSim) {
 TEST(FourierFreqEst, DVSSim) {
     double target_freq = 568.;
     // double omega, double amplitude_x, double amplitude_y, double phi, int delta_time, bool noise = true
-    EventsFreqCalibPattern reader(0, cv::Size(640, 480), target_freq, 3, 3, 0.01, 10, false);
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), target_freq, 3, 3, 0.01, false);
 
     FourierFreqEst fourierFreqEst(1000, 10, 500, 800);
 

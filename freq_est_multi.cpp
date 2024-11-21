@@ -13,7 +13,7 @@
 
 #include "include/sim/ini_sim.hpp"
 #include "include/open3d_visualizer.hpp"
-#include "include/utils.h"
+#include "include/utils.hpp"
 
 enum Colors {
     RED = 0,
@@ -74,7 +74,6 @@ public:
 
                             //vis->addPoint(x_mean / counter, y_mean / counter, static_cast<double>(time_mean) / 1e6, true);
                         }
-
 
 
                         index++;
@@ -278,7 +277,7 @@ int main() {
     // dv::io::MonoCameraRecording reader(
     //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/dvSave-2024_11_11_15_36_53.aedat4");
     // dv::io::CameraCapture reader;
-    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10, false);
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, false);
 
     std::cout << "Opened AEDAT4 file from [" << reader.getCameraName() << "] camera\n";
 

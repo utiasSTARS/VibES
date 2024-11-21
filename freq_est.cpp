@@ -138,7 +138,7 @@ int main() {
     // Set up event reader
     // dv::io::MonoCameraRecording reader(
     //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/circle2.aedat4");
-    //EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10, true);
+    //EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, true);
     dv::io::MonoCameraRecording reader(
             "/home/viciopoli/Downloads/synth_data_slow.aedat4");
 

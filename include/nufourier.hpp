@@ -65,8 +65,12 @@ public:
             return false;
         }
         if (counter > 100) {
+            mean_x_out = mean_x / counter;
+            mean_y_out = mean_y / counter;
+            mean_t_out = mean_t / counter;
+
             t_data[index] = t;
-            cj[index] = std::complex<double>(mean_x / counter, mean_y / counter);
+            cj[index] = std::complex<double>(mean_x_out, mean_y_out);
             index++;
             if (index >= N) {
 
@@ -120,8 +124,11 @@ public:
 
         // Calculate frequencies based on peak indices
         main_freq_t = freqs_t[peakIndex];
+        phase_shift = std::arg(outXY[peakIndex]);
 
-        std::cout << "Estimated Frequency for X: " << main_freq_t << " Hz" << std::endl;
+        std::cout << "Estimated Frequency for X: " << main_freq_t << " Hz, " << Hz2rad<double>(main_freq_t) << " rad/s"
+                  << std::endl;
+        std::cout << "Amplitude: " << maxMagnitude / N << std::endl;
 
         // Reset data
         t_data.assign(N, 0.0);
@@ -130,9 +137,26 @@ public:
         return true;
     }
 
-    double getMainFreq() const {
+    double getMainFreqHz() const {
         return main_freq_t;
     }
+
+    double getMainFreqRad() const {
+        return Hz2rad(main_freq_t);
+    }
+
+    double getPhaseShift() const {
+        return phase_shift;
+    }
+
+    double getAmplitude() const {
+        return maxMagnitude / N;
+    }
+
+    std::tuple<double, double, double> getMean() {
+        return std::make_tuple(mean_x_out, mean_y_out, mean_t_out);
+    }
+
 
     void visualize() {
         int height = 400;
@@ -158,6 +182,7 @@ private:
     int index = 0;
     double main_freq_t = 0.0;
     double maxMagnitude = 0.0;
+    double phase_shift = 0.0;
 
     std::vector<double> magnitudes;
 
@@ -166,6 +191,10 @@ private:
     double mean_y = 0;
     double mean_t = 0;
     int64_t counter = 0;
+
+    double mean_x_out = 0;
+    double mean_y_out = 0;
+    double mean_t_out = 0;
 };
 
 #endif //PROJECT_NUFOURIER_H

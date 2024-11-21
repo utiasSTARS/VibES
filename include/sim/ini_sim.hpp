@@ -8,7 +8,7 @@
 
 #include <dv-processing/core/core.hpp>
 #include <dv-processing/io/camera_input_base.hpp>
-#include "../utils.h"
+#include "../utils.hpp"
 
 
 class EventsFreqCalibPattern : public dv::io::CameraInputBase {
@@ -16,9 +16,9 @@ public:
     EventsFreqCalibPattern() = delete;
 
     EventsFreqCalibPattern(const int64_t &timestamp, const cv::Size &size, double omega, double amplitude_x,
-                           double amplitude_y, double phi, int delta_time, bool noise = true)
+                           double amplitude_y, double phi, bool noise = true)
             : timestamp(timestamp), size(size), omega(omega), amplitude_x(amplitude_x), amplitude_y(amplitude_y),
-              phi(phi), delta_t( static_cast<int>(500'000*(2 * M_PI) / omega)), noise(noise) {
+              phi(phi), delta_t(static_cast<int>(500'000 * (2 * M_PI) / omega)), noise(noise) {
         initialize_lines();
 
         // generate random noise over the image plane
@@ -164,8 +164,7 @@ private:
     std::uniform_int_distribution<int> t_dist;
     std::uniform_int_distribution<int> polarity_dist;
 
-    void
-    generate_noise_events(int64_t start_time, int64_t delta_time, dv::EventStore &events) {
+    void generate_noise_events(int64_t start_time, int64_t delta_time, dv::EventStore &events) {
 
 
         // Generate events

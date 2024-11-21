@@ -7,7 +7,7 @@
 
 #include <Eigen/Dense>
 #include <deque>
-#include "../utils.h"
+#include "../utils.hpp"
 
 class EKF {
 public:
@@ -27,16 +27,16 @@ public:
     }
 
     void initialize(double omega, double A, double phi, double C_x, double C_y) {
-        A_x = A * std::cos(phi);
-        B_x = A * std::sin(phi);
-        B_x = A * std::cos(phi);
+        A_x = A * std::cos(0);
+        B_x = A * std::sin(0);
+        A_y = A * std::cos(phi);
         B_y = A * std::sin(phi);
         this->C_x = C_x;
         this->C_y = C_y;
         this->omega = omega;
     }
 
-    void update(double x, double y, double t) {
+    std::optional<std::tuple<int, int, int64_t>> update(double x, double y, double t) {
         if (prev_t == 0) {
             prev_t = t;
         }
@@ -44,7 +44,17 @@ public:
         if (window_data.size() > n_samples) {
             windowedEKF();
             window_data.pop_front();
+            return compensate(x, y, t);
         }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::tuple<int, int, int64_t>> compensate(int x, int y, double t) const {
+        // according to out camera projection model
+        // double u = x - A_x * std::sin(theta) + B_x * std::cos(theta);
+        // double v = y - A_y * std::sin(theta) + B_y * std::cos(theta);
+        // return std::make_tuple(static_cast<int>(u), static_cast<int>(v), static_cast<int64_t>(t * 1e6));
+        return std::make_tuple(static_cast<int>(C_x), static_cast<int>(C_y), static_cast<int64_t>(t * 1e6));
     }
 
     void windowedEKF() {
@@ -96,8 +106,12 @@ public:
         P = 0.5 * (P + P.transpose()); // Ensure symmetry
     }
 
+    [[nodiscard]] double getPrevT() const {
+        return prev_t;
+    }
+
     [[nodiscard]] double getHz() const {
-        return std::abs(omega) * 2 * M_PI;
+        return rad2Hz(std::abs(omega));
     }
 
     [[nodiscard]] double getRadS() const {

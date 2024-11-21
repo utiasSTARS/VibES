@@ -7,14 +7,14 @@
 #include <opencv2/highgui.hpp>
 #include "include/fourier.hpp"
 #include "include/sim/ini_sim.hpp"
-#include "include/utils.h"
+#include "include/utils.hpp"
 #include "include/open3d_visualizer.hpp"
 
 
 int main() {
     // dv::io::MonoCameraRecording reader(
     //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
-    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 700, 40, 40, 0.01, 100, false);
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 700, 40, 40, 0.01, false);
 
     std::cout << "Opened an AEDAT4 file which contains data from [" << reader.getCameraName() << "] camera"
               << std::endl;

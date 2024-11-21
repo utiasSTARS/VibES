@@ -1,8 +1,8 @@
 //
 // Created by viciopoli on 18/11/24.
 //
-#ifndef PROJECT_UTILS_H
-#define PROJECT_UTILS_H
+#ifndef PROJECT_UTILS_HPP
+#define PROJECT_UTILS_HPP
 
 #include <algorithm>
 #include <vector>
@@ -40,8 +40,8 @@ inline T rad2Hz(T rad) {
 }
 
 template<typename T>
-inline T Hz2rad(T rad) {
-    return rad * (2 * M_PI);
+inline T Hz2rad(T hz) {
+    return hz * (2 * M_PI);
 }
 
 template<typename T>
@@ -81,4 +81,4 @@ interpolate_events(std::vector<std::tuple<double, double, int64_t>> &events,
     return out;
 }
 
-#endif //PROJECT_UTILS_H
+#endif //PROJECT_UTILS_HPP

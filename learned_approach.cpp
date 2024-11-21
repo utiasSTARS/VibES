@@ -6,7 +6,7 @@
 #include <opencv2/imgproc.hpp>
 #include <chrono>
 #include "include/sim/ini_sim.hpp"
-#include "include/utils.h"
+#include "include/utils.hpp"
 // #include "include/open3d_visualizer.hpp"
 
 int main() {
@@ -24,7 +24,7 @@ int main() {
     // start with dv camera
     // dv::io::MonoCameraRecording reader(
     //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/file.aedat4");
-    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, 10, true);
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, true);
 
     // dv::io::CameraCapture reader;
     std::cout << "Opened AEDAT4 file from [" << reader.getCameraName() << "] camera\n";

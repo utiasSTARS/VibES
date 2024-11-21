@@ -13,7 +13,7 @@
 TEST(IniBin, OneBin) {
     double target_freq = 700.;
     // double omega, double amplitude_x, double amplitude_y, double phi, int delta_time, bool noise = true
-    EventsFreqCalibPattern reader(0, cv::Size(640, 480), target_freq, 3, 3, 0.01, 10, false);
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), target_freq, 3, 3, 0.01, false);
 
     Bin bin(2, 0.1, 0.1, target_freq - 80, 0, 0);
 
@@ -38,7 +38,7 @@ TEST(IniBin, MultiBin) {
     double target_freq = 700.;
     cv::Size resolution(640, 480);
     // double omega, double amplitude_x, double amplitude_y, double phi, int delta_time, bool noise = true
-    EventsFreqCalibPattern reader(0, resolution, target_freq, 3, 3, 0.01, 10, false);
+    EventsFreqCalibPattern reader(0, resolution, target_freq, 3, 3, 0.01, false);
 
     int win_h = 80;
     int win_w = 80;
