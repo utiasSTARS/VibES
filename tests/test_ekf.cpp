@@ -9,8 +9,8 @@
 #include "../include/filter/ekf.hpp"
 
 std::tuple<double, double, double, double, double> testEKF(double amp, double freq, double phase) {
-    EKF ekf(10, 0.1, 0.1);
-    ekf.initialize(1., 1., 1., 1., 1.);
+    EKF ekf(1, 0.1, 0.1);
+    ekf.initialize(80., 1., 1., 1., 1.);
 
     SinusoidSim<double> sim_x(amp, freq, phase);
     SinusoidSim<double> sim_y(amp + 3, freq, phase);

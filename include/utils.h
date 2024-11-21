@@ -34,6 +34,23 @@ inline T linear_interp(T alpha, T x0, T x1) {
     return x0 + alpha * (x1 - x0);
 }
 
+template<typename T>
+inline T rad2Hz(T rad) {
+    return rad / (2 * M_PI);
+}
+
+template<typename T>
+inline T Hz2rad(T rad) {
+    return rad * (2 * M_PI);
+}
+
+template<typename T>
+T clipAngle(T angle) {
+    while (angle < 0) angle += 2 * M_PI;
+    while (angle > 2 * M_PI) angle -= 2 * M_PI;
+    return angle;
+}
+
 std::optional<std::vector<std::tuple<double, double, int64_t>>>
 interpolate_events(std::vector<std::tuple<double, double, int64_t>> &events,
                    double dt) {

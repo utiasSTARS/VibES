@@ -15,7 +15,7 @@ public:
     Bin(int n_samples, double process_noise, double measurement_noise, double target_omega, double c_x, double c_y)
             : bin_id(bin_counter++), target_omega(target_omega) {
         ekf = std::make_shared<EKF>(n_samples, process_noise, measurement_noise);
-        ekf->initialize(1., 1., 1., c_x, c_y);
+        ekf->initialize(target_omega, 1., 1., c_x, c_y);
     }
 
     void update(double x, double y, double t) {

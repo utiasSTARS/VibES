@@ -10,12 +10,12 @@
 
 
 bool testBin(double freq_target, double freq) {
-    Bin bin(10, 0.1, 0.1, freq_target, 4., 12.);
+    Bin bin(10, 0.1, 0.1, freq_target, 1., 1.);
 
-    SinusoidSim<double> sim_x(10, freq, 1., 5);
-    SinusoidSim<double> sim_y(10, freq, 1., 10);
+    SinusoidSim<double> sim_x(10, freq, 1., 10);
+    SinusoidSim<double> sim_y(10, freq, 1., 30);
 
-    double delta = 1. / (freq + 1.);
+    double delta = 1. / (2. * Hz2rad(freq) + 1.);
 
     for (int i = 0; i < 10'000; ++i) {
         double t = i * delta;
@@ -30,6 +30,6 @@ bool testBin(double freq_target, double freq) {
 }
 
 TEST(Bin, Estimation) {
-    EXPECT_TRUE(testBin(10., 10.));
-    EXPECT_FALSE(testBin(10., 20.));
+    EXPECT_TRUE(testBin(100., 100.));
+    EXPECT_FALSE(testBin(10., 15.));
 }
