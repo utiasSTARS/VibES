@@ -39,28 +39,48 @@ public:
         }
     }
 
-    bool feed(double x, double y, double t) {
-        if (x < min_x) min_x = x;
-        if (x > max_x) max_x = x;
-        if (y < min_y) min_y = y;
-        if (y > max_y) max_y = y;
 
+    bool feed_sim(double x, double y, double t) {
         t_data[index] = t;
         cj[index] = std::complex<double>(x, y);
         index++;
         if (index >= N) {
-
-            // double mean_x = (max_x + min_x) / 2;
-            // double mean_y = (max_y + min_y) / 2;
-            // // Remove the mean max min from data
-            // for (int i = 0; i < N; i++) {
-            //     x_data[i] -= mean_x;
-            //     y_data[i] -= mean_y;
-            // }
-
             index = 0;
             return compute();
         }
+        return false;
+    }
+
+    bool feed(double x, double y, double t) {
+        if (prev_time == 0) {
+            prev_time = t;
+        }
+
+        if (t - prev_time < 0.00001) {
+            mean_x += x;
+            mean_y += y;
+            mean_t += t;
+            counter += 1;
+            prev_time = t;
+            return false;
+        }
+        if (counter > 100) {
+            t_data[index] = t;
+            cj[index] = std::complex<double>(mean_x / counter, mean_y / counter);
+            index++;
+            if (index >= N) {
+
+                index = 0;
+                return compute();
+            }
+        }
+        mean_x = x;
+        mean_y = y;
+        mean_t = t;
+        counter = 1;
+
+        prev_time = t;
+
         return false;
     }
 
@@ -110,6 +130,10 @@ public:
         return true;
     }
 
+    double getMainFreq() const {
+        return main_freq_t;
+    }
+
     void visualize() {
         int height = 400;
         cv::Mat peak = cv::Mat::zeros(height, N, CV_8UC1);
@@ -137,8 +161,11 @@ private:
 
     std::vector<double> magnitudes;
 
-    double max_x = std::numeric_limits<double>::min(), max_y = std::numeric_limits<double>::min();
-    double min_x = std::numeric_limits<double>::max(), min_y = std::numeric_limits<double>::max();
+    double prev_time = 0;
+    double mean_x = 0;
+    double mean_y = 0;
+    double mean_t = 0;
+    int64_t counter = 0;
 };
 
 #endif //PROJECT_NUFOURIER_H
