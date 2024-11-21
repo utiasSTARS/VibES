@@ -5,6 +5,7 @@
 #define PROJECT_UTILS_HPP
 
 #include <algorithm>
+#include <sstream>
 #include <vector>
 #include <tuple>
 
@@ -79,6 +80,16 @@ interpolate_events(std::vector<std::tuple<double, double, int64_t>> &events,
     events.erase(events.begin(), events.begin() + i - 1);
 
     return out;
+}
+
+
+template <typename T>
+std::string fp2str(const T a_value, const int n = 6)
+{
+    std::ostringstream out;
+    out.precision(n);
+    out << std::fixed << a_value;
+    return std::move(out).str();
 }
 
 #endif //PROJECT_UTILS_HPP
