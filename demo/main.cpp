@@ -5,23 +5,38 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 #include <dv-processing/io/mono_camera_recording.hpp>
+#include <dv-processing/io/camera_capture.hpp>
 
-#include "include/utils.hpp"
-#include "include/nufourier.hpp"
-#include "include/bin.hpp"
-#include "include/sim/ini_sim.hpp"
+#include "../include/utils.hpp"
+#include "../include/nufourier.hpp"
+#include "../include/bin.hpp"
+#include "../include/sim/ini_sim.hpp"
 
 // Main example function
 int main(int argc, char *argv[]) {
     std::unique_ptr<dv::io::CameraInputBase> reader;
     if (argc >= 2) {
-        std::cout << "Reading from file: " << argv[1] << std::endl;
-        reader = std::make_unique<dv::io::MonoCameraRecording>(argv[1]);
+        std::string arg1 = argv[1];
+
+        // Handle different cases
+        if (arg1 == "help") {
+            std::cout << "Usage: " << argv[0] << " [help|camera|file]\n";
+            std::cout << "  help    - Display this help message\n";
+            std::cout << "  camera  - Read from camera\n";
+            std::cout << "  file    - Read from a specified file\n";
+            return 0;
+        } else if (arg1 == "camera") {
+            std::cout << "Reading from camera.\n";
+            reader = std::make_unique<dv::io::CameraCapture>();
+        } else {
+            std::cout << "Reading from file: " << arg1 << std::endl;
+            reader = std::make_unique<dv::io::MonoCameraRecording>(arg1);
+        }
     } else {
         int target_freq = 700;
         std::cout << "No file provided. Using simulator with freq " << target_freq << " rad/s, " << rad2Hz(target_freq)
                   << " Hz" << std::endl;
-        reader = std::make_unique<EventsFreqCalibPattern>(0, cv::Size(640, 480), target_freq, 4, 3, .01, false);
+        reader = std::make_unique<EventsFreqCalibPattern>(0, cv::Size(640, 480), target_freq, 4, 3, .001, false);
     }
 
     cv::Size resolution = reader->getEventResolution().value();
@@ -50,7 +65,7 @@ int main(int argc, char *argv[]) {
 
 
     // initiailize the NUFFT to estimate the frequency
-    FourierFreqEst fourierFreqEst(1000, 90, 110);
+    FourierFreqEst fourierFreqEst(1000, 500, 900);
 
     // read the events
     bool estimate_freq = true;
@@ -70,8 +85,8 @@ int main(int argc, char *argv[]) {
 
     // create the bins for tracking regions in the image plane
     std::vector<Bin> bins;
-    // int bin_h = 80, bin_w = 80;
-    int bin_h = resolution.height, bin_w = resolution.width;
+    int bin_h = 80, bin_w = 80;
+    // int bin_h = resolution.height, bin_w = resolution.width;
 
 
     if (resolution.width % bin_w != 0 || resolution.height % bin_h != 0) {
@@ -118,7 +133,7 @@ int main(int argc, char *argv[]) {
                     roi.setTo(cv::Scalar(0, 0, 0));
 
                     auto [comp_x, comp_y, comp_t] = comp.value();
-                    cv::putText(compensated_frame, "Freq: " + std::to_string(bins[bin_index].getHz()) + " Hz",
+                    cv::putText(compensated_frame, "Freq: " + std::to_string(bins[bin_index].getHz()) + " Rad/s",
                                 cv::Point(10, 30),
                                 cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(255, 0, 255), 2);
                     auto [B, G, R] = color_map[bins[bin_index].getColor()];

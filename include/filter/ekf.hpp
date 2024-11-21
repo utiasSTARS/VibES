@@ -27,10 +27,10 @@ public:
     }
 
     void initialize(double omega, double A, double phi, double C_x, double C_y) {
-        A_x = A * std::cos(0);
-        B_x = A * std::sin(0);
-        A_y = A * std::cos(phi);
-        B_y = A * std::sin(phi);
+        A_x = A * std::cos(0.1 + phi);
+        B_x = A * std::sin(0.1 + phi);
+        A_y = A * std::cos(0.1);
+        B_y = A * std::sin(0.1);
         this->C_x = C_x;
         this->C_y = C_y;
         this->omega = omega;

@@ -34,7 +34,7 @@ public:
             prev_time = t;
             return comp;
         }
-        if (counter > 100) {
+        if (counter > 1) { // 100
             mean_x_out = mean_x / counter;
             mean_y_out = mean_y / counter;
             mean_t_out = mean_t / counter;
@@ -79,6 +79,10 @@ public:
 
     [[nodiscard]] double getHz() const {
         return ekf->getHz();
+    }
+
+    [[nodiscard]] double getRad() const {
+        return ekf->getRadS();
     }
 
     [[nodiscard]] int64_t getBinId() const {

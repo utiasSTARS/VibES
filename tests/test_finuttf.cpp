@@ -10,7 +10,7 @@
 #include "../include/sim/ini_sim.hpp"
 
 TEST(FourierFreqEst, SinusoidSim) {
-    FourierFreqEst fourierFreqEst(1000, 10, 500, 700);
+    FourierFreqEst fourierFreqEst(1000, 500, 700);
 
     // generate some data
     double amp = 4.0;
@@ -37,7 +37,7 @@ TEST(FourierFreqEst, SinusoidSim) {
     // sample the sinusoid
     for (const auto &t: uniform_time) {
         if (fourierFreqEst.feed_sim(sim_x(t), sim_y(t), t)) {
-            EXPECT_NEAR(fourierFreqEst.getMainFreq(), freq, 1.);
+            EXPECT_NEAR(fourierFreqEst.getMainFreqRad(), freq, 1.);
         }
     }
 
@@ -49,7 +49,7 @@ TEST(FourierFreqEst, DVSSim) {
     // double omega, double amplitude_x, double amplitude_y, double phi, int delta_time, bool noise = true
     EventsFreqCalibPattern reader(0, cv::Size(640, 480), target_freq, 3, 3, 0.01, false);
 
-    FourierFreqEst fourierFreqEst(1000, 10, 500, 800);
+    FourierFreqEst fourierFreqEst(1000, 500, 800);
 
 
     int i = 0;
@@ -57,7 +57,7 @@ TEST(FourierFreqEst, DVSSim) {
         if (const auto events = reader.getNextEventBatch(); events.has_value()) {
             for (const auto &event: events.value()) {
                 if (fourierFreqEst.feed(event.x(), event.y(), event.timestamp() / 1e6)) {
-                    EXPECT_NEAR(fourierFreqEst.getMainFreq(), target_freq, 1.);
+                    EXPECT_NEAR(fourierFreqEst.getMainFreqRad(), target_freq, 1.);
                 }
             }
         } else {

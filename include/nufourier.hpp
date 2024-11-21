@@ -9,6 +9,7 @@
 #include <iostream>
 #include <cmath>
 #include <opencv2/opencv.hpp>
+#include "utils.hpp"
 
 class FourierFreqEst {
 public:
@@ -137,11 +138,11 @@ public:
     }
 
     double getMainFreqHz() const {
-        return main_freq_t;
+        return rad2Hz(main_freq_t);
     }
 
     double getMainFreqRad() const {
-        return Hz2rad(main_freq_t);
+        return main_freq_t;
     }
 
     double getPhaseShift() const {
