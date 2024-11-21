@@ -42,12 +42,24 @@ public:
         prev_time = t;
     }
 
-    bool is_stable() {
+    [[nodiscard]] double getCenterX() {
+        return ekf->getShiftX();
+    }
+
+    [[nodiscard]] double getCenterY() {
+        return ekf->getShiftY();
+    }
+
+    [[nodiscard]] bool is_stable() const {
         return std::abs(ekf->getRadS() - target_omega) < 1.;
     }
 
-    Colors get_colors() {
+    [[nodiscard]] Colors getColor() const {
         return is_stable() ? GREEN : RED;
+    }
+
+    [[nodiscard]] bool is(double f) const {
+        return std::abs(ekf->getRadS() - f) < 1.;
     }
 
     std::shared_ptr<EKF> getEKF() {
@@ -58,7 +70,6 @@ public:
         os << "Bin id: " << bin.bin_id << ", " << *bin.ekf;
         return os;
     }
-
 
 private:
     std::shared_ptr<EKF> ekf;
