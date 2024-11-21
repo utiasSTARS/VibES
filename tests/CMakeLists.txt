@@ -17,3 +17,10 @@ add_executable(test_bin ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bin.cpp)
 target_link_libraries(test_bin PRIVATE gtest_main)
 add_test(NAME test_bin COMMAND test_bin)
 
+
+add_executable(test_sim_bins ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sim_bins.cpp)
+target_link_libraries(test_sim_bins PRIVATE gtest_main dv::processing)
+
+add_executable(test_dvs_bins ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dvs_bins.cpp)
+target_link_libraries(test_dvs_bins PRIVATE gtest_main dv::processing)
+

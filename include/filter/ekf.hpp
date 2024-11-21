@@ -52,7 +52,7 @@ public:
             auto [x, y, t] = window_data[i];
             double delta_t = t - prev_t;
             F(0, 1) = delta_t; // omega update
-            theta = theta + omega * delta_t; // Phase update
+            theta = wrap_phase(theta + omega * delta_t); // Phase update
             prev_t = t;
 
             double x_pred = A_x * std::sin(theta) + B_x * std::cos(theta) + C_x;
@@ -66,13 +66,13 @@ public:
             H(2 * i, 1) = delta_t * (A_x * std::cos(theta) - B_x * std::sin(theta)); // dx/domega
             H(2 * i, 2) = std::sin(theta); // dx/dA_x
             H(2 * i, 3) = std::cos(theta); // dx/dB_x
-            H(2 * i, 4) = 1; // dx/dC_x
+            H(2 * i, 4) = 1.; // dx/dC_x
 
             H(2 * i + 1, 0) = A_y * std::cos(theta) - B_y * std::sin(theta); // dy/dtheta
             H(2 * i + 1, 1) = delta_t * (A_y * std::cos(theta) - B_y * std::sin(theta)); // dy/domega
             H(2 * i + 1, 5) = std::sin(theta); // dy/dA_y
             H(2 * i + 1, 6) = std::cos(theta); // dy/dB_y
-            H(2 * i + 1, 7) = 1; // dy/dC_y
+            H(2 * i + 1, 7) = 1.; // dy/dC_y
         }
 
         // Measurement update

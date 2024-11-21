@@ -19,7 +19,27 @@ public:
     }
 
     void update(double x, double y, double t) {
-        ekf->update(x, y, t);
+        if (prev_time == 0) {
+            prev_time = t;
+        }
+
+        if (t - prev_time < 0.00001) {
+            mean_x += x;
+            mean_y += y;
+            mean_t += t;
+            counter += 1;
+            prev_time = t;
+            return;
+        }
+        if (counter > 100) {
+            ekf->update(mean_x / counter, mean_y / counter, mean_t / counter);
+        }
+        mean_x = x;
+        mean_y = y;
+        mean_t = t;
+        counter = 1;
+
+        prev_time = t;
     }
 
     bool is_stable() {
@@ -44,6 +64,12 @@ private:
     std::shared_ptr<EKF> ekf;
     const int64_t bin_id;
     static int64_t bin_counter;
+
+    double prev_time = 0;
+    double mean_x = 0;
+    double mean_y = 0;
+    double mean_t = 0;
+    int64_t counter = 0;
 
     double target_omega;
     Colors colors = BLUE;
