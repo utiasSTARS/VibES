@@ -33,6 +33,7 @@ public:
         }
         if (counter > 100) {
             ekf->update(mean_x / counter, mean_y / counter, mean_t / counter);
+            updated = true;
         }
         mean_x = x;
         mean_y = y;
@@ -51,7 +52,7 @@ public:
     }
 
     [[nodiscard]] bool is_stable() const {
-        return std::abs(ekf->getRadS() - target_omega) < 1.;
+        return updated && std::abs(ekf->getRadS() - target_omega) < 5.;
     }
 
     [[nodiscard]] Colors getColor() const {
@@ -59,7 +60,7 @@ public:
     }
 
     [[nodiscard]] bool is(double f) const {
-        return std::abs(ekf->getRadS() - f) < 1.;
+        return updated && std::abs(ekf->getRadS() - f) < 5.;
     }
 
     std::shared_ptr<EKF> getEKF() {
@@ -84,6 +85,7 @@ private:
 
     double target_omega;
     Colors colors = BLUE;
+    bool updated = false;
 
 };
 
