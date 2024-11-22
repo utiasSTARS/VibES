@@ -138,9 +138,9 @@ int main() {
     // Set up event reader
     // dv::io::MonoCameraRecording reader(
     //         "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/circle2.aedat4");
-    //EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, true);
-    dv::io::MonoCameraRecording reader(
-            "/home/viciopoli/Downloads/synth_data_slow.aedat4");
+    EventsFreqCalibPattern reader(0, cv::Size(640, 480), 500, 10, 10, 0.01, false);
+    // dv::io::MonoCameraRecording reader(
+    //         "/home/viciopoli/Downloads/synth_data_slow.aedat4");
 
     // dv::io::CameraCapture reader;
     std::cout << "Opened AEDAT4 file from [" << reader.getCameraName() << "] camera\n";

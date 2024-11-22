@@ -34,6 +34,9 @@ include(tests/CMakeLists.txt)
 add_executable(project demo/main.cpp)
 target_link_libraries(project PRIVATE Open3D::Open3D finufft dv::processing)
 
+add_executable(helix_vis demo/helix_vis.cpp)
+target_link_libraries(helix_vis PRIVATE Open3D::Open3D finufft dv::processing)
+
 add_executable(test_event_generation test_event_generation.cpp)
 add_executable(main_ekf main_ekf.cpp)
 add_executable(main_ekf_ini main_ekf_ini.cpp)

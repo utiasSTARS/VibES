@@ -6,6 +6,8 @@
 #include <opencv2/highgui.hpp>
 #include <dv-processing/io/mono_camera_recording.hpp>
 #include <dv-processing/io/camera_capture.hpp>
+#include <dv-processing/camera/calibration_set.hpp>
+
 
 #include "../include/utils.hpp"
 #include "../include/nufourier.hpp"
@@ -14,6 +16,7 @@
 
 // Main example function
 int main(int argc, char *argv[]) {
+
     std::unique_ptr<dv::io::CameraInputBase> reader;
     if (argc >= 2) {
         std::string arg1 = argv[1];
@@ -85,7 +88,7 @@ int main(int argc, char *argv[]) {
 
     // create the bins for tracking regions in the image plane
     std::vector<Bin> bins;
-    int bin_h = 80, bin_w = 80;
+    int bin_h = 160, bin_w = 128;
     // int bin_h = resolution.height, bin_w = resolution.width;
 
 
@@ -101,7 +104,7 @@ int main(int argc, char *argv[]) {
             double c_y = i * bin_h + bin_h / 2;
             // process noise and measurement noise are set to 0.1
             // using the last 2 samples as window
-            bins.emplace_back(3, 0.1, 0.1, estimated_freq, c_x, c_y, phase_shift, amplitude);
+            bins.emplace_back(3, 0.1, 0.1, estimated_freq, c_x, c_y, -phase_shift, amplitude);
         }
     }
 
@@ -127,18 +130,23 @@ int main(int argc, char *argv[]) {
                 auto comp = bins[bin_index].update(static_cast<double>(event.x()), static_cast<double>(event.y()),
                                                    event.timestamp() / 1e6);
                 if (comp.has_value()) {
-                    std::cout << bins[bin_index] << std::endl;
+                    // std::cout << bins[bin_index] << std::endl;
                     // clean the compensated frame in the bin region
                     cv::Mat roi = compensated_frame(cv::Rect(bin_col * bin_w, bin_row * bin_h, bin_w, bin_h));
                     roi.setTo(cv::Scalar(0, 0, 0));
 
                     auto [comp_x, comp_y, comp_t] = comp.value();
-                    cv::putText(compensated_frame, "Freq: " + std::to_string(bins[bin_index].getHz()) + " Rad/s",
+                    cv::putText(compensated_frame, "Freq: " + fp2str(bins[bin_index].getHz(), 1) + " Rad/s",
                                 cv::Point(10, 30),
                                 cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(255, 0, 255), 2);
                     auto [B, G, R] = color_map[bins[bin_index].getColor()];
                     auto cv_color = cv::Scalar(B, G, R);
-                    cv::circle(compensated_frame, cv::Point(comp_x, comp_y), 2, cv_color, -1);
+                    int amp_x = bins[bin_index].getAmplitudeX() + 1;
+                    int amp_y = bins[bin_index].getAmplitudeY() + 1;
+                    cv::circle(compensated_frame, cv::Point(comp_x, comp_y),
+                               std::min(std::max(std::abs(amp_x), std::abs(amp_y)), int(bin_w / 4)),
+                            cv_color,
+                            -1);
                     // compensated_frame.at<uchar>(comp_y, comp_x) = 255;
                 }
             }

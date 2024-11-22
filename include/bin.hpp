@@ -34,7 +34,7 @@ public:
             prev_time = t;
             return comp;
         }
-        if (counter > 1) { // 100
+        if (counter > 1000) { // 100
             mean_x_out = mean_x / counter;
             mean_y_out = mean_y / counter;
             mean_t_out = mean_t / counter;
