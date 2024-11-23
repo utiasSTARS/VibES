@@ -56,7 +56,7 @@ public:
             prev_time = t;
         }
 
-        if (t - prev_time < 0.00001) {
+        if (t - prev_time < 0.000'001) {
             mean_x += x;
             mean_y += y;
             mean_t += t;
@@ -126,7 +126,8 @@ public:
         main_freq_t = freqs_t[peakIndex];
         phase_shift = std::arg(outXY[peakIndex]);
 
-        std::cout << "Estimated Frequency for X: " << main_freq_t << " Hz, " << Hz2rad<double>(main_freq_t) << " rad/s"
+        std::cout << "Estimated Frequency for X: " << main_freq_t << " rad/s, " << rad2Hz<double>(main_freq_t)
+                  << " Hz"
                   << std::endl;
         std::cout << "Amplitude: " << maxMagnitude / N << ", Phase Shift: " << phase_shift << " rad" << std::endl;
 

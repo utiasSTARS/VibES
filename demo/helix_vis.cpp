@@ -40,7 +40,7 @@ int main(int argc, char *argv[]) {
         int target_freq = 700;
         std::cout << "No file provided. Using simulator with freq " << target_freq << " rad/s, " << rad2Hz(target_freq)
                   << " Hz" << std::endl;
-        reader = std::make_unique<EventsFreqCalibPattern>(0, cv::Size(640, 480), target_freq, 4, 3, .001, false);
+        reader = std::make_unique<EventsFreqCalibPattern>(0, cv::Size(640, 480), target_freq, 5, 5, 0., false);
     }
 
     cv::Size resolution = reader->getEventResolution().value();
@@ -61,7 +61,6 @@ int main(int argc, char *argv[]) {
     accumulator.setEventContribution(0.25f);
     accumulator.setIgnorePolarity(false);
 
-
     dv::EdgeMapAccumulator comp_accumulator(resolution);
     comp_accumulator.setNeutralPotential(0.5f);
     comp_accumulator.setEventContribution(0.25f);
@@ -75,7 +74,12 @@ int main(int argc, char *argv[]) {
 
     // read the events
     bool estimate_freq = true;
+    int skip = 0;
     while (reader->isRunning() && estimate_freq) {
+        if (skip < 100) { // skip the first 100 samples
+            skip++;
+            continue;
+        }
         if (const auto events = reader->getNextEventBatch(); events.has_value()) {
             for (const auto &event: events.value()) {
                 if (fourierFreqEst.feed(event.x(), event.y(), event.timestamp() / 1e6)) {
@@ -107,7 +111,7 @@ int main(int argc, char *argv[]) {
             double c_y = i * bin_h + bin_h / 2;
             // process noise and measurement noise are set to 0.1
             // using the last 2 samples as window
-            bins.emplace_back(3, 0.1, 0.1, estimated_freq, c_x, c_y, -phase_shift, amplitude);
+            bins.emplace_back(3, 0.1, 0.1, estimated_freq, c_x, c_y, phase_shift, amplitude);
         }
     }
 
@@ -117,6 +121,14 @@ int main(int argc, char *argv[]) {
             cv::rectangle(compensated_frame, cv::Rect(j * bin_w, i * bin_h, bin_w, bin_h), cv::Scalar(255, 255, 255));
         }
     }
+
+    // draw helix model in bin
+    // for (int i = 0; i < 1000; i++) {
+    //     auto [est_x, est_y] = bins[0].estimate(i / 10.0);
+    //     vis.addPoint(est_x, est_y, i / 10.0, 0.1, 0.1, 1.0);
+    //     vis.update();
+    // }
+    // vis.loop();
 
     // track the bins
     while (reader->isRunning()) {
@@ -133,17 +145,26 @@ int main(int argc, char *argv[]) {
                 auto comp = bins[bin_index].update(static_cast<double>(event.x()), static_cast<double>(event.y()),
                                                    event.timestamp() / 1e6);
                 if (comp.has_value()) {
-                    // std::cout << bins[bin_index] << std::endl;
+                    std::cout << "\r" << bins[bin_index] << std::endl;
+                    std::cout.flush();
                     // clean the compensated frame in the bin region
                     cv::Mat roi = compensated_frame(cv::Rect(bin_col * bin_w, bin_row * bin_h, bin_w, bin_h));
                     roi.setTo(cv::Scalar(0, 0, 0));
 
                     // add mean vals
                     auto [mean_x, mean_y, mean_t] = bins[bin_index].getMean();
-                    vis.addPoint(mean_x, mean_y, mean_t, 0);
+                    // std::cout << mean_x << " " << mean_y << " " << mean_t << std::endl;
+                    vis.addPoint(mean_x, mean_y, mean_t, 0.1, 1.0);
+
+                    // estimated curve
+                    auto [est_x, est_y] = bins[bin_index].getEKF()->getPred();
+                    vis.addPoint(est_x, est_y, mean_t, 0.1, 0.1, 1.0);
+
+                    // print mean vals on image
+                    compensated_frame.at<cv::Vec3b>(mean_y, mean_x) = cv::Vec3b(255, 255, 255);
 
                     auto [comp_x, comp_y, comp_t] = comp.value();
-                    cv::putText(compensated_frame, "Freq: " + fp2str(bins[bin_index].getHz(), 1) + " Rad/s",
+                    cv::putText(compensated_frame, "Freq: " + fp2str(bins[bin_index].getRad(), 1) + " Rad/s",
                                 cv::Point(10, 30),
                                 cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(255, 0, 255), 2);
                     auto [B, G, R] = color_map[bins[bin_index].getColor()];

@@ -32,9 +32,9 @@ public:
         vis->DestroyVisualizerWindow();
     }
 
-    void addPoint(double x, double y, double z, bool polarity) {
+    void addPoint(double x, double y, double z,  double r=0.1, double g=0.1, double b=0.1) {
         point_cloud->points_.emplace_back(x, y, z);
-        point_cloud->colors_.emplace_back(0.1, 0.1, polarity);
+        point_cloud->colors_.emplace_back(r, g, b);
     }
 
     void update() {

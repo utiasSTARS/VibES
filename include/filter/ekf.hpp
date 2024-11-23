@@ -18,7 +18,7 @@ public:
         int state_dim = 8;
         I = Eigen::MatrixXd::Identity(state_dim, state_dim);
         F = Eigen::MatrixXd::Identity(state_dim, state_dim);
-        P = Eigen::MatrixXd::Identity(state_dim, state_dim) * 1000.; // Initial covariance matrix
+        P = Eigen::MatrixXd::Identity(state_dim, state_dim) * 10.; // Initial covariance matrix
         Q = Eigen::MatrixXd::Identity(state_dim, state_dim) * process_noise;
         R = Eigen::MatrixXd::Identity(2 * n_samples, 2 * n_samples) * measurement_noise;
 
@@ -27,10 +27,10 @@ public:
     }
 
     void initialize(double omega, double A, double phi, double C_x, double C_y) {
-        A_x = A * std::cos(0.1 + phi);
-        B_x = A * std::sin(0.1 + phi);
-        A_y = A * std::cos(0.1);
-        B_y = A * std::sin(0.1);
+        A_x = A * std::sin(0.);
+        B_x = A * std::cos(0.);
+        A_y = A * std::sin(phi + M_PI / 2.);
+        B_y = A * std::cos(phi + M_PI / 2.);
         this->C_x = C_x;
         this->C_y = C_y;
         this->omega = omega;
@@ -57,6 +57,10 @@ public:
         return std::make_tuple(static_cast<int>(C_x), static_cast<int>(C_y), static_cast<int64_t>(t * 1e6));
     }
 
+    [[nodiscard]] std::tuple<double, double> getPred() const {
+        return std::make_tuple(x_pred, y_pred);
+    }
+
     void windowedEKF() {
         for (int i = 0; i < n_samples; i++) {
             auto [x, y, t] = window_data[i];
@@ -65,8 +69,8 @@ public:
             theta = wrap_phase(theta + omega * delta_t); // Phase update
             prev_t = t;
 
-            double x_pred = A_x * std::sin(theta) + B_x * std::cos(theta) + C_x;
-            double y_pred = A_y * std::sin(theta) + B_y * std::cos(theta) + C_y;
+            x_pred = A_x * std::sin(theta) + B_x * std::cos(theta) + C_x;
+            y_pred = A_y * std::sin(theta) + B_y * std::cos(theta) + C_y;
 
             residuals(2 * i) = x - x_pred;
             residuals(2 * i + 1) = y - y_pred;
@@ -186,6 +190,8 @@ private:
         }
         return phase;
     }
+
+    double x_pred, y_pred;
 };
 
 // double EKF::omega = 1.0;

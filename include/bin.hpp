@@ -18,23 +18,28 @@ public:
         ekf = std::make_shared<EKF>(n_samples, process_noise, measurement_noise);
         // double omega, double A, double phi, double C_x, double C_y
         ekf->initialize(target_omega, amplitude, phase_shift, c_x, c_y);
+
+        estimated_sampling_time = 1. / (2 * rad2Hz(target_omega) + 1); // in s
     }
 
     std::optional<std::tuple<int, int, int64_t>> update(double x, double y, double t) {
         std::optional<std::tuple<int, int, int64_t>> comp;
+        if (first_time == 0) {
+            first_time = t;
+        }
         if (prev_time == 0) {
             prev_time = t;
         }
 
-        if (t - prev_time < 0.00001) {
+        if (t - prev_time < estimated_sampling_time) {
             mean_x += x;
             mean_y += y;
             mean_t += t;
             counter += 1;
-            prev_time = t;
+            // prev_time = t;
             return comp;
         }
-        if (counter > 1000) { // 100
+        if (counter > 1) { // 100
             mean_x_out = mean_x / counter;
             mean_y_out = mean_y / counter;
             mean_t_out = mean_t / counter;
@@ -52,6 +57,12 @@ public:
 
     std::tuple<double, double, double> getMean() {
         return std::make_tuple(mean_x_out, mean_y_out, mean_t_out);
+    }
+
+    std::tuple<double, double> estimate(double t) {
+        return std::make_tuple(
+                ekf->getAmplX() * std::sin(ekf->getRadS() * (t - first_time) + ekf->getPhaseX()) + ekf->getShiftX(),
+                ekf->getAmplY() * std::sin(ekf->getRadS() * (t - first_time) + ekf->getPhaseY()) + ekf->getShiftY());
     }
 
     [[nodiscard]] std::optional<std::tuple<int, int>> compensate(int x, int y, double t) const {
@@ -122,6 +133,7 @@ private:
     std::shared_ptr<EKF> ekf;
     const int64_t bin_id;
     static int64_t bin_counter;
+    double first_time = 0;
 
     double prev_time = 0;
     double mean_x = 0;
@@ -136,6 +148,8 @@ private:
     double target_omega;
     Colors colors = BLUE;
     bool updated = false;
+
+    double estimated_sampling_time = 0;
 
 };
 
