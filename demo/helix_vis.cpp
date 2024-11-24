@@ -99,20 +99,18 @@ int main(int argc, char *argv[]) {
 
 
     // initiailize the NUFFT to estimate the frequency
-    std::vector<std::shared_ptr<FourierFreqEst>> fourier_ptrs;
-    for (int i = 0; i < num_bins_h * num_bins_w; i++) {
-        fourier_ptrs.push_back(std::make_shared<FourierFreqEst>(1000, 500, 900));
-    }
-    std::vector<double> estimated_freqs(num_bins_h * num_bins_w, 0);
-    std::vector<double> phase_shifts(num_bins_h * num_bins_w, 0);
-    std::vector<double> amplitudes(num_bins_h * num_bins_w, 0);
+    FourierFreqEst fourier(1000, 500, 900);
+
+    double estimated_freq = 0;
+    double phase_shift = 0;
+    double amplitude = 0;
 
     // read the events
-    int estimate_freq = 0;
+    bool estimate_freq = true;
     int skip = 0;
     dv::EventStore events;
     int64_t starting_timestamp_boot = 0;
-    while (reader->isRunning() && estimate_freq < 1000) {
+    while (reader->isRunning() && estimate_freq) {
         if (skip < 10) { // skip the first 10 samples
             skip++;
             continue;
@@ -127,20 +125,16 @@ int main(int argc, char *argv[]) {
                 if (starting_timestamp_boot == 0) {
                     starting_timestamp_boot = event.timestamp();
                 }
-                int bin_row = static_cast<int>(event.y() / bin_h);
-                int bin_col = static_cast<int>(event.x() / bin_w);
-                int bin_index = bin_row * num_bins_w + bin_col;
 
-                if (fourier_ptrs[bin_index]->feed(event.x(), event.y(),
-                                                  double(event.timestamp() - starting_timestamp_boot) / 1e6)) {
-                    estimated_freqs[bin_index] = fourier_ptrs[bin_index]->getMainFreqRad();
-                    phase_shifts[bin_index] = fourier_ptrs[bin_index]->getPhaseShift();
-                    amplitudes[bin_index] = fourier_ptrs[bin_index]->getAmplitude();
-                    // estimate_freq++;
+                if (fourier.feed(event.x(), event.y(),
+                                 event.timestamp() / 1e6)) {
+                    estimated_freq = fourier.getMainFreqRad();
+                    phase_shift = fourier.getPhaseShift();
+                    amplitude = fourier.getAmplitude();
+                    estimate_freq = false;
                 }
             }
         }
-        estimate_freq++;
     }
 
 
@@ -150,9 +144,6 @@ int main(int argc, char *argv[]) {
             double c_y = i * bin_h + bin_h / 2;
             // process noise and measurement noise are set to 0.1
             // using the last 2 samples as window
-            auto estimated_freq = estimated_freqs[i * num_bins_w + j];
-            auto phase_shift = phase_shifts[i * num_bins_w + j];
-            auto amplitude = amplitudes[i * num_bins_w + j];
             bins.emplace_back(3, 0.1, 0.1, estimated_freq, c_x, c_y, phase_shift, amplitude);
         }
     }
@@ -169,14 +160,6 @@ int main(int argc, char *argv[]) {
         }
     };
     drawGridLines();
-
-    // draw helix model in bin
-    // for (int i = 0; i < 1000; i++) {
-    //     auto [est_x, est_y] = bins[0].estimate(i / 10.0);
-    //     vis.addPoint(est_x, est_y, i / 10.0, 0.1, 0.1, 1.0);
-    //     vis.update();
-    // }
-    // vis.loop();
 
     // track the bins
     int64_t starting_timestamp = 0;
@@ -200,7 +183,7 @@ int main(int argc, char *argv[]) {
                 int bin_index = bin_row * num_bins_w + bin_col;
 
                 auto comp = bins[bin_index].update(static_cast<double>(event.x()), static_cast<double>(event.y()),
-                                                   double(event.timestamp() - starting_timestamp) / 1e6);
+                                                   static_cast<double>(event.timestamp() - starting_timestamp) / 1e6);
                 if (comp.has_value()) {
                     // std::cout << "\r" << bins[bin_index] << std::endl;
                     std::cout.flush();
@@ -225,7 +208,7 @@ int main(int argc, char *argv[]) {
                     //             cv::Point(10, 30),
                     //             cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(255, 0, 255), 2);
                     cv::putText(
-                            compensated_frame, "f:" + fp2str(bins[bin_index].getHz(), 1) + "rad/s",
+                            compensated_frame, "f:" + fp2str(bins[bin_index].getRad(), 1) + " rad/s",
                             cv::Point(5 + bin_col * (bin_w + 1), 30 + bin_row * (bin_h + 1)),
                             cv::FONT_HERSHEY_SIMPLEX, .5, cv::Scalar(255, 0, 255), 1, cv::LINE_AA);
                     drawGridLines();

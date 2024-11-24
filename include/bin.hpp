@@ -24,7 +24,7 @@ public:
 
     std::optional<std::tuple<int, int, int64_t>> update(double x, double y, double t) {
         std::optional<std::tuple<int, int, int64_t>> comp;
-        if (first_time == 0) {
+        if (first_time == -1) {
             first_time = t;
         }
         t -= first_time;
@@ -134,7 +134,7 @@ private:
     std::shared_ptr<EKF> ekf;
     const int64_t bin_id;
     static int64_t bin_counter;
-    double first_time = 0;
+    double first_time = -1;
 
     double prev_time = 0;
     double mean_x = 0;

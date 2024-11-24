@@ -52,7 +52,7 @@ public:
     }
 
     bool feed(double x, double y, double t) {
-        if (prev_time == 0) {
+        if (prev_time == -1) {
             prev_time = t;
         }
 
@@ -186,7 +186,7 @@ private:
 
     std::vector<double> magnitudes;
 
-    double prev_time = 0;
+    double prev_time = -1;
     double mean_x = 0;
     double mean_y = 0;
     double mean_t = 0;
