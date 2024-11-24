@@ -27,6 +27,7 @@ public:
         if (first_time == 0) {
             first_time = t;
         }
+        t -= first_time;
         if (prev_time == 0) {
             prev_time = t;
         }

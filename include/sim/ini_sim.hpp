@@ -82,6 +82,15 @@ public:
         return std::nullopt;
     }
 
+    void shiftX(double x) {
+        shift_x = x;
+    }
+
+    void shiftY(double y) {
+        shift_y = y;
+    }
+
+
     void stop() {
         running = false;
     }
@@ -92,8 +101,8 @@ public:
 
         while (time_all < 10'000) {  // Generate events for 10 ms
             double angle = omega * static_cast<double>(timestamp) / 1e6 + phi;
-            auto d_x = static_cast<int16_t>(amplitude_x * std::sin(angle));
-            auto d_y = static_cast<int16_t>(amplitude_y * std::cos(angle));
+            auto d_x = static_cast<int16_t>(amplitude_x * std::sin(angle)) + shift_x;
+            auto d_y = static_cast<int16_t>(amplitude_y * std::cos(angle)) + shift_y;
             // Generate events for both lines
             for (const auto &line: {vertical_line, horizontal_line}) {
                 bool is_vertical = line.size() == vertical_line.size();
@@ -138,6 +147,8 @@ private:
     double amplitude_x = 0, amplitude_y = 0;
 
     int vertical_x = 0, horizontal_y = 0;
+
+    double shift_x = 0, shift_y = 0;
 
     std::vector<EventStruct> vertical_line, horizontal_line;
 

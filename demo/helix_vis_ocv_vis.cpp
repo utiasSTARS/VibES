@@ -8,7 +8,6 @@
 #include <dv-processing/io/camera_capture.hpp>
 #include <dv-processing/camera/calibration_set.hpp>
 
-
 #include "../include/utils.hpp"
 #include "../include/nufourier.hpp"
 #include "../include/bin.hpp"
@@ -17,7 +16,7 @@
 
 // Main example function
 int main(int argc, char *argv[]) {
-    bool NO_SIM = true;
+
     std::unique_ptr<dv::io::CameraInputBase> reader;
     if (argc >= 2) {
         std::string arg1 = argv[1];
@@ -37,27 +36,10 @@ int main(int argc, char *argv[]) {
             reader = std::make_unique<dv::io::MonoCameraRecording>(arg1);
         }
     } else {
-        NO_SIM = false;
         int target_freq = 700;
         std::cout << "No file provided. Using simulator with freq " << target_freq << " rad/s, " << rad2Hz(target_freq)
                   << " Hz" << std::endl;
         reader = std::make_unique<EventsFreqCalibPattern>(0, cv::Size(640, 480), target_freq, 5, 5, 0., false);
-    }
-
-    // if not simulation try to laod the camera calibration
-    std::shared_ptr<dv::camera::CameraGeometry> geometry;
-    if (NO_SIM) {
-        const auto calibrationSet = dv::camera::CalibrationSet::LoadFromFile("../camera/calib.xml");
-        dv::camera::calibrations::CameraCalibration dvx_calib;
-
-        if (calibrationSet.getCameraList().size() > 0) {
-            const auto calibs = calibrationSet.getCameraCalibrations();
-            dvx_calib = calibs.begin()->second;
-            std::cout << "Found calibration for camera with name [" << dvx_calib.name << "]" <<
-                      std::endl;
-        }
-
-        geometry = std::make_shared<dv::camera::CameraGeometry>(dvx_calib.getCameraGeometry());
     }
 
     cv::Size resolution = reader->getEventResolution().value();
@@ -66,11 +48,50 @@ int main(int argc, char *argv[]) {
     // visualization tool
     cv::namedWindow("Standard", cv::WINDOW_NORMAL);
     cv::namedWindow("Compensated", cv::WINDOW_NORMAL);
+    cv::namedWindow("Slider", cv::WINDOW_NORMAL);
     // specify window size
     cv::resizeWindow("Standard", resolution.width, resolution.height);
     cv::resizeWindow("Compensated", resolution.width, resolution.height);
 
     cv::Mat compensated_frame = cv::Mat::zeros(resolution, CV_8UC3);
+
+    // add trackebar to shift x and y axis
+
+    if (dynamic_cast<EventsFreqCalibPattern *>(reader.get())) {
+        // Lambda function for the callback
+        auto callback = [](int, void *userdata) {
+            auto *handler = static_cast<EventsFreqCalibPattern *>(userdata);
+            // Get the current slider positions
+            int x_shift = cv::getTrackbarPos("X Shift", "Slider");
+            int y_shift = cv::getTrackbarPos("Y Shift", "Slider");
+
+            handler->shiftX(x_shift);
+            handler->shiftY(y_shift);
+
+            std::cout << "X Shift: " << x_shift << ", Y Shift: " << y_shift << std::endl;
+
+        };
+
+        // Initialize the trackbars with the starting values (half of the image size)
+        cv::createTrackbar("X Shift", "Slider", NULL, resolution.width, callback, reader.get());
+        cv::createTrackbar("Y Shift", "Slider", NULL, resolution.height, callback, reader.get());
+
+    }
+
+    cv::imshow("Slider", compensated_frame);
+    cv::waitKey(1);
+
+    // Main loop
+    // while (reader->isRunning()) {
+    //     if (const auto events = reader->getNextEventBatch(); events.has_value()) {
+    //         // Process events and update compensated_frame
+    //         // (your event processing and frame update logic here)
+//
+    //         // Update the window and trackbars
+    //         cv::imshow("Compensated", compensated_frame);  // Update the frame display
+    //         cv::waitKey(1);  // Allow trackbar callback to be triggered
+    //     }
+    // }
 
     // create accumulator
     dv::EdgeMapAccumulator accumulator(resolution);
@@ -86,6 +107,30 @@ int main(int argc, char *argv[]) {
     // open3d vis
     Open3DVisualizer vis;
 
+    // initiailize the NUFFT to estimate the frequency
+    FourierFreqEst fourierFreqEst(1000, 500, 900);
+
+    // read the events
+    bool estimate_freq = true;
+    int skip = 0;
+    while (reader->isRunning() && estimate_freq) {
+        if (skip < 100) { // skip the first 100 samples
+            skip++;
+            continue;
+        }
+        if (const auto events = reader->getNextEventBatch(); events.has_value()) {
+            for (const auto &event: events.value()) {
+                if (fourierFreqEst.feed(event.x(), event.y(), event.timestamp() / 1e6)) {
+                    estimate_freq = false;
+                }
+            }
+        }
+    }
+
+    double estimated_freq = fourierFreqEst.getMainFreqRad();
+    double phase_shift = fourierFreqEst.getPhaseShift();
+    double amplitude = fourierFreqEst.getAmplitude();
+
     // create the bins for tracking regions in the image plane
     std::vector<Bin> bins;
     int bin_h = 160, bin_w = 128;
@@ -97,78 +142,22 @@ int main(int argc, char *argv[]) {
     int num_bins_h = resolution.height / bin_h;
     int num_bins_w = resolution.width / bin_w;
 
-
-    // initiailize the NUFFT to estimate the frequency
-    std::vector<std::shared_ptr<FourierFreqEst>> fourier_ptrs;
-    for (int i = 0; i < num_bins_h * num_bins_w; i++) {
-        fourier_ptrs.push_back(std::make_shared<FourierFreqEst>(1000, 500, 900));
-    }
-    std::vector<double> estimated_freqs(num_bins_h * num_bins_w, 0);
-    std::vector<double> phase_shifts(num_bins_h * num_bins_w, 0);
-    std::vector<double> amplitudes(num_bins_h * num_bins_w, 0);
-
-    // read the events
-    int estimate_freq = 0;
-    int skip = 0;
-    dv::EventStore events;
-    int64_t starting_timestamp_boot = 0;
-    while (reader->isRunning() && estimate_freq < 1000) {
-        if (skip < 10) { // skip the first 10 samples
-            skip++;
-            continue;
-        }
-        if (const auto events_dist = reader->getNextEventBatch(); events_dist.has_value()) {
-            if (NO_SIM) {
-                events = geometry->undistortEvents(events_dist.value());
-            } else {
-                events = events_dist.value();
-            }
-            for (const auto &event: events) {
-                if (starting_timestamp_boot == 0) {
-                    starting_timestamp_boot = event.timestamp();
-                }
-                int bin_row = static_cast<int>(event.y() / bin_h);
-                int bin_col = static_cast<int>(event.x() / bin_w);
-                int bin_index = bin_row * num_bins_w + bin_col;
-
-                if (fourier_ptrs[bin_index]->feed(event.x(), event.y(),
-                                                  double(event.timestamp() - starting_timestamp_boot) / 1e6)) {
-                    estimated_freqs[bin_index] = fourier_ptrs[bin_index]->getMainFreqRad();
-                    phase_shifts[bin_index] = fourier_ptrs[bin_index]->getPhaseShift();
-                    amplitudes[bin_index] = fourier_ptrs[bin_index]->getAmplitude();
-                    // estimate_freq++;
-                }
-            }
-        }
-        estimate_freq++;
-    }
-
-
     for (int i = 0; i < num_bins_h; i++) {
         for (int j = 0; j < num_bins_w; j++) {
             double c_x = j * bin_w + bin_w / 2;
             double c_y = i * bin_h + bin_h / 2;
             // process noise and measurement noise are set to 0.1
             // using the last 2 samples as window
-            auto estimated_freq = estimated_freqs[i * num_bins_w + j];
-            auto phase_shift = phase_shifts[i * num_bins_w + j];
-            auto amplitude = amplitudes[i * num_bins_w + j];
             bins.emplace_back(3, 0.1, 0.1, estimated_freq, c_x, c_y, phase_shift, amplitude);
         }
     }
 
-    // draw bins lines on compensated_frame
-    auto drawGridLines = [&]() {
-        for (int i = 1; i < resolution.height / bin_h; i++) {
-            int y = i * bin_h;
-            cv::line(compensated_frame, cv::Point(0, y), cv::Point(resolution.width, y), cv::Scalar(100, 100, 100), 1);
+    // write bins lines on compensated_frame
+    for (int i = 0; i < num_bins_h; i++) {
+        for (int j = 0; j < num_bins_w; j++) {
+            cv::rectangle(compensated_frame, cv::Rect(j * bin_w, i * bin_h, bin_w, bin_h), cv::Scalar(255, 255, 255));
         }
-        for (int j = 1; j < resolution.width / bin_w; j++) {
-            int x = j * bin_w;
-            cv::line(compensated_frame, cv::Point(x, 0), cv::Point(x, resolution.height), cv::Scalar(100, 100, 100), 1);
-        }
-    };
-    drawGridLines();
+    }
 
     // draw helix model in bin
     // for (int i = 0; i < 1000; i++) {
@@ -179,19 +168,10 @@ int main(int argc, char *argv[]) {
     // vis.loop();
 
     // track the bins
-    int64_t starting_timestamp = 0;
     while (reader->isRunning()) {
-        if (const auto events_dist = reader->getNextEventBatch(); events_dist.has_value()) {
-            if (NO_SIM) {
-                events = geometry->undistortEvents(events_dist.value());
-            } else {
-                events = events_dist.value();
-            }
-            accumulator.accumulate(events);
-            for (const auto &event: events) {
-                if (starting_timestamp == 0) {
-                    starting_timestamp = event.timestamp();
-                }
+        if (const auto events = reader->getNextEventBatch(); events.has_value()) {
+            accumulator.accumulate(events.value());
+            for (const auto &event: events.value()) {
 
                 int bin_row = static_cast<int>(event.y() / bin_h);
                 int bin_col = static_cast<int>(event.x() / bin_w);
@@ -200,9 +180,9 @@ int main(int argc, char *argv[]) {
                 int bin_index = bin_row * num_bins_w + bin_col;
 
                 auto comp = bins[bin_index].update(static_cast<double>(event.x()), static_cast<double>(event.y()),
-                                                   double(event.timestamp() - starting_timestamp) / 1e6);
+                                                   event.timestamp() / 1e6);
                 if (comp.has_value()) {
-                    // std::cout << "\r" << bins[bin_index] << std::endl;
+                    std::cout << "\r" << bins[bin_index] << std::endl;
                     std::cout.flush();
                     // clean the compensated frame in the bin region
                     cv::Mat roi = compensated_frame(cv::Rect(bin_col * bin_w, bin_row * bin_h, bin_w, bin_h));
@@ -211,24 +191,19 @@ int main(int argc, char *argv[]) {
                     // add mean vals
                     auto [mean_x, mean_y, mean_t] = bins[bin_index].getMean();
                     // std::cout << mean_x << " " << mean_y << " " << mean_t << std::endl;
-                    vis.addPoint(mean_x, mean_y, mean_t * 100, 0.1, 1.0);
+                    vis.addPoint(mean_x, mean_y, mean_t, 0.1, 1.0);
 
                     // estimated curve
                     auto [est_x, est_y] = bins[bin_index].getEKF()->getPred();
-                    vis.addPoint(est_x, est_y, mean_t * 100, 0.1, 0.1, 1.0);
+                    vis.addPoint(est_x, est_y, mean_t, 0.1, 0.1, 1.0);
 
                     // print mean vals on image
                     compensated_frame.at<cv::Vec3b>(mean_y, mean_x) = cv::Vec3b(255, 255, 255);
 
                     auto [comp_x, comp_y, comp_t] = comp.value();
-                    // cv::putText(compensated_frame, "Freq: " + fp2str(bins[bin_index].getRad(), 1) + " Rad/s",
-                    //             cv::Point(10, 30),
-                    //             cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(255, 0, 255), 2);
-                    cv::putText(
-                            compensated_frame, "f:" + fp2str(bins[bin_index].getHz(), 1) + "rad/s",
-                            cv::Point(5 + bin_col * (bin_w + 1), 30 + bin_row * (bin_h + 1)),
-                            cv::FONT_HERSHEY_SIMPLEX, .5, cv::Scalar(255, 0, 255), 1, cv::LINE_AA);
-                    drawGridLines();
+                    cv::putText(compensated_frame, "Freq: " + fp2str(bins[bin_index].getRad(), 1) + " Rad/s",
+                                cv::Point(10, 30),
+                                cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(255, 0, 255), 2);
                     auto [B, G, R] = color_map[bins[bin_index].getColor()];
                     auto cv_color = cv::Scalar(B, G, R);
                     int amp_x = bins[bin_index].getAmplitudeX() + 1;
@@ -241,12 +216,12 @@ int main(int argc, char *argv[]) {
             }
             cv::imshow("Standard", accumulator.generateFrame().image);
             cv::imshow("Compensated", compensated_frame);
+            cv::imshow("Slider", compensated_frame);
             cv::waitKey(1);
             vis.update();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 
-    vis.loop();
     return 0;
 }
