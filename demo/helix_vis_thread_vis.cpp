@@ -206,7 +206,7 @@ int main(int argc, char *argv[]) {
             std::cout << "\rLoop frequency: " << frequency << " Hz";
             std::cout.flush();
 
-            // vis->update();
+            vis->update();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
