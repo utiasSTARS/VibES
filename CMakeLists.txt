@@ -37,6 +37,8 @@ target_link_libraries(project PRIVATE Open3D::Open3D finufft dv::processing)
 add_executable(helix_vis demo/helix_vis.cpp)
 target_link_libraries(helix_vis PRIVATE Open3D::Open3D finufft dv::processing)
 
+add_executable(helix_vis_thread demo/helix_vis_thread.cpp)
+target_link_libraries(helix_vis_thread PRIVATE Open3D::Open3D finufft dv::processing)
 
 add_executable(helix_vis_ocv_vis demo/helix_vis_ocv_vis.cpp)
 target_link_libraries(helix_vis_ocv_vis PRIVATE Open3D::Open3D finufft dv::processing)
