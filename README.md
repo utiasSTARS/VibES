@@ -2,7 +2,7 @@
 
 ## Run using Docker
 
-Make sure to have Docker installed on your machine.
+Make sure to have [Docker](https://docs.docker.com/engine/install/) installed on your machine.
 
 To build the Docker image, run the following command in the root directory of the project:
 
