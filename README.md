@@ -13,7 +13,7 @@ docker build -t harmeda .
 To run the Docker container, run the following command:
 
 ```bash
-docker run --net=host --rm --privileged -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix --gpus all -it harmeda
+docker run --net=host --rm --privileged -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix -it harmeda
 ```
 
 To run different scripts pass the following arguments to the `docker run` command:
