@@ -26,11 +26,7 @@ find_package(Open3D REQUIRED)
 
 include_directories(${EIGEN3_INCLUDE_DIR} ${TORCH_INCLUDE_DIRS})
 
-
 include(tests/CMakeLists.txt)
-
-add_executable(helix_vis demo/helix_vis.cpp)
-target_link_libraries(helix_vis PRIVATE Open3D::Open3D finufft dv::processing)
 
 add_executable(helix_vis_thread demo/helix_vis_thread.cpp)
 target_link_libraries(helix_vis_thread PRIVATE Open3D::Open3D finufft dv::processing)
