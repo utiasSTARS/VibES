@@ -17,6 +17,7 @@
 
 // Main example function
 int main(int argc, char *argv[]) {
+    std::cout << "\033[1;31mThis is a demo for the HARMEDA project.\nPress ESC to close the windows.\033[0m" << std::endl;
     bool NO_SIM = true;
     std::unique_ptr<dv::io::CameraInputBase> reader;
     if (argc >= 2) {
@@ -195,6 +196,14 @@ int main(int argc, char *argv[]) {
             cv::imshow("Standard", accumulator.generateFrame().image);
             cv::imshow("Compensated", compensated_frame);
             cv::waitKey(1);
+
+            if (cv::waitKey(1) == 27) {
+                // stop and exit
+                for (auto &bin: bins) {
+                    bin->stop();
+                }
+                return 0;
+            }
 
             // Measure the time elapsed for this loop iteration
             auto end_time = std::chrono::high_resolution_clock::now();
