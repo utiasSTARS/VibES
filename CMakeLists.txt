@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CUDA_STANDARD 17)
 
 include(cmake/CPM.cmake)
+
 # short version
 CPMAddPackage("gh:flatironinstitute/finufft@2.3.1")
 
@@ -25,6 +26,7 @@ find_package(Open3D REQUIRED)
 #find_package(FFTW3 REQUIRED)
 
 include_directories(${EIGEN3_INCLUDE_DIR} ${TORCH_INCLUDE_DIRS})
+include_directories(${PROJECT_SOURCE_DIR}/include)
 
 include(tests/CMakeLists.txt)
 
