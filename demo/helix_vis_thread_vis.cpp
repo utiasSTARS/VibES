@@ -9,11 +9,11 @@
 #include <dv-processing/camera/calibration_set.hpp>
 
 
-#include "../include/utils.hpp"
-#include "../include/nufourier.hpp"
-#include "../include/bin_thread.hpp"
-#include "../include/sim/ini_sim.hpp"
-#include "../include/open3d_visualizer.hpp"
+#include "utils.hpp"
+#include "nufourier.hpp"
+#include "bin_thread.hpp"
+#include "sim/ini_sim.hpp"
+#include "open3d_visualizer.hpp"
 
 // Main example function
 int main(int argc, char *argv[]) {
