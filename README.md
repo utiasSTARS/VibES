@@ -53,11 +53,11 @@ See [Run Arguments](#run-arguments) for more options.
 
 To run different scripts in the project, run the following commands:
 
-- ./helix_vis_thread_vis
-- ./helix_vis_thread
+- `./helix_vis_thread_vis`
+- `./helix_vis_thread`
 
 To use the camera or a `aedat4` file as input, run the following commands:
 
-- ./helix_vis_thread_vis camera
-- ./helix_vis_thread /path/to/aedat4/file.aedat4
+- `./helix_vis_thread_vis camera`
+- `./helix_vis_thread /path/to/aedat4/file.aedat4`
 
