@@ -17,6 +17,13 @@ struct EventStruct {
     bool polarity;
 };
 
+enum EventRepresentation {
+    BINARY = 0,
+    COUNT = 1,
+    TS = 2,
+    AVERAGE_TS = 3
+};
+
 enum Colors {
     RED = 0,
     GREEN = 1,
@@ -83,9 +90,8 @@ interpolate_events(std::vector<std::tuple<double, double, int64_t>> &events,
 }
 
 
-template <typename T>
-std::string fp2str(const T a_value, const int n = 6)
-{
+template<typename T>
+std::string fp2str(const T a_value, const int n = 6) {
     std::ostringstream out;
     out.precision(n);
     out << std::fixed << a_value;

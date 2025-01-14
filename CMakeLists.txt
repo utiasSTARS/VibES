@@ -23,7 +23,6 @@ CPMAddPackage(
 find_package(Eigen3 REQUIRED)
 find_package(dv-processing REQUIRED)
 find_package(Open3D REQUIRED)
-#find_package(FFTW3 REQUIRED)
 
 include_directories(${EIGEN3_INCLUDE_DIR} ${TORCH_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR}/include)

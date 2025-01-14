@@ -6,46 +6,30 @@
 #include <vector>
 
 #include "sim/sinusoid_sim.hpp"
-#include "filter/ekf.hpp"
+#include "bin.hpp"
 
-std::tuple<double, double, double, double, double> testEKF(double amp, double freq, double phase)
-{
-  EKF ekf(1, 0.1, 0.1);
-  ekf.initialize(80., 1., 1., 1., 1.);
 
-  SinusoidSim<double> sim_x(amp, freq, phase);
-  SinusoidSim<double> sim_y(amp + 3, freq, phase);
+bool testBin(double freq_target, double freq) {
+    Bin bin(10, 0.1, 0.1, freq_target, 1., 1.);
 
-  double delta = 0.01;
+    SinusoidSim<double> sim_x(10, freq, 1., 10);
+    SinusoidSim<double> sim_y(10, freq, 1., 30);
 
-  for (int i = 0; i < 10'000; ++i) {
-    double t = i * delta;
-    double x = sim_x(t);
-    double y = sim_y(t);
-    ekf.update(x, y, t);
-  }
+    double delta = 1. / (2. * Hz2rad(freq) + 1.);
 
-  std::cout << ekf << std::endl;
-  // return the estimated parameters
-  return std::make_tuple(
-    ekf.getRadS(),
-    ekf.getAmplX(),
-    ekf.getAmplY(),
-    ekf.getPhaseX(),
-    ekf.getPhaseY());
+    for (int i = 0; i < 10'000; ++i) {
+        double t = i * delta;
+        double x = sim_x(t);
+        double y = sim_y(t);
+        bin.update(x, y, t);
+    }
+
+    std::cout << bin << std::endl;
+    // return the estimated parameters
+    return bin.is_stable();
 }
 
-TEST(EKF, Estimation) {
-  double amp = 4.0;
-  double freq = 100.0;
-  double phase = 1.0;
-
-  auto [omega, A_x, A_y, phi_x, phi_y] = testEKF(amp, freq, phase);
-
-  EXPECT_NEAR(omega, freq, 1.);
-  EXPECT_NEAR(A_x, amp, 1.);
-  EXPECT_NEAR(A_y, amp + 3, 1.);
-
-  EXPECT_NEAR(phi_x, phase, 1.);
-  EXPECT_NEAR(phi_y, phase, 1.);
+TEST(Bin, Estimation) {
+    EXPECT_TRUE(testBin(100., 100.));
+    EXPECT_FALSE(testBin(10., 15.));
 }
