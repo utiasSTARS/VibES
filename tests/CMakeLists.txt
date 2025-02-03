@@ -26,3 +26,15 @@ target_link_libraries(test_dvs_bins PRIVATE gtest_main dv::processing)
 
 add_executable(test_finuttf ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_finuttf.cpp)
 target_link_libraries(test_finuttf PRIVATE gtest_main dv::processing finufft)
+
+add_executable(test_centroid ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_centroid.cpp)
+target_link_libraries(test_centroid PRIVATE gtest_main dv::processing)
+
+add_executable(test_centroid_nufft ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_centroid_nufft.cpp)
+target_link_libraries(test_centroid_nufft PRIVATE gtest_main dv::processing finufft)
+
+add_executable(test_finuttf_standalone ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_finuttf_standalone.cpp)
+target_link_libraries(test_finuttf_standalone PRIVATE gtest_main dv::processing finufft)
+
+add_executable(test_centroid_nufft_ekf ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_centroid_nufft_ekf.cpp)
+target_link_libraries(test_centroid_nufft_ekf PRIVATE gtest_main dv::processing finufft)

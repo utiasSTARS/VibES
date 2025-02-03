@@ -54,27 +54,6 @@ void ev2img(std::vector<EventStruct> &events, cv::Mat &output, EventRepresentati
             throw std::runtime_error("Invalid Event Representation");
     }
 
-    double t0 = events[0].timestamp;
-
-
-    if (ev_rep == 0) {
-        image = eventBinary;
-    } else if (ev_rep == 1) {
-        eventCount.convertTo(eventCount, CV_8UC1);
-        cv::normalize(eventCount, eventCount, 0, 255, cv::NORM_MINMAX);
-        image = eventCount;
-    } else if (ev_rep == 2) {
-        cv::normalize(eventTS, eventTS, 0, 255, cv::NORM_MINMAX);
-        eventTS.convertTo(eventTS, CV_8UC1);
-        image = eventTS;
-    } else if (ev_rep == 3) {
-        cv::divide(eventSum, eventCount, img_avgts, 1.0f, CV_32FC1);
-        normalize(img_avgts, img_avgts, 0, 255, cv::NORM_MINMAX);
-        img_avgts.convertTo(img_avgts, CV_8UC1);
-        cv::medianBlur(img_avgts, img_avgts, 3);
-        image = img_avgts;
-    }
-
     cv::applyColorMap(image, output, cv::COLORMAP_JET);
 }
 

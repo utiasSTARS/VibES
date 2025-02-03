@@ -29,8 +29,8 @@ public:
     void initialize(double omega, double A, double phi, double C_x, double C_y) {
         A_x = A * std::sin(0.);
         B_x = A * std::cos(0.);
-        A_y = A * std::sin(phi + M_PI / 2.);
-        B_y = A * std::cos(phi + M_PI / 2.);
+        A_y = A * std::sin((phi == 0.0 ? M_PI / 2. : phi));
+        B_y = A * std::cos((phi == 0.0 ? M_PI / 2. : phi));
         this->C_x = C_x;
         this->C_y = C_y;
         this->omega = omega;
@@ -39,11 +39,12 @@ public:
     std::optional<std::tuple<int, int, int64_t>> update(double x, double y, double t) {
         if (prev_t == 0) {
             prev_t = t;
+            return std::nullopt;
         }
         window_data.emplace_back(x, y, t);
         if (window_data.size() > n_samples) {
             windowedEKF();
-            window_data.pop_front();
+            window_data.clear();
             return compensate(x, y, t);
         }
         return std::nullopt;
@@ -74,6 +75,7 @@ public:
 
             residuals(2 * i) = x - x_pred;
             residuals(2 * i + 1) = y - y_pred;
+            residuals_vec.emplace_back(x - x_pred, y - y_pred);
 
             // Jacobian computation
             H(2 * i, 0) = A_x * std::cos(theta) - B_x * std::sin(theta); // dx/dtheta
@@ -147,6 +149,10 @@ public:
         return wrap_phase(std::atan2(std::abs(B_y), std::abs(A_y)));
     }
 
+    std::vector<std::tuple<double, double>> getResiduals() {
+        return residuals_vec;
+    }
+
     friend std::ostream &operator<<(std::ostream &os, const EKF &ekf) {
         os << "omega: " << ekf.getRadS() << " rad/s, " << ekf.getHz() << " Hz, ";
         os << "Amplitude X: " << ekf.getAmplX() << " px, ";
@@ -181,7 +187,9 @@ private:
     Eigen::VectorXd residuals;
     Eigen::MatrixXd H;
 
-    double wrap_phase(double phase) const {
+    std::vector<std::tuple<double, double>> residuals_vec;
+
+    [[nodiscard]] double wrap_phase(double phase) const {
         while (phase > 2 * M_PI) {
             phase -= 2 * M_PI;
         }

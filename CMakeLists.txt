@@ -20,9 +20,11 @@ CPMAddPackage(
         SYSTEM
 )
 
+find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(dv-processing REQUIRED)
 find_package(Open3D REQUIRED)
+find_package(MetavisionSDK COMPONENTS core driver ui REQUIRED)
 
 include_directories(${EIGEN3_INCLUDE_DIR} ${TORCH_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR}/include)
@@ -34,3 +36,6 @@ target_link_libraries(helix_vis_thread PRIVATE Open3D::Open3D finufft dv::proces
 
 add_executable(helix_vis_thread_vis demo/helix_vis_thread_vis.cpp)
 target_link_libraries(helix_vis_thread_vis PRIVATE Open3D::Open3D finufft dv::processing)
+
+add_executable(motion_comp demo/motion_comp.cpp)
+target_link_libraries(motion_comp PRIVATE Open3D::Open3D finufft dv::processing)

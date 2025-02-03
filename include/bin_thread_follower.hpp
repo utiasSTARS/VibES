@@ -14,21 +14,21 @@
 #include <boost/lockfree/spsc_queue.hpp>
 #include <thread>
 
-class BinThread {
+class BinThreadFollower {
 
 public:
-    ~BinThread() {
+    ~BinThreadFollower() {
         stop();
     }
 
-    BinThread(int n_samples, cv::Mat &_image, std::shared_ptr<Open3DVisualizer> &_vis,
-              int _bin_w, int _bin_h,
-              double process_noise, double measurement_noise, double _target_omega,
-              double c_x,
-              double c_y,
-              double phase_shift = M_PI / 2, double amplitude = 1.)
+    BinThreadFollower(int n_samples, cv::Mat &_image, std::shared_ptr<Open3DVisualizer> &_vis,
+                      int _bin_w, int _bin_h,
+                      double process_noise, double measurement_noise, double _target_omega,
+                      double c_x,
+                      double c_y,
+                      double phase_shift = M_PI / 2, double amplitude = 1.)
             : bin_id(bin_counter++), target_omega(_target_omega), image{_image}, vis(_vis),
-              bin_w(_bin_w), bin_h(_bin_h) {
+              bin_w(_bin_w), bin_h(_bin_h), _bin_center_x(c_x), _bin_center_y(c_y) {
         ekf = std::make_shared<EKF>(n_samples, process_noise, measurement_noise);
         // double omega, double A, double phi, double C_x, double C_y
         ekf->initialize(target_omega, amplitude, phase_shift, c_x, c_y);
@@ -64,32 +64,39 @@ public:
                     int amp_x = getAmplitudeX(); // + 1;
                     int amp_y = getAmplitudeY(); // + 1;
 
-                    int bin_row = static_cast<int>(y / bin_h);
-                    int bin_col = static_cast<int>(x / bin_w);
+
+                    const auto left_x = _bin_center_x - bin_w / 2, top_y = _bin_center_y - bin_h / 2;
 
                     {
                         std::lock_guard<std::mutex> lock(mtx);
                         // thread safe
                         vis->addPoint(m_x, m_y, m_t * 100, 0.1, 1.0);
-                        vis->addPoint(est_x, est_y, mean_t * 100, 0.1, 0.1, 1.0);
+                        // vis->addPoint(est_x, est_y, mean_t * 100, 0.1, 0.1, 1.0);
+                        // vis->addPoint(getEKF()->getShiftX(), getEKF()->getShiftY(), mean_t * 100, 0.1, 0.1, 1.0);
 
-                        // cv::Mat roi = image(cv::Rect(bin_col * bin_w, bin_row * bin_h, bin_w, bin_h));
-                        // roi.setTo(cv::Scalar(0, 0, 0));
+                        // draw a rectangle indicating the bin, using bin center and bin width and height
+                        cv::rectangle(image,
+                                      cv::Rect(left_x, top_y, bin_w, bin_h),
+                                      cv::Scalar(0, 0, 255), 1);
+
                         cv::putText(
-                                image, "f:" + fp2str(getRad(), 1) + " rad/s",
-                                cv::Point(5 + bin_col * (bin_w + 1), 30 + bin_row * (bin_h + 1)),
+                                image, "f: " + fp2str(getHz(), 1) + " Hz",
+                                cv::Point(left_x, top_y + 10),
                                 cv::FONT_HERSHEY_SIMPLEX, .5, cv::Scalar(255, 0, 255), 1, cv::LINE_AA);
 
-                        // cv::circle(image, cv::Point(comp_x, comp_y),
-                        //            std::min(std::max(std::abs(amp_x), std::abs(amp_y)), int(bin_w / 4)),
-                        //            cv_color,
-                        //            -1);
+                        cv::circle(image, cv::Point(comp_x, comp_y),
+                                   std::min(std::max(std::abs(amp_x), std::abs(amp_y)), int(bin_w / 4)),
+                                   cv_color,
+                                   -1);
 
                         // set pixel color at est_x, est_y, use directly pixel operation
-                        image.at<cv::Vec3b>(cv::Point(est_x, est_y)) = cv::Vec3b(255, 255, 255);
+                        // image.at<cv::Vec3b>(cv::Point(est_x, est_y)) = cv::Vec3b(255, 255, 255);
                         image.at<cv::Vec3b>(cv::Point(m_x, m_y)) = cv::Vec3b(255, 0, 255);
-
                     }
+
+                    _bin_center_x = comp_x;
+                    _bin_center_y = comp_y;
+
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 });
             }
@@ -102,7 +109,18 @@ public:
     }
 
     void add_event(double x, double y, double t) {
-        events_queue.push(std::make_tuple(x, y, t));
+        // check if event is in the bin
+        if (check(x, y)) {
+            events_queue.push(std::make_tuple(x, y, t));
+        }
+    }
+
+    bool check(double x, double y) {
+        const double x_max = _bin_center_x + bin_w / 2.0;
+        const double x_min = _bin_center_x - bin_w / 2.0;
+        const double y_max = _bin_center_y + bin_h / 2.0;
+        const double y_min = _bin_center_y - bin_h / 2.0;
+        return x >= x_min && x <= x_max && y >= y_min && y <= y_max;
     }
 
     std::optional<std::tuple<int, int, int64_t>> update(double x, double y, double t) {
@@ -209,12 +227,13 @@ public:
         return ekf;
     }
 
-    friend std::ostream &operator<<(std::ostream &os, const BinThread &bin) {
+    friend std::ostream &operator<<(std::ostream &os, const BinThreadFollower &bin) {
         os << "Bin id: " << bin.bin_id << ", " << *bin.ekf;
         return os;
     }
 
 private:
+    double _bin_center_x = 0, _bin_center_y = 0;
     std::shared_ptr<EKF> ekf;
     const int64_t bin_id;
     static int64_t bin_counter;
@@ -248,7 +267,7 @@ private:
 
 };
 
-std::mutex BinThread::mtx;
-int64_t BinThread::bin_counter = 0;
+std::mutex BinThreadFollower::mtx;
+int64_t BinThreadFollower::bin_counter = 0;
 
 #endif //PROJECT_BIN_H

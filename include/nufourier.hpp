@@ -56,12 +56,12 @@ public:
             prev_time = t;
         }
 
-        if (t - prev_time < 0.000'001) {
+        if (t - prev_time < 0.000'1) { // if the events are in the same time
             mean_x += x;
             mean_y += y;
             mean_t += t;
             counter += 1;
-            prev_time = t;
+            // prev_time = t;
             return false;
         }
         if (counter > 100) {
@@ -73,7 +73,6 @@ public:
             cj[index] = std::complex<double>(mean_x_out, mean_y_out);
             index++;
             if (index >= N) {
-
                 index = 0;
                 return compute();
             }
@@ -89,30 +88,59 @@ public:
     }
 
     bool compute() {
+        int M = N;  // Number of nonuniform points
+        int N1 = N, N2 = N;  // Fourier grid dimensions
 
-        int ier = finufft1d3(
-                N,
-                t_data.data(),    // Non-uniform sampling positions in z
-                cj.data(),          // Complex input signal
-                1,                  // Forward transform
-                1e-6,                // Desired accuracy
-                N,            // Number of desired frequencies
-                freqs_t.data(),     // Output frequencies
-                outXY.data(),          // Output Fourier coefficients
-                opts
+        // Extract x and y coordinates from complex input data
+        std::vector<double> x_data(M), y_data(M);
+        mean_x = 0;
+        mean_y = 0;
+        for (int i = 0; i < M; ++i) {
+            x_data[i] = cj[i].real();
+            mean_x += x_data[i];
+            y_data[i] = cj[i].imag();
+            mean_y += y_data[i];
+        }
+        mean_x /= M;
+        mean_y /= M;
+
+        // print on an image the x and y coordinates
+        cv::namedWindow("2D Peak Magnitudes", cv::WINDOW_NORMAL);
+        cv::Mat image = cv::Mat::zeros(500, 1500, CV_8UC1);
+        for (int i = 0; i < 100; i++) {
+            image.at<uchar>(cv::Point(int(x_data[i]) + 15 * i, int(y_data[i]))) = 255;
+        }
+        cv::imshow("2D Peak Magnitudes", image);
+        cv::waitKey(0);
+
+        // Resize output storage for Fourier coefficients
+        outXY.resize(N1 * N2);
+
+        // Perform 2D NUFFT Type 1
+        int ier = finufft2d1(
+                M,                         // Number of nonuniform points
+                x_data.data(),              // Nonuniform X coordinates
+                y_data.data(),              // Nonuniform Y coordinates
+                cj.data(),                  // Complex input strengths
+                1,                          // Forward transform (+i convention)
+                1e-4,                       // Accuracy
+                N1, N2,                     // Fourier grid dimensions (output size)
+                outXY.data(),               // Output Fourier coefficients
+                opts                        // NUFFT options
         );
+
         // Check for errors
         if (ier != 0) {
-            std::cerr << "FINUFFT type 3 failed with error code: " << ier << std::endl;
+            std::cerr << "FINUFFT 2D failed with error code: " << ier << std::endl;
             return false;
         }
 
-        // Find dominant frequencies in the x and y directions
+        // Find dominant frequency by searching max magnitude
         maxMagnitude = -1.0;
         int peakIndex = -1;
 
-        magnitudes = std::vector<double>(N);
-        for (int i = 0; i < N; ++i) {
+        magnitudes.resize(N1 * N2);
+        for (int i = 0; i < N1 * N2; ++i) {
             double magnitude = std::abs(outXY[i]);
             magnitudes[i] = magnitude;
 
@@ -122,18 +150,23 @@ public:
             }
         }
 
-        // Calculate frequencies based on peak indices
-        main_freq_t = freqs_t[peakIndex];
-        phase_shift = std::arg(outXY[peakIndex]);
+        // Extract dominant frequency
+        if (peakIndex != -1) {
+            int freq_x = peakIndex % N1;  // Get X frequency index
+            int freq_y = peakIndex / N1;  // Get Y frequency index
 
-        std::cout << "Estimated Frequency for X: " << main_freq_t << " rad/s, " << rad2Hz<double>(main_freq_t)
-                  << " Hz"
-                  << std::endl;
-        std::cout << "Amplitude: " << maxMagnitude / N << ", Phase Shift: " << phase_shift << " rad" << std::endl;
+            main_freq_t = freqs_t[freq_x];  // Frequency in X
+            phase_shift = std::arg(outXY[peakIndex]);
 
-        // Reset data
-        t_data.assign(N, 0.0);
-        cj.assign(N, std::complex<double>(0.0, 0.0));
+            std::cout << "Estimated Frequency: " << main_freq_t << " rad/s, "
+                      << rad2Hz<double>(main_freq_t) << " Hz" << std::endl;
+            std::cout << "Amplitude: " << maxMagnitude / (N1 * N2)
+                      << ", Phase Shift: " << phase_shift << " rad" << std::endl;
+        }
+
+        // Reset data for next batch
+        std::fill(t_data.begin(), t_data.end(), 0.0);
+        std::fill(cj.begin(), cj.end(), std::complex<double>(0.0, 0.0));
 
         return true;
     }

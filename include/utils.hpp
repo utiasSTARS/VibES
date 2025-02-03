@@ -8,6 +8,7 @@
 #include <sstream>
 #include <vector>
 #include <tuple>
+#include <cmath>
 
 // Define EventStruct to store individual events
 struct EventStruct {

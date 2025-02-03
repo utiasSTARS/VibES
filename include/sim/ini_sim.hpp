@@ -26,7 +26,7 @@ public:
         x_dist = std::uniform_int_distribution<int16_t>(0, size.width - 1);
         y_dist = std::uniform_int_distribution<int16_t>(0, size.height - 1);
         polarity_dist = std::uniform_int_distribution<int>(0, 1);
-        t_dist = std::uniform_int_distribution<int>(0, 10);
+        t_dist = std::uniform_int_distribution<int>(0, 5);
 
     }
 
