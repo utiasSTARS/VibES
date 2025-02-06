@@ -108,7 +108,7 @@ public:
         thread.join();
     }
 
-    void add_event(double x, double y, double t) {
+    void add_event(double x, double y, Time t) {
         // check if event is in the bin
         if (check(x, y)) {
             events_queue.push(std::make_tuple(x, y, t));
@@ -123,21 +123,21 @@ public:
         return x >= x_min && x <= x_max && y >= y_min && y <= y_max;
     }
 
-    std::optional<std::tuple<int, int, int64_t>> update(double x, double y, double t) {
+    std::optional<std::tuple<int, int, int64_t>> update(double x, double y, Time t) {
         std::optional<std::tuple<int, int, int64_t>> comp;
         // t += 1; // to avoid odd time mean
         if (first_time == -1) {
-            first_time = t - 0.1;
+            first_time = double(t - 0.1);
         }
         // t -= first_time;
         if (prev_time == 0) {
-            prev_time = t;
+            prev_time = double(t);
         }
 
         if (t - prev_time < estimated_sampling_time) {
             mean_x += x;
             mean_y += y;
-            mean_t += t;
+            mean_t += double(t);
             counter += 1;
             // prev_time = t;
             return comp;
@@ -151,10 +151,10 @@ public:
         }
         mean_x = x;
         mean_y = y;
-        mean_t = t;
+        mean_t = double(t);
         counter = 1;
 
-        prev_time = t;
+        prev_time = double(t);
         return comp;
     }
 
@@ -257,7 +257,7 @@ private:
 
     std::thread thread;
     std::atomic_bool running{true};
-    boost::lockfree::spsc_queue<std::tuple<double, double, double>> events_queue{10000};
+    boost::lockfree::spsc_queue<std::tuple<double, double, Time>> events_queue{10000};
 
     cv::Mat image;
     std::shared_ptr<Open3DVisualizer> vis;

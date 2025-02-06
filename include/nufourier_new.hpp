@@ -45,9 +45,8 @@ public:
     ~FourierFreqEst() = default;
 
     // Feed new event data. Returns true if a complete batch is reached and computed.
-    bool feed(double x, double y, double t) {
-        if (t_min < 0)
-            t_min = t;
+    bool feed(double x, double y, Time time) {
+        auto t = double(time);
 
         t_data[index] = t;
         sx[index] = x;
