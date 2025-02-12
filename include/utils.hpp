@@ -10,6 +10,7 @@
 #include <tuple>
 #include <cmath>
 
+
 // Define EventStruct to store individual events
 struct EventStruct {
     int64_t timestamp;
@@ -102,6 +103,8 @@ std::string fp2str(const T a_value, const int n = 6) {
 // TIME CLASS
 class Time {
 public:
+    Time() = default;
+
     template<typename T>
     Time(T time, double time_resolution = 1e-6) : _resolution(time_resolution) {
         static_assert(std::is_arithmetic_v<T>, "Time can only be constructed from arithmetic types.");
@@ -239,8 +242,8 @@ public:
     }
 
 private:
-    double _time;         // Underlying time in seconds.
-    double _resolution;   // Tolerance for equality comparisons.
+    double _time = 0;         // Underlying time in seconds.
+    double _resolution = 1e-6;   // Tolerance for equality comparisons.
 
     // Helper: choose the lower (i.e., finer) resolution.
     double _choose_resolution(const Time &other) const {

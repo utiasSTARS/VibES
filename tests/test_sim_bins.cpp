@@ -7,7 +7,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 
-#include "bin.hpp"
+#include "tracker/bin.hpp"
 #include "sim/ini_sim.hpp"
 
 TEST(IniBin, OneBin) {

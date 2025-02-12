@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "sim/sinusoid_sim.hpp"
-#include "bin.hpp"
+#include "tracker/bin.hpp"
 
 
 bool testBin(double freq_target, double freq) {

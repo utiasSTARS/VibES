@@ -5,7 +5,7 @@
 #ifndef PROJECT_BIN_H
 #define PROJECT_BIN_H
 
-#include "filter/ekf.hpp"
+#include "estimator/ekf.hpp"
 #include "utils.hpp"
 #include <memory>
 

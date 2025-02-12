@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 #include <random>
 
-#include "nufourier.hpp"
+#include "estimator/nufourier.hpp"
 #include "sim/sinusoid_sim.hpp"
 #include "sim/ini_sim.hpp"
 

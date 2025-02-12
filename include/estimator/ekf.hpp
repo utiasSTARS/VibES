@@ -7,7 +7,7 @@
 
 #include <Eigen/Dense>
 #include <deque>
-#include "../utils.hpp"
+#include "utils.hpp"
 
 class EKF {
 public:
@@ -19,6 +19,8 @@ public:
         I = Eigen::MatrixXd::Identity(state_dim, state_dim);
         F = Eigen::MatrixXd::Identity(state_dim, state_dim);
         P = Eigen::MatrixXd::Identity(state_dim, state_dim) * 10.; // Initial covariance matrix
+        // we are more certain about omega, respect to the other parameters
+        P(1, 1) = 1.0;
         Q = Eigen::MatrixXd::Identity(state_dim, state_dim) * process_noise;
         R = Eigen::MatrixXd::Identity(2 * n_samples, 2 * n_samples) * measurement_noise;
 

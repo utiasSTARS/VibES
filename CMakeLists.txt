@@ -20,6 +20,8 @@ CPMAddPackage(
         SYSTEM
 )
 
+# find_package(TBB REQUIRED)
+find_package(OpenMP REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(dv-processing REQUIRED)
@@ -39,3 +41,6 @@ target_link_libraries(helix_vis_thread_vis PRIVATE Open3D::Open3D finufft dv::pr
 
 add_executable(motion_comp demo/motion_comp.cpp)
 target_link_libraries(motion_comp PRIVATE Open3D::Open3D finufft dv::processing)
+
+add_executable(harmeda demo/harmeda.cpp)
+target_link_libraries(harmeda PRIVATE Open3D::Open3D finufft dv::processing PUBLIC OpenMP::OpenMP_CXX) # TBB::tbb)

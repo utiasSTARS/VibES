@@ -9,17 +9,16 @@
 #include <dv-processing/camera/calibration_set.hpp>
 
 #include "utils.hpp"
-#include "bin_thread_follower.hpp"
+#include "tracker/bin_thread_follower.hpp"
 #include "sim/ini_sim.hpp"
-#include "open3d_visualizer.hpp"
-#include "ev2image.hpp"
+#include "visualizer/open3d_visualizer.hpp"
+#include "visualizer/ev2image.hpp"
 
-#include "centroid.hpp"
-#include "nufourier_new.hpp"
+#include "event_frontend/centroid.hpp"
+#include "estimator/nufourier_new.hpp"
 #include "data_loaders/dvs_loader.h"
 #include "logger/loading.hpp"
 
-using namespace harmeda;
 
 // Main example function
 int main(int argc, char *argv[]) {

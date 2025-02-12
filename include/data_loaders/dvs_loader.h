@@ -66,7 +66,7 @@ private:
             }
         } else {
             // No arguments provided: run in simulation mode.
-            int target_freq = 700;
+            int target_freq = 220;
             std::cout << "No file provided. Using simulator with freq " << target_freq
                       << " rad/s (" << rad2Hz(target_freq) << " Hz)" << std::endl;
             reader = std::make_shared<EventsFreqCalibPattern>(0, cv::Size(640, 480),

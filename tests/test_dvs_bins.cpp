@@ -6,7 +6,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 
-#include "bin.hpp"
+#include "tracker/bin.hpp"
 #include <dv-processing/io/mono_camera_recording.hpp>
 
 TEST(DVSBin, OneBin) {

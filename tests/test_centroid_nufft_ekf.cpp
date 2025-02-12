@@ -7,10 +7,10 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 
-#include "centroid.hpp"
+#include "event_frontend/centroid.hpp"
 #include "sim/ini_sim.hpp"
-#include "nufourier_new.hpp"
-#include "filter/ekf.hpp"
+#include "estimator/nufourier_new.hpp"
+#include "estimator/ekf.hpp"
 
 using namespace harmeda;
 

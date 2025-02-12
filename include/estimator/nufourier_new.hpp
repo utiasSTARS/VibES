@@ -29,10 +29,10 @@ public:
     FourierFreqEst() = delete;
 
     // Constructor: n_samples is required. f_min and f_max are preserved for legacy or visualization.
-    FourierFreqEst(int n_samples, double f_min, double f_max)
-            : N(n_samples), f_min(f_min), f_max(f_max),
+    FourierFreqEst(int n_samples, double f_min_hz, double f_max_hz)
+            : N(n_samples), f_min(Hz2rad(f_min_hz)), f_max(Hz2rad(f_max_hz)),
               t_data(n_samples), sx(n_samples), sy(n_samples),
-              n_modes(2 * 100'000), F_out(n_modes),
+              n_modes(2 * static_cast<int>(Hz2rad(f_max_hz))), F_out(n_modes),
               opts(new finufft_opts, FinufftOptsDeleter()) {
         // Initialize the frequency grid for visualization.
         freqs_t.resize(n_modes);
@@ -47,6 +47,11 @@ public:
     // Feed new event data. Returns true if a complete batch is reached and computed.
     bool feed(double x, double y, Time time) {
         auto t = double(time);
+        // make sure the time is increasing
+        if (t < t_data[index]) {
+            std::cerr << "Error: Time samples are not increasing." << std::endl;
+            return false;
+        }
 
         t_data[index] = t;
         sx[index] = x;
@@ -56,7 +61,6 @@ public:
 
         ++index;
         if (index >= N) {
-            t_max = t;
             index = 0;
             return compute();
         }
@@ -65,13 +69,15 @@ public:
 
     // Compute the dominant frequency and other parameters using 1D NUFFT.
     bool compute() {
+        double t_max = t_data.back();
+        double t_min = t_data.front();
+
         if (t_max == t_min) {
             std::cerr << "Error: All time samples are identical." << std::endl;
             return false;
         }
 
         const double dt = t_max - t_min;
-        std::cout << "Delta time: " << dt << std::endl;
 
         // Rescale time points to [-pi, pi].
         const double scaling = 2 * M_PI / dt;
@@ -236,7 +242,6 @@ private:
 
     // Counters and indices.
     int index = 0;
-    double t_min = -1.0, t_max = -1.0;
 
     // Estimated parameters.
     double main_freq_t = 0.0;    // Angular frequency (rad/s) from Sx.

@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "sim/sinusoid_sim.hpp"
-#include "filter/ekf.hpp"
+#include "estimator/ekf.hpp"
 
 std::tuple<double, double, double, double, double> testEKF(double amp, double freq, double phase)
 {

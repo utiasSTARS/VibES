@@ -7,7 +7,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 
-#include "centroid.hpp"
+#include "event_frontend/centroid.hpp"
 #include "sim/ini_sim.hpp"
 
 using namespace harmeda;

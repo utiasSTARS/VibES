@@ -10,11 +10,11 @@
 
 
 #include "utils.hpp"
-#include "nufourier.hpp"
-#include "bin_thread.hpp"
+#include "estimator/nufourier.hpp"
+#include "tracker/bin_thread.hpp"
 #include "sim/ini_sim.hpp"
-#include "open3d_visualizer.hpp"
-#include "ev2image.hpp"
+#include "visualizer/open3d_visualizer.hpp"
+#include "visualizer/ev2image.hpp"
 
 // Main example function
 int main(int argc, char *argv[]) {
