@@ -5,6 +5,11 @@
 #ifndef PROJECT_DVS_LOADER_H
 #define PROJECT_DVS_LOADER_H
 
+#include <dv-processing/io/camera_capture.hpp>
+#include <dv-processing/io/mono_camera_recording.hpp>
+#include <dv-processing/camera/camera_geometry.hpp>
+#include <dv-processing/camera/calibration_set.hpp>
+
 class DVSLoader {
 public:
 

@@ -44,3 +44,7 @@ target_link_libraries(motion_comp PRIVATE Open3D::Open3D finufft dv::processing)
 
 add_executable(harmeda demo/harmeda.cpp)
 target_link_libraries(harmeda PRIVATE Open3D::Open3D finufft dv::processing PUBLIC OpenMP::OpenMP_CXX) # TBB::tbb)
+
+
+add_executable(harmeda_metav demo/harmeda_metavision.cpp)
+target_link_libraries(harmeda_metav PRIVATE Open3D::Open3D finufft MetavisionSDK::core MetavisionSDK::driver MetavisionSDK::ui PUBLIC OpenMP::OpenMP_CXX) # TBB::tbb)

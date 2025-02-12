@@ -25,12 +25,15 @@ public:
 
     // Stop displaying the loading text.
     void stop() {
+        if (!_running) {
+            return;
+        }
         _running = false;
         if (_thread.joinable()) {
             _thread.join();
         }
         // Optionally, clear the line or print a "Done" message.
-        std::cout << "\rLoading " << _loadingText << "... Done!" << std::endl;
+        std::cout << "\r" << _loadingText << "... Done!" << std::endl;
     }
 
     // Destructor ensures the thread is stopped properly.
@@ -44,7 +47,7 @@ private:
         const char spinner[] = {'|', '/', '-', '\\'};
         int i = 0;
         while (_running) {
-            std::cout << "\rLoading " << _loadingText << "... " << spinner[i % 4] << std::flush;
+            std::cout << "\r" << _loadingText << "... " << spinner[i % 4] << std::flush;
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             ++i;
         }

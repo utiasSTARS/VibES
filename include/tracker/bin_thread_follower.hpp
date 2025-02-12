@@ -63,14 +63,14 @@ public:
                 events_queue.consume_all([&](auto &event) {
                     auto [x, y, t] = event;
                     if (auto sample = _centroid->feed(x, y, t); sample.has_value()) {
-                        auto [s_x, s_y, s_t] = sample.value();
-                        if (auto est = ekf->update(s_x, s_y, double(s_t)); est.has_value()) {
+                        const auto &[s_x, s_y, s_t] = sample.value();
+                        auto est = ekf->update(s_x, s_y, s_t);
+                        if (est.has_value()) {
+                            updated = true;
                             auto [comp_x, comp_y, comp_t] = est.value();
 
-                            // add mean vals
-                            auto [m_x, m_y, m_t] = getMean();
                             // estimated curve
-                            auto [est_x, est_y] = getEKF()->getPred();
+                            auto [est_x, est_y] = ekf->getPred();
 
                             auto [B, G, R] = color_map[getColor()];
                             auto cv_color = cv::Scalar(B, G, R);
@@ -83,8 +83,8 @@ public:
                             {
                                 std::lock_guard<std::mutex> lock(mtx);
                                 // thread safe
-                                _vis->addPoint(m_x, m_y, m_t * 100, 0.1, 1.0);
-                                // _vis->addPoint(est_x, est_y, mean_t * 100, 0.1, 0.1, 1.0);
+                                _vis->addPoint(x, y, double(s_t) * 100, 0.1, 1.0);
+                                _vis->addPoint(est_x, est_y, double(s_t) * 100, 0.1, 0.1, 1.0);
                                 // _vis->addPoint(getEKF()->getShiftX(), getEKF()->getShiftY(), mean_t * 100, 0.1, 0.1, 1.0);
 
                                 // draw a rectangle indicating the bin, using bin center and bin width and height
@@ -104,7 +104,6 @@ public:
 
                                 // set pixel color at est_x, est_y, use directly pixel operation
                                 // image.at<cv::Vec3b>(cv::Point(est_x, est_y)) = cv::Vec3b(255, 255, 255);
-                                image.at<cv::Vec3b>(cv::Point(m_x, m_y)) = cv::Vec3b(255, 0, 255);
                             }
 
                             _bin_center_x = comp_x;
@@ -112,6 +111,7 @@ public:
                         }
                     }
                     cv::imshow("Bin " + std::to_string(_bin_id), image);
+                    // cv::waitKey(1);
 
                     std::this_thread::sleep_for(std::chrono::nanoseconds(10));
                 });
@@ -124,7 +124,7 @@ public:
         thread.join();
     }
 
-    void feed(double x, double y, Time t) {
+    void feed(double x, double y, double t) {
         // check if event is in the bin
         if (check(x, y)) {
             events_queue.push(std::make_tuple(x, y, t));
@@ -139,10 +139,6 @@ public:
         return x >= x_min && x <= x_max && y >= y_min && y <= y_max;
     }
 
-
-    std::tuple<double, double, double> getMean() {
-        return std::make_tuple(mean_x_out, mean_y_out, mean_t_out);
-    }
 
     std::tuple<double, double> estimate(double t) {
         return std::make_tuple(
@@ -229,7 +225,7 @@ private:
 
     std::thread thread;
     std::atomic_bool running{true};
-    boost::lockfree::spsc_queue<std::tuple<double, double, Time>> events_queue{10000};
+    boost::lockfree::spsc_queue<std::tuple<double, double, double>> events_queue{10000};
 
     cv::Mat image;
     std::shared_ptr<Open3DVisualizer> _vis;

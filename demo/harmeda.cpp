@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
     // visualization stuffs
     //
     // open3d vis
-    // auto vis = std::make_shared<Open3DVisualizer>();
+    auto vis = std::make_shared<Open3DVisualizer>();
     cv::namedWindow("Accumulated", cv::WINDOW_NORMAL);
     cv::resizeWindow("Accumulated", resolution.width, resolution.height);
 
@@ -49,11 +49,10 @@ int main(int argc, char *argv[]) {
 
 
     // HARMEDA stuffs
-    dv::EventStore events;
-
     HARMEDA harmeda(10'000, 2, 150);
     int64_t initial_timestamp = -1;
 
+    dv::EventStore events;
     auto start = std::chrono::high_resolution_clock::now();
     while (reader->isRunning()) {
         if (const auto events_dist = reader->getNextEventBatch(); events_dist.has_value()) {
@@ -62,24 +61,25 @@ int main(int argc, char *argv[]) {
             } else {
                 events = events_dist.value();
             }
-            // accumulator.accumulate(events);
-            // cv::imshow("Standard", accumulator.generateFrame().image);
-            // cv::waitKey(1);
 
             auto start = std::chrono::high_resolution_clock::now();
             for (auto &event: events) {
                 if (initial_timestamp == -1) {
                     initial_timestamp = event.timestamp();
                 }
-                // time this function in ms
-                // auto start = std::chrono::high_resolution_clock::now()
                 harmeda.feed(event.x(), event.y(),
                              Time(event.timestamp() - initial_timestamp));
-
-
-
-                // vis->update();
+                if (harmeda.initialized() && harmeda.size() == 0) {
+                    // we want to track only one patter in the screen
+                    const auto &[x_centre, y_centre] = harmeda.getInitialCenter();
+                    harmeda.add_bin(x_centre, y_centre, std::max(resolution.width, resolution.height) / 4., vis);
+                }
             }
+
+            accumulator.accumulate(events);
+            cv::imshow("Standard", accumulator.generateFrame().image);
+            cv::waitKey(1);
+            vis->update();
         }
     }
     auto end = std::chrono::high_resolution_clock::now();
@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
     harmeda.stop();
     std::cout << harmeda << std::endl;
 
-    // vis->loop();
+    vis->loop();
 
     return 0;
 }

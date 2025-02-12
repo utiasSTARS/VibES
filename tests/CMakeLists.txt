@@ -30,6 +30,9 @@ target_link_libraries(test_finuttf PRIVATE gtest_main dv::processing finufft)
 add_executable(test_centroid ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_centroid.cpp)
 target_link_libraries(test_centroid PRIVATE gtest_main dv::processing)
 
+add_executable(test_centroid_metav ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_centroid_metav.cpp)
+target_link_libraries(test_centroid_metav PRIVATE gtest_main MetavisionSDK::core MetavisionSDK::driver MetavisionSDK::ui PUBLIC OpenMP::OpenMP_CXX) # TBB::tbb)
+
 add_executable(test_centroid_nufft ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_centroid_nufft.cpp)
 target_link_libraries(test_centroid_nufft PRIVATE gtest_main dv::processing finufft)
 

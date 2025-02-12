@@ -190,7 +190,7 @@ public:
 
     // Comparison operators (using fuzzy equality for ==)
     bool operator==(const Time &other) const {
-        return std::abs(_time - other._time) < _choose_resolution(other);
+        return std::abs(_time - other._time) < _resolution;
     }
 
     bool operator!=(const Time &other) const {
