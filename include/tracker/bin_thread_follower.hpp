@@ -51,7 +51,7 @@ public:
 
         // std::cout << "\033[1;34m" << "Centroid initialization with delta t: " << 1. / (10. * rad2Hz(target_omega))
         //           << "\033[0m" << std::endl;
-        _centroid = std::make_shared<CMassCalculation>(100, 1. / (10. * rad2Hz(target_omega)));
+        _centroid = std::make_shared<CMassCalculation>(10, 1. / (5 * rad2Hz(target_omega)));
 
         // if the _vis is not initialized reaise an error
         if (!_vis) {
@@ -72,9 +72,9 @@ public:
 
 
                         // std::lock_guard<std::mutex> lock(mtx);
-                        // // thread safe
-                        // _vis->addPoint(s_x, s_y, s_t * 1000, 0.1, 1.0);
-                        // _vis->addPoint(est_x, est_y, s_t * 1000, 0.1, 0.1, 1.0);
+                        // thread safe
+                        _vis->addPoint(s_x, s_y, s_t * 1000, 0.1, 1.0);
+                        _vis->addPoint(est_x, est_y, s_t * 1000, 0.1, 0.1, 1.0);
 
 
                         _bin_center_x = centre_x;
@@ -112,12 +112,12 @@ public:
 
         cv::rectangle(frame,
                       cv::Rect(_bin_center_x - _bin_size_half, _bin_center_y - _bin_size_half, _bin_size, _bin_size),
-                      cv::Scalar(0, 0, 255), 1);
+                      cv_color, 2);
 
         // draw the freq
         cv::putText(frame, "f:" + fp2str(ekf->getHz(), 1) + " Hz",
                     cv::Point(_bin_center_x - _bin_size_half, _bin_center_y - _bin_size_half - 10),
-                    cv::FONT_HERSHEY_SIMPLEX, 1, cv_color, 1, cv::LINE_AA);
+                    cv::FONT_HERSHEY_SIMPLEX, 1, cv_color, 2, cv::LINE_AA);
     }
 
     [[nodiscard]] bool check(double x, double y) const {

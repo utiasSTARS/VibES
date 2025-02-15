@@ -18,9 +18,12 @@ public:
         int state_dim = 8;
         I = Eigen::MatrixXd::Identity(state_dim, state_dim);
         F = Eigen::MatrixXd::Identity(state_dim, state_dim);
-        P = Eigen::MatrixXd::Identity(state_dim, state_dim) * 10.; // Initial covariance matrix
+        P = Eigen::MatrixXd::Identity(state_dim, state_dim) * 100.; // Initial covariance matrix
         // we are more certain about omega, respect to the other parameters
         P(1, 1) = 1.0;
+        // high uncertainty over c_x and c_y
+        P(4, 4) = 1000.;
+        P(7, 7) = 1000.;
         Q = Eigen::MatrixXd::Identity(state_dim, state_dim) * process_noise;
         R = Eigen::MatrixXd::Identity(2 * n_samples, 2 * n_samples) * measurement_noise;
 

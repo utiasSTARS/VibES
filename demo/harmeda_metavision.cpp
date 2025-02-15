@@ -69,14 +69,14 @@ int main(int argc, char *argv[]) {
         if (harmeda.initialized() && harmeda.size() == 0) {
             // we want to track only one patter in the screen
             const auto &[x_centre, y_centre] = harmeda.getInitialCenter();
-            harmeda.add_bin(x_centre, y_centre, std::max(camera_width, camera_height) / 6., vis);
+            harmeda.add_bin(x_centre, y_centre, std::max(camera_width, camera_height) / 6.5, vis);
         }
     });
 
     // visualization
 
     const std::uint32_t acc = 20000;
-    double fps = 100;
+    double fps = 200;
 
     auto frame_gen = Metavision::PeriodicFrameGenerationAlgorithm(camera_width, camera_height, acc, fps);
 
@@ -127,7 +127,7 @@ int main(int argc, char *argv[]) {
         // we need to update the visualizer
         vis->update();
 
-        static constexpr std::int64_t kSleepPeriodMs = 10;
+        static constexpr std::int64_t kSleepPeriodMs = 5;
         Metavision::EventLoop::poll_and_dispatch(kSleepPeriodMs);
     }
 
