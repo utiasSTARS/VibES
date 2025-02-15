@@ -67,7 +67,7 @@ int main(int argc, char *argv[]) {
     double phase_shift = 0;
     double amplitude = 0;
 
-    CentroidCalculation centroid;
+    CMassCalculation centroid;
 
     // read the events
     bool initialized = false;

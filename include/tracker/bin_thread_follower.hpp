@@ -42,49 +42,53 @@ public:
               _bin_center_x(c_x),
               _bin_center_y(c_y) {
 
-        // create the image
-        cv::namedWindow("Bin " + std::to_string(_bin_id), cv::WINDOW_NORMAL);
-        image = cv::Mat::zeros(480, 640, CV_8UC3);
-
         ekf = std::make_shared<EKF>(n_samples, process_noise, measurement_noise);
         // double omega, double A, double phi, double C_x, double C_y
         ekf->initialize(_target_omega, amplitude, phase_shift, c_x, c_y);
 
-        _centroid = std::make_shared<CentroidCalculation>();
+        // std::cout << "\033[1;34m" << "Centroid initialization with delta t: " << 1. / (10. * rad2Hz(target_omega))
+        //           << "\033[0m" << std::endl;
+        _centroid = std::make_shared<CMassCalculation>(100, 1. / (10. * rad2Hz(target_omega)));
 
         // if the _vis is not initialized reaise an error
         if (!_vis) {
             throw std::runtime_error("Open3DVisualizer is not initialized");
         }
+        // create the image
+        cv::namedWindow("Bin " + std::to_string(_bin_id), cv::WINDOW_NORMAL);
+        image = cv::Mat::zeros(_vis->getHeight(), _vis->getWidth(), CV_8UC3);
 
         // start thread
         thread = std::thread([&]() {
-            while (running) {
+            while (running.load(std::memory_order::relaxed)) {
                 events_queue.consume_all([&](auto &event) {
                     auto [x, y, t] = event;
-                    if (auto sample = _centroid->feed(x, y, t); sample.has_value()) {
+                    auto sample = _centroid->feed(x, y, t);
+                    if (sample) {
                         const auto &[s_x, s_y, s_t] = sample.value();
-                        auto est = ekf->update(s_x, s_y, s_t);
-                        if (est.has_value()) {
+
+                        if (ekf->update(s_x, s_y, s_t)) {
                             updated = true;
-                            auto [comp_x, comp_y, comp_t] = est.value();
 
                             // estimated curve
-                            auto [est_x, est_y] = ekf->getPred();
+                            const auto &[centre_x, centre_y] = ekf->getCenter();
+
+                            const auto &[est_x, est_y] = ekf->getPred();
 
                             auto [B, G, R] = color_map[getColor()];
-                            auto cv_color = cv::Scalar(B, G, R);
-                            int amp_x = ceil(getAmplitudeX()); // + 1;
-                            int amp_y = ceil(getAmplitudeY()); // + 1;
 
+                            auto cv_color = cv::Scalar(B, G, R);
+
+                            int amp_x = ceil(ekf->getAmplX()); // + 1;
+                            int amp_y = ceil(ekf->getAmplX()); // + 1;
 
                             const auto left_x = _bin_center_x - _bin_size_half, top_y = _bin_center_y - _bin_size_half;
 
                             {
                                 std::lock_guard<std::mutex> lock(mtx);
                                 // thread safe
-                                _vis->addPoint(x, y, double(s_t) * 100, 0.1, 1.0);
-                                _vis->addPoint(est_x, est_y, double(s_t) * 100, 0.1, 0.1, 1.0);
+                                _vis->addPoint(s_x, s_y, s_t * 100, 0.1, 1.0);
+                                _vis->addPoint(est_x, est_y, s_t * 100, 0.1, 0.1, 1.0);
                                 // _vis->addPoint(getEKF()->getShiftX(), getEKF()->getShiftY(), mean_t * 100, 0.1, 0.1, 1.0);
 
                                 // draw a rectangle indicating the bin, using bin center and bin width and height
@@ -97,7 +101,7 @@ public:
                                         cv::Point(left_x, top_y + 10),
                                         cv::FONT_HERSHEY_SIMPLEX, .5, cv::Scalar(255, 0, 255), 1, cv::LINE_AA);
 
-                                cv::circle(image, cv::Point(comp_x, comp_y),
+                                cv::circle(image, cv::Point(centre_x, centre_y),
                                            std::min(std::max(std::abs(amp_x), std::abs(amp_y)), int(_bin_size / 4)),
                                            cv_color,
                                            -1);
@@ -106,12 +110,12 @@ public:
                                 // image.at<cv::Vec3b>(cv::Point(est_x, est_y)) = cv::Vec3b(255, 255, 255);
                             }
 
-                            _bin_center_x = comp_x;
-                            _bin_center_y = comp_y;
+                            _bin_center_x = centre_x;
+                            _bin_center_y = centre_y;
                         }
                     }
                     cv::imshow("Bin " + std::to_string(_bin_id), image);
-                    // cv::waitKey(1);
+                    cv::waitKey(1);
 
                     std::this_thread::sleep_for(std::chrono::nanoseconds(10));
                 });
@@ -120,7 +124,7 @@ public:
     }
 
     void stop() {
-        running = false;
+        running.store(false, std::memory_order_relaxed);
         thread.join();
     }
 

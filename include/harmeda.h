@@ -6,8 +6,8 @@
 #define PROJECT_HARMEDA_H
 
 #include "tracker/bin_thread_follower.hpp"
-#include "estimator/nufourier_new.hpp"
 #include "event_frontend/centroid.hpp"
+#include "estimator/nufourier_new.hpp"
 #include "estimator/nufourier_new.hpp"
 
 #include <atomic>
@@ -27,7 +27,7 @@ public:
 
     HARMEDA(int n_samples, double f_min, double f_max)
             : _fourierFreqEst(n_samples, f_min, f_max) {
-        _initializer = std::make_shared<CentroidCalculation>();
+        _initializer = std::make_shared<CMassCalculation>(10, 1e-3);
 
         _loading_text.loading("Initializing HARMEDA");
     }
@@ -45,6 +45,7 @@ public:
         if (!_initialized) {
             throw std::runtime_error("HARMEDA is not initialized yet.");
         }
+        std::lock_guard<std::mutex> lock(_mtx);
         _bins.emplace_back(
                 std::make_shared<BinThreadFollower>(1, size, 0.1, 0.1,
                                                     _estimated_freq,
@@ -55,14 +56,7 @@ public:
     }
 
     void feed(double x, double y, double time) {
-        if (_initialized) {
-            // bool pushed = _events_queue.push({x, y, time});
-            _bins[0]->feed(x, y, time);
-// #pragma omp parallel for
-//                     for (std::size_t i = 0; i < _bins.size(); ++i) {
-//                         _bins[i]->feed(x, y, time);
-//                     }
-        } else {
+        if (!_initialized) {
             // add this here, because it is true that the following code will be run less than the estimation code above
             auto sample = _initializer->feed(x, y, time);
             if (!sample) {
@@ -85,6 +79,17 @@ public:
             _loading_text.stop();
 
             _initialized = true;
+            return;
+        }
+
+        if (!_bins.empty()) {
+            std::lock_guard<std::mutex> lock(_mtx);
+            // bool pushed = _events_queue.push({x, y, time});
+            _bins[0]->feed(x, y, time);
+// #pragma omp parallel for
+//                     for (std::size_t i = 0; i < _bins.size(); ++i) {
+//                         _bins[i]->feed(x, y, time);
+//                     }
         }
     }
 
@@ -128,6 +133,8 @@ private:
 
     // Use std::jthread for cooperative cancellation.
     std::jthread _thread;
+
+    std::mutex _mtx;
 
     // Lock-free single-producer single-consumer queues.
     boost::lockfree::spsc_queue<std::tuple<double, double, Time>> _init_events_queue{10000};

@@ -119,7 +119,6 @@ public:
                 }
             }
         }
-
         // --- Step 5: Estimate amplitude (A) and offset (c_x) using least squares ---
         double S11 = 0.0, S12 = 0.0, S22 = static_cast<double>(N);
         double S1y = 0.0, S2y = 0.0;

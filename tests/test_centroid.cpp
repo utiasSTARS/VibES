@@ -12,13 +12,14 @@
 #include "sim/ini_sim.hpp"
 
 TEST(CENTROID, Estimation) {
-    CentroidCalculation centroid;
+    CMassCalculation centroid(10, 1e-6);
 
     // auto reader = std::make_unique<EventsFreqCalibPattern>(0, cv::Size(480, 640), Hz2rad(100), 5, 5, 0., true);
-    auto reader = std::make_shared<dv::io::MonoCameraRecording>("/home/viciopoli/datasets/event_harmeda/harmeda_newpattern_hz100_3mm.aedat4");
+    auto reader = std::make_shared<dv::io::MonoCameraRecording>(
+            "/home/viciopoli/datasets/event_harmeda/harmeda_newpattern_hz10_3mm.aedat4");
 
     int counter = 0;
-    std::vector<std::tuple<double, double, Time>> samples;
+    std::vector<std::tuple<double, double, double>> samples;
     int initial_time = -1;
     while (reader->isRunning()) {
         if (const auto events_dist = reader->getNextEventBatch(); events_dist.has_value()) {
@@ -41,17 +42,29 @@ TEST(CENTROID, Estimation) {
     std::cout << "N. of samples: " << samples.size() << std::endl;
 
     // show samples on an image
-    int scaling = 10000;
-    cv::Mat img(600, 600, CV_8UC3, cv::Scalar(0, 0, 0));
-    for (const auto [x, y, time]: samples) {
-        auto t = double(time);
-        if (t * scaling < 600 && x < 600 && y < 600) {
-            img.at<cv::Vec3b>(x, t * scaling) = cv::Vec3b(255, 255, 255);
-            img.at<cv::Vec3b>(t * scaling, y) = cv::Vec3b(255, 255, 255);
+    int scaling = 50000;
+    // cv::Mat img(600, 600, CV_8UC3, cv::Scalar(0, 0, 0));
+    // for (const auto [x, y, time]: samples) {
+    //     auto t = double(time);
+    //     if (t * scaling < 600 && x < 600 && y < 600) {
+    //         img.at<cv::Vec3b>(x, t * scaling) = cv::Vec3b(255, 255, 255);
+    //         img.at<cv::Vec3b>(t * scaling, y) = cv::Vec3b(255, 255, 255);
+    //     }
+    // }
+
+    cv::Mat continuos_line_img(600, 600, CV_8UC3, cv::Scalar(0, 0, 0));
+    for (int i = 1; i < samples.size(); i++) {
+        auto [x, y, time] = samples[i];
+        if (time * scaling < 600 && x < 600 && y < 600) {
+            auto [x_prev, y_prev, time_prev] = samples[i - 1];
+            cv::line(continuos_line_img, cv::Point(x_prev, time_prev * scaling), cv::Point(x, time * scaling),
+                     cv::Scalar(255, 255, 255), 1);
+            cv::line(continuos_line_img, cv::Point(time_prev * scaling, y_prev), cv::Point(time * scaling, y),
+                     cv::Scalar(255, 255, 255), 1);
         }
     }
 
     cv::namedWindow("Centroids", cv::WINDOW_NORMAL);
-    cv::imshow("Centroids", img);
+    cv::imshow("Centroids", continuos_line_img);
     cv::waitKey(0);
 }

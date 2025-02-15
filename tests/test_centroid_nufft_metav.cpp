@@ -4,26 +4,27 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <vector>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/highgui.hpp>
 
 #include "event_frontend/centroid.hpp"
-
+#include "estimator/nufourier_new.hpp"
 
 #include <metavision/sdk/driver/camera.h>
 #include <metavision/sdk/base/events/event_cd.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
 
 TEST(CENTROID, Estimation) {
-    CMassCalculation centroid(100, 1e-3);
+    CMassCalculation centroid(10, 1e-3);
 
     auto cam = Metavision::Camera::from_file(
             "/home/viciopoli/datasets/event_harmeda/april_2v.raw");
 
-
-    int counter = 0;
     std::vector<std::tuple<double, double, double>> samples;
     int initial_time = -1;
+
+    FourierFreqEst fourier(100, 5, 1000);
+    double estimated_freq = 0;
+    double phase_shift = 0;
+    double amplitude = 0;
 
     cam.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         auto ev_prev = begin;
@@ -37,41 +38,14 @@ TEST(CENTROID, Estimation) {
             auto centr = centroid.feed(ev->x, ev->y, double(ev->t - initial_time) / 1e6);
             if (centr.has_value()) {
                 samples.push_back(centr.value());
-            }
-        }
-
-        counter++;
-        if (counter > 50'000) {
-            std::cout << "N. of samples: " << samples.size() << std::endl;
-
-            // show samples on an image
-            int scaling = 1e4;
-            auto win_size = 1000;
-            double initial_time = -1, final_time = 0;
-            cv::Mat img(win_size, win_size, CV_8UC3, cv::Scalar(0, 0, 0));
-            for (int i = 1; i < samples.size(); i++) {
-                auto [x, y, time] = samples[i];
-                if (initial_time == -1) {
-                    initial_time = time;
-                }
-                if (time * scaling < win_size && x < win_size && y < win_size) {
-                    auto [x_prev, y_prev, time_prev] = samples[i - 1];
-                    cv::line(img, cv::Point(x_prev, time_prev * scaling), cv::Point(x, time * scaling),
-                             cv::Scalar(255, 255, 255), 1);
-                    cv::line(img, cv::Point(time_prev * scaling, y_prev), cv::Point(time * scaling, y),
-                             cv::Scalar(255, 255, 255), 1);
-                    final_time = time;
+                const auto &[x, y, t] = centr.value();
+                if (fourier.feed(x, y, t)) {
+                    estimated_freq = fourier.getMainFreqRad();
+                    phase_shift = fourier.getPhaseShift();
+                    amplitude = fourier.getAmplitude();
+                    break;
                 }
             }
-            auto delta_t = final_time - initial_time;
-            std::cout << "Initial time: " << initial_time << " Final time: " << final_time << " delta: "
-                      << delta_t << ", one px: " << delta_t / win_size << "s" << std::endl;
-
-
-            cv::namedWindow("Centroids", cv::WINDOW_NORMAL);
-            cv::imshow("Centroids", img);
-            cv::waitKey(0);
-            cam.stop();
         }
     });
 

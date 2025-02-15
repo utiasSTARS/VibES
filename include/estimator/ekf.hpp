@@ -38,17 +38,17 @@ public:
         this->omega = omega;
     }
 
-    std::optional<std::tuple<int, int, int64_t>> update(double x, double y, double t) {
+    bool update(double x, double y, double t) {
         if (prev_t != -1) {
             computeEKF(x, y, t);
-            return compensate(x, y, t);
+            return true;
         } else {
             prev_t = t;
-            return std::nullopt;
+            return false;
         }
     }
 
-    [[nodiscard]] std::optional<std::tuple<int, int, int64_t>> compensate(int x, int y, double t) const {
+    [[nodiscard]] std::optional<std::tuple<int, int, double>> compensate(int x, int y, double t) const {
         // according to out camera projection model
         // double u = x - A_x * std::sin(theta) + B_x * std::cos(theta);
         // double v = y - A_y * std::sin(theta) + B_y * std::cos(theta);
@@ -60,11 +60,18 @@ public:
         return std::make_tuple(x_pred, y_pred);
     }
 
+    [[nodiscard]] std::vector<std::pair<double, double>> getTrajectory() const {
+        return _trajectory;
+    }
+
+    [[nodiscard]] std::pair<double, double> getCenter() const {
+        return _trajectory.back();
+    }
+
     void computeEKF(double x_meas, double y_meas, double t) {
         double delta_t = t - prev_t;
 
         // ========== PREDICT STEP ==========
-        // 1. Reinitialize F as identity
         F(0, 1) = delta_t; // d(theta)/d(omega)
 
         // 2. Predict state (theta is updated here)
@@ -79,29 +86,29 @@ public:
         y_pred = A_y * std::sin(theta) + B_y * std::cos(theta) + C_y;
 
         // 2. Compute residual
-        Eigen::Vector2d residual(x_meas - x_pred, y_meas - y_pred);
+        const Eigen::Vector2d residual(x_meas - x_pred, y_meas - y_pred);
 
         // 3. Compute Jacobian H (2x8 for this measurement)
-        double dxdtheta = A_x * std::cos(theta) - B_x * std::sin(theta);
-        double dydtheta = A_y * std::cos(theta) - B_y * std::sin(theta);
+        const double dxdtheta = A_x * std::cos(theta) - B_x * std::sin(theta);
+        const double dydtheta = A_y * std::cos(theta) - B_y * std::sin(theta);
 
         H.setZero();
         // dx/dtheta, dx/dA_x, dx/dB_x, dx/dC_x
         H(0, 0) = dxdtheta;
-        H(0, 1) = delta_t * dxdtheta;
+        // H(0, 1) = delta_t * dxdtheta;
         H(0, 2) = std::sin(theta);
         H(0, 3) = std::cos(theta);
         H(0, 4) = 1.0;
         // dy/dtheta, dy/dA_y, dy/dB_y, dy/dC_y
         H(1, 0) = dydtheta;
-        H(1, 1) = delta_t * dydtheta;
+        // H(1, 1) = delta_t * dydtheta;
         H(1, 5) = std::sin(theta);
         H(1, 6) = std::cos(theta);
         H(1, 7) = 1.0;
 
         // 4. Kalman gain and covariance update
-        Eigen::MatrixXd S = H * P * H.transpose() + R;
-        Eigen::MatrixXd K = P * H.transpose() * S.inverse();
+        const Eigen::MatrixXd S = H * P * H.transpose() + R;
+        const Eigen::MatrixXd K = P * H.transpose() * S.inverse();
 
         // 5. Update state
         Eigen::VectorXd state_update = K * residual;
@@ -115,10 +122,11 @@ public:
         C_y += state_update(7);
 
         // 6. Update covariance (Joseph form)
-        Eigen::MatrixXd I = Eigen::MatrixXd::Identity(P.rows(), P.cols());
+        I = Eigen::MatrixXd::Identity(P.rows(), P.cols());
         P = (I - K * H) * P * (I - K * H).transpose() + K * R * K.transpose();
         P = 0.5 * (P + P.transpose()); // Ensure symmetry
 
+        _trajectory.emplace_back(C_x, C_y);
         prev_t = t;
     }
 
@@ -164,17 +172,10 @@ public:
             H_batch(2 * i, 1) = delta_t * dxdtheta;            // d(x_pred)/dω
             H_batch(2 * i, 2) = std::sin(theta_i);             // d(x_pred)/dAₓ
             H_batch(2 * i, 3) = std::cos(theta_i);             // d(x_pred)/dBₓ
-            H_batch(2 * i, 4) = 1.0;                           // d(x_pred)/dCₓ
-            H_batch(2 * i, 5) = 0.0;                           // x_pred does not depend on Aᵧ
-            H_batch(2 * i, 6) = 0.0;                           // x_pred does not depend on Bᵧ
-            H_batch(2 * i, 7) = 0.0;                           // x_pred does not depend on Cᵧ
 
             // Fill in Jacobian rows for y measurement:
             H_batch(2 * i + 1, 0) = dydtheta;                  // d(y_pred)/dθ
             H_batch(2 * i + 1, 1) = delta_t * dydtheta;          // d(y_pred)/dω
-            H_batch(2 * i + 1, 2) = 0.0;                       // y_pred does not depend on Aₓ
-            H_batch(2 * i + 1, 3) = 0.0;                       // y_pred does not depend on Bₓ
-            H_batch(2 * i + 1, 4) = 0.0;                       // y_pred does not depend on Cₓ
             H_batch(2 * i + 1, 5) = std::sin(theta_i);         // d(y_pred)/dAᵧ
             H_batch(2 * i + 1, 6) = std::cos(theta_i);         // d(y_pred)/dBᵧ
             H_batch(2 * i + 1, 7) = 1.0;                       // d(y_pred)/dCᵧ
@@ -295,6 +296,7 @@ private:
     Eigen::MatrixXd H;
 
     std::vector<std::tuple<double, double>> residuals_vec;
+    std::vector<std::pair<double, double>> _trajectory;
 
     [[nodiscard]] double wrap_phase(double phase) const {
         while (phase > 2 * M_PI) {

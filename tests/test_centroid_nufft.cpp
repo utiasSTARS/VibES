@@ -16,7 +16,7 @@ TEST(CENTROID_NUFFT, Estimation) {
     double amp = 10.0;
     double freq = Hz2rad(10.0); // Hz
 
-    CentroidCalculation centroid;
+    CMassCalculation centroid;
 
     auto reader = std::make_unique<EventsFreqCalibPattern>(0, cv::Size(640, 480), freq, amp, amp, 0., true);
 
