@@ -7,6 +7,9 @@
 #include <metavision/sdk/driver/camera.h>
 #include <metavision/sdk/base/events/event_cd.h>
 #include <csignal>
+#include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
+#include <metavision/sdk/ui/utils/window.h>
+#include <metavision/sdk/ui/utils/event_loop.h>
 
 
 #include "utils.hpp"
@@ -62,7 +65,54 @@ int main(int argc, char *argv[]) {
             harmeda.feed(ev->x, ev->y,
                          static_cast<double>(ev->t - initial_timestamp) / 1e6);
         }
+
+        if (harmeda.initialized() && harmeda.size() == 0) {
+            // we want to track only one patter in the screen
+            const auto &[x_centre, y_centre] = harmeda.getInitialCenter();
+            harmeda.add_bin(x_centre, y_centre, std::max(camera_width, camera_height) / 6., vis);
+        }
     });
+
+    // visualization
+
+    const std::uint32_t acc = 20000;
+    double fps = 100;
+
+    auto frame_gen = Metavision::PeriodicFrameGenerationAlgorithm(camera_width, camera_height, acc, fps);
+
+    // we add the callback that will pass the events to the frame generator
+    cam.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
+        frame_gen.process_events(begin, end);
+    });
+
+    // to render the frames, we create a window using the Window class of the UI module
+    Metavision::Window window("Metavision SDK Get Started", camera_width, camera_height,
+                              Metavision::BaseWindow::RenderMode::BGR);
+
+    // we set a callback on the windows to close it when the Escape or Q key is pressed
+    window.set_keyboard_callback(
+            [&window](Metavision::UIKeyEvent key, int scancode, Metavision::UIAction action, int mods) {
+                if (action == Metavision::UIAction::RELEASE &&
+                    (key == Metavision::UIKeyEvent::KEY_ESCAPE || key == Metavision::UIKeyEvent::KEY_Q)) {
+                    window.set_close_flag();
+                }
+            });
+
+    // we set a callback on the frame generator so that it calls the window object to display the generated frames
+    frame_gen.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
+        if (harmeda.initialized()) {
+            // add a text to the frame
+            cv::putText(frame, "HARMEDA: ON", cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0),
+                        2);
+        } else {
+            cv::putText(frame, "HARMEDA: OFF", cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255),
+                        2);
+        }
+        harmeda.draw(frame);
+        window.show(frame);
+    });
+
+
 
     // start the camera
     try {
@@ -73,17 +123,12 @@ int main(int argc, char *argv[]) {
     }
 
     // keep running until the camera is off, the recording is finished or the escape key was pressed
-    while (cam.is_running() && !signal_caught.load(std::memory_order::relaxed)) {
+    while (cam.is_running() && !signal_caught.load(std::memory_order::relaxed) && !window.should_close()) {
         // we need to update the visualizer
         vis->update();
 
-        if (harmeda.initialized() && harmeda.size() == 0) {
-            // we want to track only one patter in the screen
-            const auto &[x_centre, y_centre] = harmeda.getInitialCenter();
-            harmeda.add_bin(x_centre, y_centre, std::max(camera_width, camera_height) / 4., vis);
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        static constexpr std::int64_t kSleepPeriodMs = 10;
+        Metavision::EventLoop::poll_and_dispatch(kSleepPeriodMs);
     }
 
     // the recording is finished or the user wants to quit, stop the camera.

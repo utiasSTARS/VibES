@@ -57,6 +57,9 @@ public:
 
     void feed(double x, double y, double time) {
         if (!_initialized) {
+            if (_start_time.time_since_epoch().count() == 0) {
+                _start_time = std::chrono::high_resolution_clock::now();
+            }
             // add this here, because it is true that the following code will be run less than the estimation code above
             auto sample = _initializer->feed(x, y, time);
             if (!sample) {
@@ -79,6 +82,14 @@ public:
             _loading_text.stop();
 
             _initialized = true;
+
+            // time measurement
+            auto end_time = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> elapsed_time = end_time - _start_time;
+            // text in red
+            std::cout << "\033[1;31m";
+            std::cout << "Initialization time: " << elapsed_time.count() << " s\n";
+            std::cout << "\033[0m" << std::endl;
             return;
         }
 
@@ -90,6 +101,17 @@ public:
 //                     for (std::size_t i = 0; i < _bins.size(); ++i) {
 //                         _bins[i]->feed(x, y, time);
 //                     }
+        }
+    }
+
+    void draw(cv::Mat &image) {
+        if (!_initialized) {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(_mtx);
+        for (const auto &bin: _bins) {
+            bin->draw(image);
         }
     }
 
@@ -139,6 +161,9 @@ private:
     // Lock-free single-producer single-consumer queues.
     boost::lockfree::spsc_queue<std::tuple<double, double, Time>> _init_events_queue{10000};
     boost::lockfree::spsc_queue<std::tuple<double, double, Time>> _events_queue{10000};
+
+    // chrono for time measurement
+    std::chrono::high_resolution_clock::time_point _start_time;
 };
 
 #endif // PROJECT_HARMEDA_H

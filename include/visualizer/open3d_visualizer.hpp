@@ -33,11 +33,13 @@ public:
     }
 
     void addPoint(double x, double y, double z, double r = 0.1, double g = 0.1, double b = 0.1) {
+        std::lock_guard<std::mutex> lock(_mtx);
         point_cloud->points_.emplace_back(x, y, z);
         point_cloud->colors_.emplace_back(r, g, b);
     }
 
     void update() {
+        std::lock_guard<std::mutex> lock(_mtx);
         vis->UpdateGeometry(point_cloud);
         vis->PollEvents();
         vis->UpdateRender();
@@ -61,6 +63,8 @@ private:
     std::shared_ptr<open3d::visualization::Visualizer> vis;
     std::shared_ptr<open3d::geometry::PointCloud> point_cloud;
     const int _width, _height;
+
+    std::mutex _mtx;
 };
 
 #endif //PROJECT_OPEN3D_VISUALIZER_H
