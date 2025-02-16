@@ -131,6 +131,12 @@ int main(int argc, char *argv[]) {
         Metavision::EventLoop::poll_and_dispatch(kSleepPeriodMs);
     }
 
+    std::cout << "Exiting..." << std::endl;
+    // blue text
+    std::cout << "\033[1;34m";
+    std::cout << "EKF results: " << harmeda;
+    std::cout << "\033[0m" << std::endl;
+
     // the recording is finished or the user wants to quit, stop the camera.
     cam.stop();
 

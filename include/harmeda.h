@@ -47,7 +47,7 @@ public:
         }
         std::lock_guard<std::mutex> lock(_mtx);
         _bins.emplace_back(
-                std::make_shared<BinThreadFollower>(1, size, 2., 2.,
+                std::make_shared<BinThreadFollower>(1, size, .1, 1.,
                                                     _estimated_freq,
                                                     x, y,
                                                     _phase_shift,
@@ -96,11 +96,10 @@ public:
         if (!_bins.empty()) {
             std::lock_guard<std::mutex> lock(_mtx);
             // bool pushed = _events_queue.push({x, y, time});
-            _bins[0]->feed(x, y, time);
-// #pragma omp parallel for
-//                     for (std::size_t i = 0; i < _bins.size(); ++i) {
-//                         _bins[i]->feed(x, y, time);
-//                     }
+            //_bins[0]->feed(x, y, time);
+            for (std::size_t i = 0; i < _bins.size(); ++i) {
+                _bins[i]->feed(x, y, time);
+            }
         }
     }
 
@@ -135,6 +134,10 @@ public:
         os << "Initialized: " << harmeda._initialized << "\n";
         os << "Initial events centre x: " << harmeda._ini_events_centre_x << "\n";
         os << "Initial events centre y: " << harmeda._ini_events_centre_y << "\n";
+        os << "Bins: " << harmeda._bins.size() << "\n";
+        for (const auto &bin: harmeda._bins) {
+            os << *bin << "\n";
+        }
         return os;
     }
 
