@@ -47,7 +47,7 @@ public:
         }
         std::lock_guard<std::mutex> lock(_mtx);
         _bins.emplace_back(
-                std::make_shared<BinThreadFollower>(1, size, .1, 1.,
+                std::make_shared<BinThreadFollower>(1, size, .001, 10.,
                                                     _estimated_freq,
                                                     x, y,
                                                     _phase_shift,

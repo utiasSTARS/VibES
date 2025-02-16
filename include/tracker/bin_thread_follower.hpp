@@ -58,6 +58,7 @@ public:
         if (!_vis) {
             throw std::runtime_error("Open3DVisualizer is not initialized");
         }
+
         // start thread
         thread = std::thread([&]() {
             while (running.load(std::memory_order::relaxed)) {
@@ -67,22 +68,33 @@ public:
                         updated = true;
 
                         // estimated curve
-                        const auto &[centre_x, centre_y] = ekf->getCenter();
+                        auto centre = ekf->getCenter();
+                        if (centre) {
+                            const auto &[centre_x, centre_y] = centre.value();
+                            _vis->addPoint(centre_x, centre_y, s_t * 100, 1., 0., 0.);
+
+                            if (!fixe_bin) {
+                                _bin_center_x = centre_x;
+                                _bin_center_y = centre_y;
+                            }
+                        }
 
                         const auto &[est_x, est_y] = ekf->getPred();
 
+                        omega_covariance = ekf->getOmegaCov();
 
-                        // std::lock_guard<std::mutex> lock(mtx);
-                        // thread safe
+                        auto cov = ekf->getCov();
+                        // print the covariance, cov is a tuple
+                        std::cout << "\rCovariance: ";
+                        std::apply([&](auto... args) {
+                            ((std::cout << args << " "), ...);
+                        }, cov);
+                        std::cout.flush();
+
+
                         // _vis->addPoint(s_x, s_y, s_t * 1000, 0.1, 1.0);
-                        // _vis->addPoint(est_x, est_y, s_t * 1000, 0.1, 0.1, 1.0);
-                        _vis->addLine(s_x, s_y, s_t * 1000, 0.1, 1.0);
-                        _vis->addLine2(est_x, est_y, s_t * 1000, 0.1, 0.1, 1.0);
-
-                        if (!fixe_bin) {
-                            _bin_center_x = centre_x;
-                            _bin_center_y = centre_y;
-                        }
+                        _vis->addLine(s_x, s_y, s_t * 100, 0.1, 1.0);
+                        _vis->addLine2(est_x, est_y, s_t * 100, 0.1, 0.1, 1.0);
                     }
 
                     // std::this_thread::sleep_for(std::chrono::nanoseconds(10));
@@ -122,6 +134,10 @@ public:
         cv::putText(frame, "f:" + fp2str(ekf->getHz(), 1) + " Hz",
                     cv::Point(_bin_center_x - _bin_size_half, _bin_center_y - _bin_size_half - 10),
                     cv::FONT_HERSHEY_SIMPLEX, 1, cv_color, 2, cv::LINE_AA);
+
+        // draw covariance as an ellipse
+        cv::ellipse(frame, cv::Point(_bin_center_x, _bin_center_y),
+                    cv::Size(omega_covariance, omega_covariance), 0, 0, 360, cv_color, 2);
     }
 
     [[nodiscard]] bool check(double x, double y) const {
@@ -226,6 +242,8 @@ private:
     double _bin_size = 0, _bin_size_half = 0;
 
     CentroidPtr _centroid;
+
+    double omega_covariance = 0;
 
 };
 

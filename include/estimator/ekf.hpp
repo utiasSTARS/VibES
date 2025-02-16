@@ -20,10 +20,10 @@ public:
         F = Eigen::MatrixXd::Identity(state_dim, state_dim);
         P = Eigen::MatrixXd::Identity(state_dim, state_dim) * 100.; // Initial covariance matrix
         // we are more certain about omega, respect to the other parameters
-        P(1, 1) = 1.0;
+        P(1, 1) = 100.0;
         // high uncertainty over c_x and c_y
-        P(4, 4) = 1000.;
-        P(7, 7) = 1000.;
+        P(4, 4) = 100.;
+        P(7, 7) = 100.;
         Q = Eigen::MatrixXd::Identity(state_dim, state_dim) * process_noise;
         R = Eigen::MatrixXd::Identity(2 * n_samples, 2 * n_samples) * measurement_noise;
 
@@ -46,6 +46,7 @@ public:
             computeEKF(x, y, t);
             return true;
         } else {
+            theta = std::atan2(y, x);
             prev_t = t;
             return false;
         }
@@ -67,8 +68,9 @@ public:
         return _trajectory;
     }
 
-    [[nodiscard]] std::pair<double, double> getCenter() const {
-        return _trajectory.back();
+    [[nodiscard]] std::optional<std::pair<double, double>> getCenter() const {
+        if(_trajectory.empty()) return std::nullopt;
+        return std::make_pair(_trajectory.back().first, _trajectory.back().second);
     }
 
     void computeEKF(double x_meas, double y_meas, double t) {
@@ -98,19 +100,29 @@ public:
         H.setZero();
         // dx/dtheta, dx/dA_x, dx/dB_x, dx/dC_x
         H(0, 0) = dxdtheta;
-        // H(0, 1) = delta_t * dxdtheta;
+        H(0, 1) = delta_t * dxdtheta;
         H(0, 2) = std::sin(theta);
         H(0, 3) = std::cos(theta);
         H(0, 4) = 1.0;
         // dy/dtheta, dy/dA_y, dy/dB_y, dy/dC_y
         H(1, 0) = dydtheta;
-        // H(1, 1) = delta_t * dydtheta;
+        H(1, 1) = delta_t * dydtheta;
         H(1, 5) = std::sin(theta);
         H(1, 6) = std::cos(theta);
         H(1, 7) = 1.0;
 
         // 4. Kalman gain and covariance update
         const Eigen::MatrixXd S = H * P * H.transpose() + R;
+
+        // --------- Mahalanobis distance check ---------
+        // double mahalanobisSq = residual.transpose() * S.inverse() * residual;
+        // const double threshold = 9.21;  // Example: 99% confidence threshold for 2 DOF
+        // if (mahalanobisSq > threshold) {
+        //     // Measurement considered an outlier. Option: skip update.
+        //     prev_t = t;  // Still update time stamp
+        //     return;
+        // }
+
         const Eigen::MatrixXd K = P * H.transpose() * S.inverse();
 
         // 5. Update state
@@ -262,7 +274,35 @@ public:
         return wrap_phase(std::atan2(std::abs(B_y), std::abs(A_y)));
     }
 
-    std::vector<std::tuple<double, double>> getResiduals() {
+    [[nodiscard]] std::tuple<double, double, double, double, double, double, double, double> getState() const {
+        return std::make_tuple(theta, omega, A_x, B_x, C_x, A_y, B_y, C_y);
+    }
+
+    [[nodiscard]] std::tuple<double, double, double, double, double, double, double, double> getCov() const {
+        return std::make_tuple(P(0, 0), P(1, 1), P(2, 2), P(3, 3), P(4, 4), P(5, 5), P(6, 6), P(7, 7));
+    }
+
+    [[nodiscard]] double getOmegaCov() const {
+        return P(1, 1);
+    }
+
+    [[nodiscard]] double getAmplXCov() const {
+        return P(2, 2);
+    }
+
+    [[nodiscard]] double getAmplYCov() const {
+        return P(5, 5);
+    }
+
+    [[nodiscard]] double getShiftXCov() const {
+        return P(4, 4);
+    }
+
+    [[nodiscard]] double getShiftYCov() const {
+        return P(7, 7);
+    }
+
+    [[nodiscard]] std::vector<std::tuple<double, double>> getResiduals() {
         return residuals_vec;
     }
 

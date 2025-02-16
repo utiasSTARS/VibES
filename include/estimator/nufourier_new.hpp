@@ -140,6 +140,7 @@ public:
         // --- Step 6: Perform 1D NUFFT on Sy to extract phase information ---
         std::vector<std::complex<double>> F_out_y(n_modes);
         ier = finufft1d1(N, t_scaled.data(), Sy_complex.data(), iflag, eps, n_modes, F_out_y.data(), opts.get());
+        
         if (ier != 0) {
             std::cerr << "FINUFFT error (Sy transform): " << ier << std::endl;
             return false;
@@ -170,10 +171,12 @@ public:
         offset_x = c_x_est;
         offset_y = mean_y;
 
+        std::cout << "\033[1;34m";
         std::cout << "Estimated ω: " << main_freq_t << " rad/s, " << rad2Hz(main_freq_t) << " Hz" << std::endl;
         std::cout << "Estimated Amplitude: " << amplitude << ", Offset (Sx): " << offset_x << std::endl;
         std::cout << "Estimated Phase Shift: " << phase_shift << " rad" << std::endl;
         std::cout << "Estimated Offset (Sy): " << offset_y << std::endl;
+        std::cout << "\033[0m";
 
         // Reset data for next batch.
         std::fill(t_data.begin(), t_data.end(), 0.0);
