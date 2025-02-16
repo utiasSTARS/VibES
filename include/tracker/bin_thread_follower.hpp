@@ -36,7 +36,8 @@ public:
                       double c_y,
                       double phase_shift = M_PI / 2,
                       double amplitude = 1.,
-                      std::shared_ptr<Open3DVisualizer> vis = nullptr)
+                      std::shared_ptr<Open3DVisualizer> vis = nullptr,
+                      bool fixe_bin = false)
             : _bin_id(bin_counter++),
               _target_omega(target_omega),
               _vis(std::move(vis)),
@@ -51,7 +52,7 @@ public:
 
         // std::cout << "\033[1;34m" << "Centroid initialization with delta t: " << 1. / (10. * rad2Hz(target_omega))
         //           << "\033[0m" << std::endl;
-        _centroid = std::make_shared<CMassCalculation>(10, 1. / (5 * rad2Hz(target_omega)));
+        _centroid = std::make_shared<CMassCalculation>(10, 1. / (5. * rad2Hz(target_omega)));
 
         // if the _vis is not initialized reaise an error
         if (!_vis) {
@@ -73,12 +74,15 @@ public:
 
                         // std::lock_guard<std::mutex> lock(mtx);
                         // thread safe
-                        _vis->addPoint(s_x, s_y, s_t * 1000, 0.1, 1.0);
-                        _vis->addPoint(est_x, est_y, s_t * 1000, 0.1, 0.1, 1.0);
+                        // _vis->addPoint(s_x, s_y, s_t * 1000, 0.1, 1.0);
+                        // _vis->addPoint(est_x, est_y, s_t * 1000, 0.1, 0.1, 1.0);
+                        _vis->addLine(s_x, s_y, s_t * 1000, 0.1, 1.0);
+                        _vis->addLine2(est_x, est_y, s_t * 1000, 0.1, 0.1, 1.0);
 
-
-                        _bin_center_x = centre_x;
-                        _bin_center_y = centre_y;
+                        if (!fixe_bin) {
+                            _bin_center_x = centre_x;
+                            _bin_center_y = centre_y;
+                        }
                     }
 
                     // std::this_thread::sleep_for(std::chrono::nanoseconds(10));

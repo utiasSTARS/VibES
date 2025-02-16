@@ -26,6 +26,9 @@ public:
         bounding_box->color_ = Eigen::Vector3d(0.0, 1.0, 0.0);  // Green color
 
         vis->AddGeometry(bounding_box);
+
+        vis->AddGeometry(_line_set);
+        vis->AddGeometry(_line_set2);
     }
 
     ~Open3DVisualizer() {
@@ -38,9 +41,47 @@ public:
         point_cloud->colors_.emplace_back(r, g, b);
     }
 
+    void addLine(double x, double y, double z, double r = 0.1, double g = 0.1, double b = 0.1) {
+        std::lock_guard<std::mutex> lock(_mtx);
+
+
+        // If this is the first point, store it and return
+        if (_line_set->points_.empty()) {
+            _line_set->points_.emplace_back(Eigen::Vector3d(x, y, z));
+            return;
+        }
+
+        // Update LineSet
+        _line_set->points_.emplace_back(Eigen::Vector3d(x, y, z));
+        _line_set->lines_.emplace_back(Eigen::Vector2i(_line_set->points_.size() - 2, _line_set->points_.size() - 1));
+
+        // Ensure colors array matches the number of lines
+        _line_set->colors_.resize(_line_set->lines_.size(), Eigen::Vector3d(r, g, b));
+    }
+
+    void addLine2(double x, double y, double z, double r = 0.1, double g = 0.1, double b = 0.1) {
+        std::lock_guard<std::mutex> lock(_mtx);
+
+        // If this is the first point, store it and return
+        if (_line_set2->points_.empty()) {
+            _line_set2->points_.emplace_back(Eigen::Vector3d(x, y, z));
+            return;
+        }
+
+        // Update LineSet
+        _line_set2->points_.emplace_back(Eigen::Vector3d(x, y, z));
+        _line_set2->lines_.emplace_back(
+                Eigen::Vector2i(_line_set2->points_.size() - 2, _line_set2->points_.size() - 1));
+
+        // Ensure colors array matches the number of lines
+        _line_set2->colors_.resize(_line_set2->lines_.size(), Eigen::Vector3d(r, g, b));
+    }
+
     void update() {
         std::lock_guard<std::mutex> lock(_mtx);
         vis->UpdateGeometry(point_cloud);
+        vis->UpdateGeometry(_line_set);
+        vis->UpdateGeometry(_line_set2);
         vis->PollEvents();
         vis->UpdateRender();
     }
@@ -63,6 +104,15 @@ private:
     std::shared_ptr<open3d::visualization::Visualizer> vis;
     std::shared_ptr<open3d::geometry::PointCloud> point_cloud;
     const int _width, _height;
+
+    std::shared_ptr<open3d::geometry::LineSet> _line_set = std::make_shared<open3d::geometry::LineSet>();
+    std::vector<Eigen::Vector3d> _points;
+    std::vector<Eigen::Vector2i> _lines;
+
+
+    std::shared_ptr<open3d::geometry::LineSet> _line_set2 = std::make_shared<open3d::geometry::LineSet>();
+    std::vector<Eigen::Vector3d> _points2;
+    std::vector<Eigen::Vector2i> _lines2;
 
     std::mutex _mtx;
 };

@@ -41,7 +41,7 @@ public:
     }
 
     void add_bin(double x, double y, double size = 40,
-                 std::shared_ptr<Open3DVisualizer> vis = nullptr) {
+                 std::shared_ptr<Open3DVisualizer> vis = nullptr, bool fixed_bin = false) {
         if (!_initialized) {
             throw std::runtime_error("HARMEDA is not initialized yet.");
         }
@@ -52,7 +52,8 @@ public:
                                                     x, y,
                                                     _phase_shift,
                                                     _amplitude,
-                                                    vis));
+                                                    vis,
+                                                    fixed_bin));
     }
 
     void feed(double x, double y, double time) {
