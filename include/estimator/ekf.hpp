@@ -8,6 +8,8 @@
 #include <Eigen/Dense>
 #include <deque>
 #include "utils.hpp"
+#include <cmath>
+#include <optional>
 
 class EKF {
 public:
@@ -52,12 +54,21 @@ public:
         }
     }
 
-    [[nodiscard]] std::optional<std::tuple<int, int, double>> compensate(int x, int y, double t) const {
+    [[nodiscard]] inline std::optional<std::tuple<int, int>> compensate(int x, int y, double delta_t) const {
+        if (prev_t == -1) return std::nullopt;
         // according to out camera projection model
-        // double u = x - A_x * std::sin(theta) + B_x * std::cos(theta);
-        // double v = y - A_y * std::sin(theta) + B_y * std::cos(theta);
-        // return std::make_tuple(static_cast<int>(u), static_cast<int>(v), static_cast<int64_t>(t * 1e6));
-        return std::make_tuple(static_cast<int>(C_x), static_cast<int>(C_y), static_cast<int64_t>(t * 1e6));
+        const double theta_hat = theta + omega * delta_t;
+        const double u = x - (A_x * std::sin(theta_hat) + B_x * std::cos(theta_hat));
+        const double v = y - (A_y * std::sin(theta_hat) + B_y * std::cos(theta_hat));
+        return std::make_tuple(static_cast<int>(u), static_cast<int>(v));
+    }
+
+    inline std::tuple<double, double> getComp(double delta_t) const {
+        if (prev_t == -1) return std::make_tuple(0., 0.);
+        // according to out camera projection model
+        const double theta_hat = theta + omega * delta_t;
+        return std::make_tuple((A_x * std::sin(theta_hat) + B_x * std::cos(theta_hat)),
+                               (A_y * std::sin(theta_hat) + B_y * std::cos(theta_hat)));
     }
 
     [[nodiscard]] std::tuple<double, double> getPred() const {
@@ -69,7 +80,7 @@ public:
     }
 
     [[nodiscard]] std::optional<std::pair<double, double>> getCenter() const {
-        if(_trajectory.empty()) return std::nullopt;
+        if (_trajectory.empty()) return std::nullopt;
         return std::make_pair(_trajectory.back().first, _trajectory.back().second);
     }
 
@@ -145,100 +156,12 @@ public:
         prev_t = t;
     }
 
-    void batchUpdate(
-            double prev_t,
-            const std::vector<double> &meas_times,
-            const std::vector<Eigen::Vector2d> &meas,
-            double &theta,
-            double &omega,
-            double &A_x, double &B_x, double &C_x,
-            double &A_y, double &B_y, double &C_y,
-            Eigen::MatrixXd &P,
-            const Eigen::MatrixXd &Q,
-            const Eigen::MatrixXd &R) {
-        const int N = static_cast<int>(meas_times.size());
-        if (N == 0) return; // no measurements to update with
-
-        Eigen::MatrixXd H_batch(2 * N, 8);
-        Eigen::VectorXd r_batch(2 * N);
-
-        // For each measurement, compute predicted measurement and its Jacobian row.
-        for (int i = 0; i < N; i++) {
-            double t_i = meas_times[i];
-            double delta_t = t_i - prev_t; // time difference from previous update time
-
-            // Propagate the phase: note that only theta is time-varying.
-            double theta_i = wrap_phase(theta + omega * delta_t);
-
-            // Predicted measurements at time t_i:
-            double x_pred = A_x * std::sin(theta_i) + B_x * std::cos(theta_i) + C_x;
-            double y_pred = A_y * std::sin(theta_i) + B_y * std::cos(theta_i) + C_y;
-
-            // Residual (measurement - prediction):
-            r_batch(2 * i) = meas[i](0) - x_pred;
-            r_batch(2 * i + 1) = meas[i](1) - y_pred;
-
-            // Common derivatives:
-            double dxdtheta = A_x * std::cos(theta_i) - B_x * std::sin(theta_i);
-            double dydtheta = A_y * std::cos(theta_i) - B_y * std::sin(theta_i);
-
-            // Fill in Jacobian rows for x measurement:
-            H_batch(2 * i, 0) = dxdtheta;                    // d(x_pred)/dθ
-            H_batch(2 * i, 1) = delta_t * dxdtheta;            // d(x_pred)/dω
-            H_batch(2 * i, 2) = std::sin(theta_i);             // d(x_pred)/dAₓ
-            H_batch(2 * i, 3) = std::cos(theta_i);             // d(x_pred)/dBₓ
-
-            // Fill in Jacobian rows for y measurement:
-            H_batch(2 * i + 1, 0) = dydtheta;                  // d(y_pred)/dθ
-            H_batch(2 * i + 1, 1) = delta_t * dydtheta;          // d(y_pred)/dω
-            H_batch(2 * i + 1, 5) = std::sin(theta_i);         // d(y_pred)/dAᵧ
-            H_batch(2 * i + 1, 6) = std::cos(theta_i);         // d(y_pred)/dBᵧ
-            H_batch(2 * i + 1, 7) = 1.0;                       // d(y_pred)/dCᵧ
-        }
-
-        // For the covariance propagation, we assume a state transition from the previous update time to the time of the last measurement.
-        double t_last = meas_times.back();
-        double delta_last = t_last - prev_t;
-        Eigen::MatrixXd F_batch = Eigen::MatrixXd::Identity(8, 8);
-        F_batch(0, 1) = delta_last; // Only theta depends on omega over delta_last.
-        Eigen::MatrixXd P_pred = F_batch * P * F_batch.transpose() + Q;
-
-        // Form the block-diagonal measurement noise covariance for the batch.
-        Eigen::MatrixXd R_batch = Eigen::MatrixXd::Zero(2 * N, 2 * N);
-        for (int i = 0; i < N; i++) {
-            R_batch.block(2 * i, 2 * i, 2, 2) = R;
-        }
-
-        // Innovation covariance for the batch update.
-        Eigen::MatrixXd S = H_batch * P_pred * H_batch.transpose() + R_batch;
-
-        // Batch Kalman gain.
-        Eigen::MatrixXd K = P_pred * H_batch.transpose() * S.inverse();
-
-        // Compute the state update from the stacked residual.
-        Eigen::VectorXd state_update = K * r_batch;
-
-        // Update the state:
-        theta = wrap_phase(theta + state_update(0)); // Wrap phase after update.
-        omega += state_update(1);
-        A_x += state_update(2);
-        B_x += state_update(3);
-        C_x += state_update(4);
-        A_y += state_update(5);
-        B_y += state_update(6);
-        C_y += state_update(7);
-
-        // Update covariance using the Joseph form.
-        I = Eigen::MatrixXd::Identity(8, 8);
-        P = (I - K * H_batch) * P_pred * (I - K * H_batch).transpose() + K * R_batch * K.transpose();
-        P = 0.5 * (P + P.transpose());  // Ensure symmetry.
-
-        prev_t = meas_times.back();
-    }
-
-
     [[nodiscard]] double getPrevT() const {
         return prev_t;
+    }
+
+    [[nodiscard]] double getTheta() const {
+        return theta;
     }
 
     [[nodiscard]] double getHz() const {

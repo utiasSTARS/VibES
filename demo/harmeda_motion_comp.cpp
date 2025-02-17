@@ -69,12 +69,12 @@ int main(int argc, char *argv[]) {
         if (harmeda.initialized() && harmeda.size() == 0) {
             // we want to track only one patter in the screen
             const auto &[x_centre, y_centre] = harmeda.getInitialCenter();
-            harmeda.add_bin(camera_width/2, camera_height/2, std::max(camera_width, camera_height), vis, true);
+            harmeda.add_bin(camera_width / 2, camera_height / 2, std::max(camera_width, camera_height), vis, true);
         }
     });
 
     // visualization
-    const std::uint32_t acc = 20000;
+    const std::uint32_t acc = 200;
     double fps = 200;
 
     auto frame_gen = Metavision::PeriodicFrameGenerationAlgorithm(camera_width, camera_height, acc, fps);
@@ -84,9 +84,39 @@ int main(int argc, char *argv[]) {
         frame_gen.process_events(begin, end);
     });
 
+    auto frame_gen_comp = Metavision::PeriodicFrameGenerationAlgorithm(camera_width, camera_height, acc, fps);
+
+    // we add the callback that will pass the events to the frame generator
+    cam.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
+        auto comp = harmeda.compensate();
+        if (comp) {
+            const auto shared_ptr = comp.value();
+            if(shared_ptr->empty()) {
+                return;
+            }
+            // from my event to Metavision event
+            std::vector<Metavision::EventCD> events;
+
+            for (const auto [x, y, t]: *shared_ptr) {
+                // check x and y are within the camera resolution
+                if (x < 0 || x >= camera_width || y < 0 || y >= camera_height) {
+                    continue;
+                }
+                // unsigned short x, unsigned short y, short p, timestamp t
+                events.emplace_back(x, y, 1, t * 1e6);
+            }
+
+            frame_gen_comp.process_events(events.begin(), events.end());
+        }
+    });
+
     // to render the frames, we create a window using the Window class of the UI module
     Metavision::Window window("Metavision SDK Get Started", camera_width, camera_height,
                               Metavision::BaseWindow::RenderMode::BGR);
+
+
+    Metavision::Window window_comp("Compensated events", camera_width, camera_height,
+                                   Metavision::BaseWindow::RenderMode::BGR);
 
     // we set a callback on the windows to close it when the Escape or Q key is pressed
     window.set_keyboard_callback(
@@ -111,6 +141,9 @@ int main(int argc, char *argv[]) {
         window.show(frame);
     });
 
+    frame_gen_comp.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
+        window_comp.show(frame);
+    });
 
 
     // start the camera

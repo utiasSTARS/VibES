@@ -16,9 +16,10 @@
 #include <utility>
 #include <thread>
 
-struct DataPoint {
-    double x, y, t;
-};
+using Event = std::tuple<int, int, double>;
+using EventVect = std::vector<Event>;
+using EventVectPtr = std::shared_ptr<EventVect>;
+
 
 class BinThreadFollower {
 
@@ -83,6 +84,9 @@ public:
 
                         omega_covariance = ekf->getOmegaCov();
 
+                        c_m_x = s_x;
+                        c_m_y = s_y;
+
                         auto cov = ekf->getCov();
                         // print the covariance, cov is a tuple
                         std::cout << "\rCovariance: ";
@@ -95,13 +99,49 @@ public:
                         // _vis->addPoint(s_x, s_y, s_t * 1000, 0.1, 1.0);
                         _vis->addLine(s_x, s_y, s_t * 100, 0.1, 1.0);
                         _vis->addLine2(est_x, est_y, s_t * 100, 0.1, 0.1, 1.0);
-                    }
 
-                    // std::this_thread::sleep_for(std::chrono::nanoseconds(10));
+                        compensate();
+                    } else {
+                        _events_centre.pop();
+                    }
                 });
             }
         });
     }
+
+    void compensate() {
+        std::lock_guard<std::mutex> lock(mtx_out);
+        const auto &[events, t_hat] = _events_centre.front();
+        if (t_start == -1) {
+            t_start = std::get<2>(events->front());
+        }
+        double C_x_est = 0;
+        for (const auto &event: *events) {
+            auto [x, y, t] = event;
+            const auto &[shift_x, shift_y] = ekf->getComp(t-t_hat);
+            const double u = x - shift_x;
+            C_x_est += u;
+            const double v = y - shift_y;
+            _events_out->emplace_back(u, v, t);
+
+            cv::circle(_frame, cv::Point((t - t_start) * 1000, 10 * shift_x + 240), 2, cv::Scalar(0, 255, 0), -1);
+        }
+        cv::imshow("Compensated", _frame);
+        cv::waitKey(0);
+        C_x_est /= events->size();
+        std::cout << "C_x_est: " << C_x_est << ", should be same as: " << ekf->getShiftX() << std::endl;
+        // std::cout << "t_hat: " << t_hat << ", should be same as: " << ekf->getPrevT() << std::endl;
+        // assert(C_x_est == ekf->getShiftX());
+        assert(t_hat == ekf->getPrevT());
+        _events_centre.pop();
+    }
+
+    void getEventsOut(std::shared_ptr<EventVect> &events) {
+        std::lock_guard<std::mutex> lock(mtx_out);
+        events = _events_out;
+        _events_out = std::make_shared<EventVect>();
+    }
+
 
     void stop() {
         running.store(false, std::memory_order_relaxed);
@@ -112,8 +152,11 @@ public:
         // check if event is in the bin
         if (check(x, y)) {
             auto sample = _centroid->feed(x, y, t);
+            _events->emplace_back(x, y, t);
             if (sample) {
                 events_queue.push(sample.value());
+                _events_centre.emplace(_events, std::get<2>(sample.value()));
+                _events = std::make_shared<EventVect>();
             }
         }
     }
@@ -138,6 +181,10 @@ public:
         // draw covariance as an ellipse
         cv::ellipse(frame, cv::Point(_bin_center_x, _bin_center_y),
                     cv::Size(omega_covariance, omega_covariance), 0, 0, 360, cv_color, 2);
+
+        // draw c_m_x and c_m_y as a dot
+        cv::circle(frame, cv::Point(c_m_x, c_m_y), 2, cv_color, -1);
+
     }
 
     [[nodiscard]] bool check(double x, double y) const {
@@ -237,17 +284,26 @@ private:
     boost::lockfree::spsc_queue<std::tuple<double, double, double>> events_queue{10000};
 
     std::shared_ptr<Open3DVisualizer> _vis;
-    static std::mutex mtx;
+    static std::mutex mtx, mtx_out;
 
     double _bin_size = 0, _bin_size_half = 0;
 
     CentroidPtr _centroid;
 
     double omega_covariance = 0;
+    double c_m_x = 0, c_m_y = 0;
 
+    std::queue<std::tuple<EventVectPtr, double>> _events_centre;
+    EventVectPtr _events = std::make_shared<EventVect>();
+    EventVectPtr _events_out = std::make_shared<EventVect>();
+
+
+    cv::Mat _frame = cv::Mat::zeros(480, 640, CV_8UC3);
+    double t_start = -1;
 };
 
 std::mutex BinThreadFollower::mtx;
+std::mutex BinThreadFollower::mtx_out;
 int64_t BinThreadFollower::bin_counter = 0;
 
 

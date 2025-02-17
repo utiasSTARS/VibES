@@ -104,6 +104,16 @@ public:
         }
     }
 
+    std::optional<std::shared_ptr<std::vector<std::tuple<int, int, double>>>> compensate() {
+        std::lock_guard<std::mutex> lock(_mtx);
+        if (_bins.empty()) {
+            return std::nullopt;
+        }
+        std::shared_ptr<std::vector<std::tuple<int, int, double>>> compensated_points;
+        _bins[0]->getEventsOut(compensated_points);
+        return compensated_points;
+    }
+
     void draw(cv::Mat &image) {
         if (!_initialized) {
             return;
