@@ -28,19 +28,21 @@ public:
         stop();
     }
 
-    BinThreadFollower(int n_samples,
-                      double bin_size,
-                      double process_noise,
-                      double measurement_noise,
-                      double target_omega,
-                      double c_x,
-                      double c_y,
-                      double phase_shift = M_PI / 2,
-                      double amplitude_x = 1.,
-                      double amplitude_y = 1.,
-                      std::shared_ptr<Open3DVisualizer> vis = nullptr,
-                      bool fixed_bin = false,
-                      bool motion_compensation = false)
+    BinThreadFollower(
+            int width,
+            int height,
+            double bin_size,
+            double process_noise,
+            double measurement_noise,
+            double target_omega,
+            double c_x,
+            double c_y,
+            double phase_shift = M_PI / 2,
+            double amplitude_x = 1.,
+            double amplitude_y = 1.,
+            std::shared_ptr<Open3DVisualizer> vis = nullptr,
+            bool fixed_bin = false,
+            bool motion_compensation = false)
             : _bin_id(bin_counter++),
               _target_omega(target_omega),
               _vis(std::move(vis)),
@@ -51,7 +53,7 @@ public:
               _fixed_bin(fixed_bin),
               _motion_compensation(motion_compensation) {
         auto centroid_freq = 1. / (10. * rad2Hz(target_omega));
-        _centroid = std::make_shared<CMassCalculation>(10, centroid_freq); // 1e-3); //
+        _centroid = std::make_shared<CMassCalculation>(width, height, 10'000, centroid_freq); // 1e-3); //
 
         ekf = std::make_shared<EKF>(centroid_freq, 1., 1., .1, 3.);
         // double omega, double A, double phi, double C_x, double C_y

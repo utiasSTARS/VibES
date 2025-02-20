@@ -9,50 +9,93 @@
 
 #include <optional>
 #include <tuple>
+#include <vector>
+#include <memory>
+
+using opt_tuple = std::optional<std::tuple<double, double, double>>;
 
 class CMassCalculation {
 public:
-    explicit CMassCalculation(int counter_threshold = 50, double time_window = 1e-4) : _counter_threshold(
-            counter_threshold), _time_window(time_window) {}
+    CMassCalculation(int width, int height, int counter_threshold = 50, double time_window = 1e-4, int n_bins_x = 10,
+                     int n_bins_y = 10)
+            : _width(width), _height(height),
+              _counter_threshold(counter_threshold), _time_window(time_window),
+              _n_bins_x(n_bins_x), _n_bins_y(n_bins_y),
+              _bin_width(int(width / n_bins_x)), _bin_height(int(height / n_bins_y)) {
+        // init bins and weights with 0
+        _bins_x.reserve(_n_bins_x);
+        _bins_x.assign(_n_bins_x, 0);
+        _bins_y.reserve(_n_bins_x);
+        _bins_y.assign(_n_bins_x, 0);
+        _weights.reserve(_n_bins_x * _n_bins_y);
+        _weights.assign(_n_bins_x * _n_bins_y, 0);
+    }
 
-    std::optional<std::tuple<double, double, double>> feed(double x, double y, double t) {
+    opt_tuple feed(int x, int y, double t) {
+        // bounds check
+        if (x < 0 || x >= _width || y < 0 || y >= _height) return std::nullopt;
         if (_init_t < 0) _init_t = t; // Initialize start time
 
-        double delta_t = t - _init_t;
-        if (delta_t > _time_window) {  // Time window exceeded
-            auto centroid = getCMass();
+        opt_tuple centroid;
+        const double delta_t = t - _init_t;
+//        if (delta_t > _time_window) {  // Time window exceeded
+        if (centroid = getCMass(); centroid.has_value()) {
             reset(x, y, t);
             return centroid;
         }
 
-        // Accumulate values
-        _x += x;
-        _y += y;
+        const auto idx = _n_bins_x * int(y / _bin_height) + int(x / _bin_width);
+        _weights.at(idx) += 1;
+        _bins_x.at(idx) += x;
+        _bins_y.at(idx) += y;
         _t += t;
         _counter++;
-        return std::nullopt;
+        return centroid;
     }
 
-    std::optional<std::tuple<double, double, double>> getCMass() {
+    opt_tuple getCMass() {
         if (_counter < _counter_threshold) return std::nullopt;
-        double cc = static_cast<double>(_counter);
-        return std::make_tuple(_x / cc, _y / cc, _t / cc);
+
+        const auto icc = 1. / static_cast<double>(_counter);
+        double _x = 0, _y = 0;
+        for (int i = 0; i < _n_bins_x; i++) {
+            _weights[i] = _weights[i] * icc;
+            _x += _bins_x[i] * _weights[i];
+            _y += _bins_y[i] * _weights[i];
+        }
+        for (int i = 0; i < _n_bins_ygit ; i++) {
+            _y += _bins_y[i] * _weights[i];
+        }
+        return std::make_tuple(_x * icc, _y * icc, _t * icc);
     }
 
 private:
-    void reset(double x, double y, double t) {
-        _x = x;
-        _y = y;
-        _t = t; // Keep last point
+
+    inline void reset(int x, int y, double t) {
+        _bins_x.assign(_n_bins_x, 0);
+        _bins_y.assign(_n_bins_x, 0);
+        _weights.assign(_n_bins_x * _n_bins_y, 0);
+        const auto idx = _n_bins_x * int(y / _bin_height) + int(x / _bin_width);
+        _weights[idx] += 1;
+        _bins_x[idx] += x;
+        _bins_y[idx] += y;
+        _t = t;
         _counter = 1;
-        _init_t = t;
     }
 
-    double _x = 0, _y = 0, _t = 0;
+    double _t = 0;
     double _init_t = -1;
     unsigned long int _counter = 0;
-    const int _counter_threshold = 50;
-    const double _time_window = 1e-4;
+    const int _counter_threshold;
+    const double _time_window;
+    const double alpha = 0.1;
+    const int _bin_width, _bin_height;
+    const int _width, _height;
+
+    const int _n_bins_x = 10, _n_bins_y = 10;
+    std::vector<double> _weights;
+    std::vector<int> _bins_x, _bins_y;
+
 };
 
 

@@ -25,9 +25,9 @@ class HARMEDA {
 public:
     HARMEDA() = delete;
 
-    HARMEDA(int n_samples, double f_min, double f_max)
+    HARMEDA(int n_samples, double f_min, double f_max, int widht, int height)
             : _fourierFreqEst(n_samples, f_min, f_max) {
-        _initializer = std::make_shared<CMassCalculation>(10, 1e-3);
+        _initializer = std::make_shared<CMassCalculation>(widht, height, 10000, 1e-3);
 
         _loading_text.loading("Initializing HARMEDA");
     }
@@ -47,7 +47,7 @@ public:
         }
         std::lock_guard<std::mutex> lock(_mtx);
         _bins.emplace_back(
-                std::make_shared<BinThreadFollower>(1, size, .001, 10.,
+                std::make_shared<BinThreadFollower>(vis->getWidth(), vis->getHeight(), size, .001, 10.,
                                                     _estimated_freq,
                                                     x, y,
                                                     _phase_shift,
