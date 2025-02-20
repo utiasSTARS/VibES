@@ -61,9 +61,8 @@ public:
         for (int i = 0; i < _n_bins_x; i++) {
             _weights[i] = _weights[i] * icc;
             _x += _bins_x[i] * _weights[i];
-            _y += _bins_y[i] * _weights[i];
         }
-        for (int i = 0; i < _n_bins_ygit ; i++) {
+        for (int i = 0; i < _n_bins_y ; i++) {
             _y += _bins_y[i] * _weights[i];
         }
         return std::make_tuple(_x * icc, _y * icc, _t * icc);
