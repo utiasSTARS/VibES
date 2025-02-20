@@ -44,6 +44,27 @@ public:
 
     ~FourierFreqEst() = default;
 
+
+    inline std::pair<double, double> leastSquare(double omega_est, std::vector<double> data_) {
+        // --- Step 5: Estimate amplitude (A) and offset (c_x) using least squares ---
+        double S11 = 0.0, S12 = 0.0, S22 = static_cast<double>(N);
+        double S1y = 0.0, S2y = 0.0;
+        for (int i = 0; i < N; i++) {
+            double s = sin(omega_est * t_data[i]);
+            S11 += s * s;
+            S12 += s;
+            S1y += s * data_[i];
+            S2y += data_[i];
+        }
+        double det = S11 * S22 - S12 * S12;
+        if (std::abs(det) < 1e-10) {
+            throw std::runtime_error("Least squares: Singular matrix.");
+        }
+        double A_est = (S22 * S1y - S12 * S2y) / det;
+        double c_x_est = (S11 * S2y - S12 * S1y) / det;
+        return {A_est, c_x_est};
+    }
+
     // Feed new event data. Returns true if a complete batch is reached and computed.
     bool feed(double x, double y, Time time) {
         auto t = double(time);
@@ -119,32 +140,26 @@ public:
                 }
             }
         }
-        // --- Step 5: Estimate amplitude (A) and offset (c_x) using least squares ---
-        double S11 = 0.0, S12 = 0.0, S22 = static_cast<double>(N);
-        double S1y = 0.0, S2y = 0.0;
-        for (int i = 0; i < N; i++) {
-            double s = sin(omega_est * t_data[i]);
-            S11 += s * s;
-            S12 += s;
-            S1y += s * sx[i];
-            S2y += sx[i];
-        }
-        double det = S11 * S22 - S12 * S12;
-        if (std::abs(det) < 1e-10) {
-            std::cerr << "Error: Singular matrix in least squares fitting." << std::endl;
-            return false;
-        }
-        double A_est = (S22 * S1y - S12 * S2y) / det;
-        double c_x_est = (S11 * S2y - S12 * S1y) / det;
+
+        auto peak = findPeakIndex(F_out);
+        std::cout << "Peak index: " << peak << std::endl;
+        // magnitude of the peak
+        std::cout << "Magnitude of the peak: " << std::abs(F_out[peak]) << std::endl;
+        // frequency of the peak
+        std::cout << "Frequency of the peak: " << freqs_t[peak] * scaling << std::endl;
+
+        auto [A_est, c_x_est] = leastSquare(omega_est, sx);
 
         // --- Step 6: Perform 1D NUFFT on Sy to extract phase information ---
         std::vector<std::complex<double>> F_out_y(n_modes);
         ier = finufft1d1(N, t_scaled.data(), Sy_complex.data(), iflag, eps, n_modes, F_out_y.data(), opts.get());
-        
+
         if (ier != 0) {
             std::cerr << "FINUFFT error (Sy transform): " << ier << std::endl;
             return false;
         }
+
+        auto [A_y_est, c_y_est] = leastSquare(omega_est, sy);
 
         // Use the Fourier peak from Sx to get phase information.
         // (Assumes the same index gives the dominant contribution in both transforms.)
@@ -164,16 +179,22 @@ public:
             phi_est = std::fmod(phi_est + M_PI, 2 * M_PI);
         }
 
+        if (A_y_est < 0) {
+            A_y_est = -A_y_est;
+        }
+
         // --- Step 8: Save the estimated parameters ---
         main_freq_t = omega_est;
         phase_shift = phi_est;
         amplitude = A_est;
+        amplitude_y = A_y_est;
         offset_x = c_x_est;
         offset_y = mean_y;
 
         std::cout << "\033[1;34m";
         std::cout << "Estimated ω: " << main_freq_t << " rad/s, " << rad2Hz(main_freq_t) << " Hz" << std::endl;
-        std::cout << "Estimated Amplitude: " << amplitude << ", Offset (Sx): " << offset_x << std::endl;
+        std::cout << "Estimated Amplitude X: " << amplitude << ", Amplitude Y: " << A_y_est << ", Offset (Sx): "
+                  << offset_x << std::endl;
         std::cout << "Estimated Phase Shift: " << phase_shift << " rad" << std::endl;
         std::cout << "Estimated Offset (Sy): " << offset_y << std::endl;
         std::cout << "\033[0m";
@@ -203,6 +224,10 @@ public:
 
     double getAmplitude() const {
         return amplitude;
+    }
+
+    double getAmplitudeY() const {
+        return amplitude_y;
     }
 
     std::tuple<double, double> getOffset() const {
@@ -248,7 +273,7 @@ private:
     // Estimated parameters.
     double main_freq_t = 0.0;    // Angular frequency (rad/s) from Sx.
     double phase_shift = 0.0;    // Phase difference between Sx and Sy.
-    double amplitude = 0.0;      // Amplitude from least squares.
+    double amplitude = 0.0, amplitude_y = 0.0;      // Amplitude from least squares.
     double offset_x = 0.0;       // Offset for Sx from LS fit.
     double offset_y = 0.0;       // Offset (mean) for Sy.
 
@@ -260,7 +285,7 @@ private:
     const double f_min = 0.0, f_max = 0.0;
 
     // Helper: find the index of the peak in a Fourier spectrum.
-    int findPeakIndex(const std::vector<std::complex<double>> &F) const {
+    [[nodiscard]] static inline int findPeakIndex(const std::vector<std::complex<double>> &F) {
         int peak_idx = 0;
         double max_val = 0.0;
         for (int k = 0; k < static_cast<int>(F.size()); ++k) {

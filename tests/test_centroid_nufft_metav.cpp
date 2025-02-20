@@ -43,7 +43,7 @@ TEST(CENTROID, Estimation) {
                     estimated_freq = fourier.getMainFreqRad();
                     phase_shift = fourier.getPhaseShift();
                     amplitude = fourier.getAmplitude();
-                    break;
+                    cam.stop();
                 }
             }
         }

@@ -13,17 +13,24 @@
 #include <metavision/sdk/driver/camera.h>
 #include <metavision/sdk/base/events/event_cd.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
+#include <fstream>
 
 TEST(CENTROID, Estimation) {
-    CMassCalculation centroid(100, 1e-3);
+    CMassCalculation centroid(100, 1e-4);
 
     auto cam = Metavision::Camera::from_file(
-            "/home/viciopoli/datasets/event_harmeda/april_2v.raw");
+            "/home/viciopoli/datasets/event_harmeda/pattern.raw");
 
 
     int counter = 0;
     std::vector<std::tuple<double, double, double>> samples;
     int initial_time = -1;
+
+    // create a file we want to store the centroid
+    std::ofstream file_x(
+            "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/scripts/centroid_data_real/centroids_x_pattern.txt");
+    std::ofstream file_y(
+            "/home/viciopoli/STARS/courses/CSC2529 computational imagin/Project_proposal/project/scripts/centroid_data_real/centroids_y_pattern.txt");
 
     cam.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         auto ev_prev = begin;
@@ -36,6 +43,9 @@ TEST(CENTROID, Estimation) {
             }
             auto centr = centroid.feed(ev->x, ev->y, double(ev->t - initial_time) / 1e6);
             if (centr.has_value()) {
+                auto [x, y, time] = centr.value();
+                file_x << x << "," << time << std::endl;
+                file_y << y << "," << time << std::endl;
                 samples.push_back(centr.value());
             }
         }
@@ -72,6 +82,11 @@ TEST(CENTROID, Estimation) {
             cv::imshow("Centroids", img);
             cv::waitKey(0);
             cam.stop();
+
+
+            // close files
+            file_x.close();
+            file_y.close();
         }
     });
 

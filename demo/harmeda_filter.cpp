@@ -16,6 +16,7 @@
 #include "sim/ini_sim.hpp"
 #include "visualizer/open3d_visualizer.hpp"
 #include "visualizer/ev2image.hpp"
+#include "filter/freq_filter.hpp"
 
 #include "logger/loading.hpp"
 #include "harmeda.h"
@@ -52,42 +53,60 @@ int main(int argc, char *argv[]) {
     int camera_height = cam.geometry().height();
 
 
-    HARMEDA harmeda(100, 5, 150);
+    HARMEDA harmeda(1000, 2, 150);
+    std::shared_ptr<FreqFilter> freq_filter = nullptr;
+
     int64_t initial_timestamp = -1;
     auto vis = std::make_shared<Open3DVisualizer>(camera_width, camera_height);
 
+    const int freq_margin = 3;
     // we add the callback that will pass the events to the algo and then the frame generator
     cam.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         if (initial_timestamp == -1) {
             initial_timestamp = begin->t;
         }
         for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
+
             harmeda.feed(ev->x, ev->y,
-                         static_cast<double>(ev->t - initial_timestamp) / 1e6);
+                         static_cast<double>(ev->t - initial_timestamp) / 1e6, ev->p);
         }
 
         if (harmeda.initialized() && harmeda.size() == 0) {
-            // we want to track only one patter in the screen
-            const auto &[x_centre, y_centre] = harmeda.getInitialCenter();
-            harmeda.add_bin(x_centre, y_centre, std::max(camera_width, camera_height) / 6.5, vis);
+            if (freq_filter == nullptr) {
+                auto freq = harmeda.getEstimatedFreqHz();
+                freq_filter = std::make_shared<FreqFilter>(camera_width, camera_height, freq - freq_margin, freq + freq_margin);
+            }
         }
     });
 
     // visualization
-
     const std::uint32_t acc = 20000;
-    double fps = 200;
+    double fps = 20;
 
     auto frame_gen = Metavision::PeriodicFrameGenerationAlgorithm(camera_width, camera_height, acc, fps);
+    auto frame_gen_std = Metavision::PeriodicFrameGenerationAlgorithm(camera_width, camera_height, acc, fps);
 
+    std::vector<Metavision::EventCD> filtered_events;
     // we add the callback that will pass the events to the frame generator
     cam.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
-        frame_gen.process_events(begin, end);
+
+        if (freq_filter != nullptr) {
+            for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
+                if (freq_filter->check(ev->x, ev->y, ev->t)) {
+                    filtered_events.push_back(*ev);
+                }
+            }
+            frame_gen.process_events(filtered_events.begin(), filtered_events.end());
+        }
+        frame_gen_std.process_events(begin, end);
     });
 
     // to render the frames, we create a window using the Window class of the UI module
-    Metavision::Window window("Metavision SDK Get Started", camera_width, camera_height,
+    Metavision::Window window("Timesurface filtered", camera_width, camera_height,
                               Metavision::BaseWindow::RenderMode::BGR);
+
+    Metavision::Window window_std("Timesurface standard", camera_width, camera_height,
+                                  Metavision::BaseWindow::RenderMode::BGR);
 
     // we set a callback on the windows to close it when the Escape or Q key is pressed
     window.set_keyboard_callback(
@@ -100,18 +119,12 @@ int main(int argc, char *argv[]) {
 
     // we set a callback on the frame generator so that it calls the window object to display the generated frames
     frame_gen.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
-        if (harmeda.initialized()) {
-            // add a text to the frame
-            cv::putText(frame, "HARMEDA: ON", cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0),
-                        2);
-        } else {
-            cv::putText(frame, "HARMEDA: OFF", cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255),
-                        2);
-        }
-        harmeda.draw(frame);
         window.show(frame);
     });
 
+    frame_gen_std.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
+        window_std.show(frame);
+    });
 
 
     // start the camera
@@ -127,7 +140,7 @@ int main(int argc, char *argv[]) {
         // we need to update the visualizer
         vis->update();
 
-        static constexpr std::int64_t kSleepPeriodMs = 5;
+        static constexpr std::int64_t kSleepPeriodMs = 50;
         Metavision::EventLoop::poll_and_dispatch(kSleepPeriodMs);
     }
 

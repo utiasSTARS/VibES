@@ -1,0 +1,277 @@
+//
+// Created by viciopoli on 20/11/24.
+//
+
+#ifndef PROJECT_EKF_H
+#define PROJECT_EKF_H
+
+#include <Eigen/Dense>
+#include <deque>
+#include "utils.hpp"
+#include <cmath>
+#include <optional>
+
+class EKF {
+public:
+    EKF() = delete;
+
+    EKF(int n_samples, double process_noise, double measurement_noise) : n_samples(n_samples) {
+        // the state is a 8x1 vector [theta, omega, A_x, B_x, C_x, A_y, B_y, C_y]
+        int state_dim = 8;
+        I = Eigen::MatrixXd::Identity(state_dim, state_dim);
+        F = Eigen::MatrixXd::Identity(state_dim, state_dim);
+        P = Eigen::MatrixXd::Identity(state_dim, state_dim) * 100.; // Initial covariance matrix
+        // we are more certain about omega, respect to the other parameters
+        P(1, 1) = 100.0;
+        // high uncertainty over c_x and c_y
+        P(4, 4) = 100.;
+        P(7, 7) = 100.;
+        Q = Eigen::MatrixXd::Identity(state_dim, state_dim) * process_noise;
+        R = Eigen::MatrixXd::Identity(2 * n_samples, 2 * n_samples) * measurement_noise;
+
+        residuals = Eigen::VectorXd(2 * n_samples);
+        H = Eigen::MatrixXd::Zero(2 * n_samples, state_dim);
+    }
+
+    void initialize(double omega, double A, double A1, double phi, double C_x, double C_y) {
+        A_x = A * std::sin(0.);
+        B_x = A * std::cos(0.);
+        A_y = A1 * std::sin((phi == 0.0 ? M_PI / 2. : phi));
+        B_y = A1 * std::cos((phi == 0.0 ? M_PI / 2. : phi));
+        this->C_x = C_x;
+        this->C_y = C_y;
+        this->omega = omega;
+    }
+
+    bool update(double x, double y, double t) {
+        if (prev_t != -1) {
+            computeEKF(x, y, t);
+            return true;
+        } else {
+            theta = std::atan2(y, x);
+            prev_t = t;
+            return false;
+        }
+    }
+
+    [[nodiscard]] inline std::tuple<double, double> getComp(double thet, double delta_t) const {
+        // according to out camera projection model
+        const double theta_hat = theta; // + omega * delta_t;
+        return std::make_tuple((A_x * std::sin(theta_hat) + B_x * std::cos(theta_hat)),
+                               (A_y * std::sin(theta_hat) + B_y * std::cos(theta_hat)));
+    }
+
+    [[nodiscard]] std::tuple<double, double> getPred() const {
+        return std::make_tuple(x_pred, y_pred);
+    }
+
+    [[nodiscard]] std::vector<std::pair<double, double>> getTrajectory() const {
+        return _trajectory;
+    }
+
+    [[nodiscard]] std::optional<std::pair<double, double>> getCenter() const {
+        if (_trajectory.empty()) return std::nullopt;
+        return std::make_pair(_trajectory.back().first, _trajectory.back().second);
+    }
+
+    void computeEKF(double x_meas, double y_meas, double t) {
+        double delta_t = t - prev_t;
+
+        // ========== PREDICT STEP ==========
+        F(0, 1) = delta_t; // d(theta)/d(omega)
+
+        // Predict the state (update theta using the process model)
+        theta = wrap_phase(theta + omega * delta_t);
+
+        // Propagate covariance matrix.
+        P = F * P * F.transpose() + Q;
+
+        // ========== UPDATE STEP ==========
+        // 1. Compute the predicted measurements for x and y.
+        x_pred = A_x * std::sin(theta) + B_x * std::cos(theta) + C_x;
+        y_pred = A_y * std::sin(theta) + B_y * std::cos(theta) + C_y;
+
+        // 2. Compute residual
+        const Eigen::Vector2d residual(x_meas - x_pred, y_meas - y_pred);
+
+        residuals_vec.push_back(residual(0));
+        residuals_vec.push_back(residual(1));
+
+        // 4. Compute the measurement Jacobian H (3x8).
+        // For the x and y measurement rows, compute the partial derivatives.
+        const double dxdtheta = A_x * std::cos(theta) - B_x * std::sin(theta);
+        const double dydtheta = A_y * std::cos(theta) - B_y * std::sin(theta);
+
+        H.setZero();
+        // dx/dtheta, dx/dA_x, dx/dB_x, dx/dC_x
+        H(0, 0) = dxdtheta;
+        // H(0, 1) = delta_t * dxdtheta;
+        H(0, 2) = std::sin(theta);
+        H(0, 3) = std::cos(theta);
+        H(0, 4) = 1.0;
+        // dy/dtheta, dy/dA_y, dy/dB_y, dy/dC_y
+        H(1, 0) = dydtheta;
+        // H(1, 1) = delta_t * dydtheta;
+        H(1, 5) = std::sin(theta);
+        H(1, 6) = std::cos(theta);
+        H(1, 7) = 1.0;
+
+        // 4. Kalman gain and covariance update
+        const Eigen::MatrixXd S = H * P * H.transpose() + R;
+
+        // --------- Mahalanobis distance check ---------
+        // double mahalanobisSq = residual.transpose() * S.inverse() * residual;
+        // const double threshold = 9.21;  // Example: 99% confidence threshold for 2 DOF
+        // if (mahalanobisSq > threshold) {
+        //     // Measurement considered an outlier. Option: skip update.
+        //     prev_t = t;  // Still update time stamp
+        //     return;
+        // }
+
+        const Eigen::MatrixXd K = P * H.transpose() * S.inverse();
+
+        // 5. Update state
+        Eigen::VectorXd state_update = K * residual;
+        theta = wrap_phase(theta + state_update(0)); // Wrap phase
+        // omega += state_update(1);
+        A_x += state_update(2);
+        B_x += state_update(3);
+        C_x += state_update(4);
+        A_y += state_update(5);
+        B_y += state_update(6);
+        C_y += state_update(7);
+
+        // 6. Update covariance (Joseph form)
+        I = Eigen::MatrixXd::Identity(P.rows(), P.cols());
+        P = (I - K * H) * P * (I - K * H).transpose() + K * R * K.transpose();
+        P = 0.5 * (P + P.transpose()); // Ensure symmetry
+
+        _trajectory.emplace_back(C_x, C_y);
+        prev_t = t;
+    }
+
+
+    [[nodiscard]] double getPrevT() const {
+        return prev_t;
+    }
+
+    [[nodiscard]] double getTheta() const {
+        return theta;
+    }
+
+    [[nodiscard]] double getHz() const {
+        return rad2Hz(std::abs(omega));
+    }
+
+    [[nodiscard]] double getRadS() const {
+        return std::abs(omega);
+    }
+
+    [[nodiscard]] double getAmplX() const {
+        return std::sqrt(A_x * A_x + B_x * B_x);
+    }
+
+    [[nodiscard]] double getAmplY() const {
+        return std::sqrt(A_y * A_y + B_y * B_y);
+    }
+
+    [[nodiscard]] double getShiftX() const {
+        return C_x;
+    }
+
+    [[nodiscard]] double getShiftY() const {
+        return C_y;
+    }
+
+    [[nodiscard]] double getPhaseX() const {
+        // switch A and B signs, must be both positive
+        return wrap_phase(std::atan2(std::abs(B_x), std::abs(A_x)));
+    }
+
+    [[nodiscard]] double getPhaseY() const {
+        return wrap_phase(std::atan2(std::abs(B_y), std::abs(A_y)));
+    }
+
+    [[nodiscard]] std::tuple<double, double, double, double, double, double, double, double> getState() const {
+        return std::make_tuple(theta, omega, A_x, B_x, C_x, A_y, B_y, C_y);
+    }
+
+    [[nodiscard]] std::tuple<double, double, double, double, double, double, double, double> getCov() const {
+        return std::make_tuple(P(0, 0), P(1, 1), P(2, 2), P(3, 3), P(4, 4), P(5, 5), P(6, 6), P(7, 7));
+    }
+
+    [[nodiscard]] double getOmegaCov() const {
+        return P(1, 1);
+    }
+
+    [[nodiscard]] double getAmplXCov() const {
+        return P(2, 2);
+    }
+
+    [[nodiscard]] double getAmplYCov() const {
+        return P(5, 5);
+    }
+
+    [[nodiscard]] double getShiftXCov() const {
+        return P(4, 4);
+    }
+
+    [[nodiscard]] double getShiftYCov() const {
+        return P(7, 7);
+    }
+
+    [[nodiscard]] std::vector<double> getResiduals() {
+        return residuals_vec;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const EKF &ekf) {
+        os << "omega: " << ekf.getRadS() << " rad/s, " << ekf.getHz() << " Hz, ";
+        os << "Amplitude X: " << ekf.getAmplX() << " px, ";
+        os << "Amplitude Y: " << ekf.getAmplY() << " px, ";
+        os << "Phase X: " << ekf.getPhaseX() << " rad, ";
+        os << "Phase Y: " << ekf.getPhaseY() << " rad, ";
+        os << "Shift X: " << ekf.getShiftX() << " px, ";
+        os << "Shift Y: " << ekf.getShiftY() << " px";
+        return os;
+    }
+
+
+private:
+    // sinusoids of the form A * sin(omega * t) + B * cos(omega * t) + C
+    // where amplitude = sqrt(A^2 + B^2) and phase = atan2(B, A)
+    double omega;
+    double A_x = 0, A_y = 0, B_x = 0, B_y = 0;
+    double C_x = 0, C_y = 0;
+    double theta = 0;
+    double prev_t = -1;
+    const int n_samples;
+
+    Eigen::MatrixXd P;
+    Eigen::MatrixXd F;
+    Eigen::MatrixXd Q;
+    Eigen::MatrixXd R;
+
+    Eigen::MatrixXd I;
+
+    Eigen::VectorXd residuals;
+    Eigen::MatrixXd H;
+
+    std::vector<double> residuals_vec;
+    std::vector<std::pair<double, double>> _trajectory;
+
+    [[nodiscard]] inline double wrap_phase(double phase) const {
+        while (phase > 2 * M_PI) {
+            phase -= 2 * M_PI;
+        }
+        while (phase < 0) {
+            phase += 2 * M_PI;
+        }
+        return phase;
+    }
+
+    double x_pred, y_pred;
+};
+
+// double EKF::omega = 1.0;
+
+#endif //PROJECT_EKF_H

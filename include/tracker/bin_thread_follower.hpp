@@ -16,7 +16,7 @@
 #include <utility>
 #include <thread>
 
-using Event = std::tuple<int, int, double>;
+using Event = std::tuple<int, int, double, short>;
 using EventVect = std::vector<Event>;
 using EventVectPtr = std::shared_ptr<EventVect>;
 
@@ -36,24 +36,26 @@ public:
                       double c_x,
                       double c_y,
                       double phase_shift = M_PI / 2,
-                      double amplitude = 1.,
+                      double amplitude_x = 1.,
+                      double amplitude_y = 1.,
                       std::shared_ptr<Open3DVisualizer> vis = nullptr,
-                      bool fixe_bin = false)
+                      bool fixed_bin = false,
+                      bool motion_compensation = false)
             : _bin_id(bin_counter++),
               _target_omega(target_omega),
               _vis(std::move(vis)),
               _bin_size(bin_size),
               _bin_size_half(bin_size / 2.0),
               _bin_center_x(c_x),
-              _bin_center_y(c_y) {
+              _bin_center_y(c_y),
+              _fixed_bin(fixed_bin),
+              _motion_compensation(motion_compensation) {
+        auto centroid_freq = 1. / (10. * rad2Hz(target_omega));
+        _centroid = std::make_shared<CMassCalculation>(10, centroid_freq); // 1e-3); //
 
-        ekf = std::make_shared<EKF>(n_samples, process_noise, measurement_noise);
+        ekf = std::make_shared<EKF>(centroid_freq, 1., 1., .1, 3.);
         // double omega, double A, double phi, double C_x, double C_y
-        ekf->initialize(_target_omega, amplitude, phase_shift, c_x, c_y);
-
-        // std::cout << "\033[1;34m" << "Centroid initialization with delta t: " << 1. / (10. * rad2Hz(target_omega))
-        //           << "\033[0m" << std::endl;
-        _centroid = std::make_shared<CMassCalculation>(10, 1. / (5. * rad2Hz(target_omega)));
+        ekf->initialize(_target_omega, amplitude_x, amplitude_y, c_x, c_y, phase_shift);
 
         // if the _vis is not initialized reaise an error
         if (!_vis) {
@@ -70,14 +72,11 @@ public:
 
                         // estimated curve
                         auto centre = ekf->getCenter();
-                        if (centre) {
-                            const auto &[centre_x, centre_y] = centre.value();
-                            _vis->addPoint(centre_x, centre_y, s_t * 100, 1., 0., 0.);
+                        const auto &[centre_x, centre_y] = centre.value();
 
-                            if (!fixe_bin) {
-                                _bin_center_x = centre_x;
-                                _bin_center_y = centre_y;
-                            }
+                        if (!_fixed_bin) {
+                            _bin_center_x = centre_x;
+                            _bin_center_y = centre_y;
                         }
 
                         const auto &[est_x, est_y] = ekf->getPred();
@@ -89,18 +88,21 @@ public:
 
                         auto cov = ekf->getCov();
                         // print the covariance, cov is a tuple
-                        std::cout << "\rCovariance: ";
-                        std::apply([&](auto... args) {
-                            ((std::cout << args << " "), ...);
-                        }, cov);
-                        std::cout.flush();
+                        // std::cout << "\rCovariance: ";
+                        // std::apply([&](auto... args) {
+                        //     ((std::cout << args << " "), ...);
+                        // }, cov);
+                        // std::cout.flush();
 
 
-                        // _vis->addPoint(s_x, s_y, s_t * 1000, 0.1, 1.0);
+                        _vis->addPoint(centre_x, centre_y, s_t * 100, 1., 0., 0.);
                         _vis->addLine(s_x, s_y, s_t * 100, 0.1, 1.0);
                         _vis->addLine2(est_x, est_y, s_t * 100, 0.1, 0.1, 1.0);
 
-                        compensate();
+                        if (_motion_compensation) {
+                            compensate();
+                            // compensate(ekf->getTheta());
+                        }
                     } else {
                         _events_centre.pop();
                     }
@@ -111,25 +113,23 @@ public:
 
     void compensate() {
         std::lock_guard<std::mutex> lock(mtx_out);
-        const auto &[events, t_hat] = _events_centre.front();
-        if (t_start == -1) {
-            t_start = std::get<2>(events->front());
+        auto &[events, t_hat] = _events_centre.front();
+        // if (t_start == -1) {
+        //     t_start = std::get<2>(events->front());
+        // }
+        // double C_x_est = 0;
+        for (auto &event: *events) {
+            const auto &[shift_x, shift_y] = ekf->getComp(get<2>(event) - t_hat);
+            get<0>(event) -= ceil(shift_x);
+            get<1>(event) -= ceil(shift_y);
+            get<3>(event) = 1;
+            // cv::circle(_frame, cv::Point((t - t_start) * 1000, 10 * shift_x + 240), 2, cv::Scalar(0, 255, 0), -1);
         }
-        double C_x_est = 0;
-        for (const auto &event: *events) {
-            auto [x, y, t] = event;
-            const auto &[shift_x, shift_y] = ekf->getComp(t-t_hat);
-            const double u = x - shift_x;
-            C_x_est += u;
-            const double v = y - shift_y;
-            _events_out->emplace_back(u, v, t);
-
-            cv::circle(_frame, cv::Point((t - t_start) * 1000, 10 * shift_x + 240), 2, cv::Scalar(0, 255, 0), -1);
-        }
-        cv::imshow("Compensated", _frame);
-        cv::waitKey(0);
-        C_x_est /= events->size();
-        std::cout << "C_x_est: " << C_x_est << ", should be same as: " << ekf->getShiftX() << std::endl;
+        _events_out = events;
+        // cv::imshow("Compensated", _frame);
+        // cv::waitKey(0);
+        // C_x_est /= events->size();
+        // std::cout << "C_x_est: " << C_x_est << ", should be same as: " << ekf->getShiftX() << std::endl;
         // std::cout << "t_hat: " << t_hat << ", should be same as: " << ekf->getPrevT() << std::endl;
         // assert(C_x_est == ekf->getShiftX());
         assert(t_hat == ekf->getPrevT());
@@ -148,11 +148,11 @@ public:
         thread.join();
     }
 
-    void feed(double x, double y, double t) {
+    void feed(double x, double y, double t, short pol) {
         // check if event is in the bin
         if (check(x, y)) {
             auto sample = _centroid->feed(x, y, t);
-            _events->emplace_back(x, y, t);
+            _events->emplace_back(x, y, t, pol);
             if (sample) {
                 events_queue.push(sample.value());
                 _events_centre.emplace(_events, std::get<2>(sample.value()));
@@ -193,24 +193,6 @@ public:
         const double y_max = _bin_center_y + _bin_size_half;
         const double y_min = _bin_center_y - _bin_size_half;
         return x >= x_min && x <= x_max && y >= y_min && y <= y_max;
-    }
-
-
-    std::tuple<double, double> estimate(double t) {
-        return std::make_tuple(
-                ekf->getAmplX() * std::sin(ekf->getRadS() * (t - first_time) + ekf->getPhaseX()) + ekf->getShiftX(),
-                ekf->getAmplY() * std::sin(ekf->getRadS() * (t - first_time) + ekf->getPhaseY()) + ekf->getShiftY());
-    }
-
-    [[nodiscard]] std::optional<std::tuple<int, int>> compensate(int x, int y, double t) const {
-        if (!updated) {
-            return std::nullopt;
-        }
-        // according to out camera projection model
-        double u = x - ekf->getAmplX() * std::sin(ekf->getRadS() * (t - ekf->getPrevT()) + ekf->getPhaseX());
-        double v = y - ekf->getAmplY() * std::sin(ekf->getRadS() * (t - ekf->getPrevT()) + ekf->getPhaseY());
-
-        return std::make_tuple(static_cast<int>(u), static_cast<int>(v));
     }
 
     [[nodiscard]] double getOmega() const {
@@ -300,6 +282,8 @@ private:
 
     cv::Mat _frame = cv::Mat::zeros(480, 640, CV_8UC3);
     double t_start = -1;
+    bool _fixed_bin = false, _motion_compensation = false;
+
 };
 
 std::mutex BinThreadFollower::mtx;

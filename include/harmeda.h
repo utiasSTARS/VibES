@@ -41,7 +41,7 @@ public:
     }
 
     void add_bin(double x, double y, double size = 40,
-                 std::shared_ptr<Open3DVisualizer> vis = nullptr, bool fixed_bin = false) {
+                 std::shared_ptr<Open3DVisualizer> vis = nullptr, bool fixed_bin = false, bool motion_comp = false) {
         if (!_initialized) {
             throw std::runtime_error("HARMEDA is not initialized yet.");
         }
@@ -51,12 +51,14 @@ public:
                                                     _estimated_freq,
                                                     x, y,
                                                     _phase_shift,
-                                                    _amplitude,
+                                                    _amplitude_x,
+                                                    _amplitude_y,
                                                     vis,
-                                                    fixed_bin));
+                                                    fixed_bin,
+                                                    motion_comp));
     }
 
-    void feed(double x, double y, double time) {
+    void feed(double x, double y, double time, short pol = 0) {
         if (!_initialized) {
             if (_start_time.time_since_epoch().count() == 0) {
                 _start_time = std::chrono::high_resolution_clock::now();
@@ -74,7 +76,8 @@ public:
 
             _estimated_freq = _fourierFreqEst.getMainFreqRad();
             _phase_shift = _fourierFreqEst.getPhaseShift();
-            _amplitude = _fourierFreqEst.getAmplitude();
+            _amplitude_x = _fourierFreqEst.getAmplitude();
+            _amplitude_y = _fourierFreqEst.getAmplitudeY();
 
             const auto offset_est = _fourierFreqEst.getOffset();
             _ini_events_centre_x = std::get<0>(offset_est);
@@ -99,17 +102,17 @@ public:
             // bool pushed = _events_queue.push({x, y, time});
             //_bins[0]->feed(x, y, time);
             for (std::size_t i = 0; i < _bins.size(); ++i) {
-                _bins[i]->feed(x, y, time);
+                _bins[i]->feed(x, y, time, pol);
             }
         }
     }
 
-    std::optional<std::shared_ptr<std::vector<std::tuple<int, int, double>>>> compensate() {
+    std::optional<std::shared_ptr<std::vector<std::tuple<int, int, double, short>>>> compensate() {
         std::lock_guard<std::mutex> lock(_mtx);
         if (_bins.empty()) {
             return std::nullopt;
         }
-        std::shared_ptr<std::vector<std::tuple<int, int, double>>> compensated_points;
+        std::shared_ptr<std::vector<std::tuple<int, int, double, short>>> compensated_points;
         _bins[0]->getEventsOut(compensated_points);
         return compensated_points;
     }
@@ -125,6 +128,15 @@ public:
         }
     }
 
+    std::vector<double> getResiduals() {
+        std::vector<double> residuals;
+        for (const auto &bin: _bins) {
+            auto res = bin->getEKF()->getResiduals();
+            residuals.insert(residuals.end(), res.begin(), res.end());
+        }
+        return residuals;
+    }
+
     void stop() {
         _loading_text.stop();
     }
@@ -137,11 +149,20 @@ public:
         return {_ini_events_centre_x, _ini_events_centre_y};
     }
 
+    double getEstimatedFreq() {
+        return _estimated_freq;
+    }
+
+    double getEstimatedFreqHz() {
+        return rad2Hz(_estimated_freq);
+    }
+
     friend std::ostream &operator<<(std::ostream &os, const HARMEDA &harmeda) {
         os << "Estimated frequency: " << harmeda._estimated_freq << " rad/s\n";
         os << "Estimated frequency: " << rad2Hz(harmeda._estimated_freq) << " Hz\n";
         os << "Phase shift: " << harmeda._phase_shift << "\n";
-        os << "Amplitude: " << harmeda._amplitude << "\n";
+        os << "Amplitude X: " << harmeda._amplitude_x << "\n";
+        os << "Amplitude Y: " << harmeda._amplitude_y << "\n";
         os << "Initialized: " << harmeda._initialized << "\n";
         os << "Initial events centre x: " << harmeda._ini_events_centre_x << "\n";
         os << "Initial events centre y: " << harmeda._ini_events_centre_y << "\n";
@@ -162,7 +183,7 @@ private:
 
     double _estimated_freq = 0;
     double _phase_shift = 0;
-    double _amplitude = 0;
+    double _amplitude_x = 0, _amplitude_y = 0;
 
     bool _initialized = false;
     double _ini_events_centre_x = 0, _ini_events_centre_y = 0;

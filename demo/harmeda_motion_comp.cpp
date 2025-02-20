@@ -52,7 +52,7 @@ int main(int argc, char *argv[]) {
     int camera_height = cam.geometry().height();
 
 
-    HARMEDA harmeda(100, 5, 1000);
+    HARMEDA harmeda(100, 5, 150);
     int64_t initial_timestamp = -1;
     auto vis = std::make_shared<Open3DVisualizer>(camera_width, camera_height);
 
@@ -63,18 +63,19 @@ int main(int argc, char *argv[]) {
         }
         for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
             harmeda.feed(ev->x, ev->y,
-                         static_cast<double>(ev->t - initial_timestamp) / 1e6);
+                         static_cast<double>(ev->t - initial_timestamp) / 1e6, ev->p);
         }
 
         if (harmeda.initialized() && harmeda.size() == 0) {
             // we want to track only one patter in the screen
             const auto &[x_centre, y_centre] = harmeda.getInitialCenter();
-            harmeda.add_bin(camera_width / 2, camera_height / 2, std::max(camera_width, camera_height), vis, true);
+            harmeda.add_bin(camera_width / 2, camera_height / 2, std::max(camera_width, camera_height), vis, false,
+                            true);
         }
     });
 
     // visualization
-    const std::uint32_t acc = 200;
+    const std::uint32_t acc = 20000;
     double fps = 200;
 
     auto frame_gen = Metavision::PeriodicFrameGenerationAlgorithm(camera_width, camera_height, acc, fps);
@@ -91,19 +92,19 @@ int main(int argc, char *argv[]) {
         auto comp = harmeda.compensate();
         if (comp) {
             const auto shared_ptr = comp.value();
-            if(shared_ptr->empty()) {
+            if (shared_ptr->empty()) {
                 return;
             }
             // from my event to Metavision event
             std::vector<Metavision::EventCD> events;
 
-            for (const auto [x, y, t]: *shared_ptr) {
+            for (const auto [x, y, t, p]: *shared_ptr) {
                 // check x and y are within the camera resolution
                 if (x < 0 || x >= camera_width || y < 0 || y >= camera_height) {
                     continue;
                 }
                 // unsigned short x, unsigned short y, short p, timestamp t
-                events.emplace_back(x, y, 1, t * 1e6);
+                events.emplace_back(x, y, p, t * 1e6);
             }
 
             frame_gen_comp.process_events(events.begin(), events.end());

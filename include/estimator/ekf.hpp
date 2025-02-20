@@ -15,32 +15,75 @@ class EKF {
 public:
     EKF() = delete;
 
-    EKF(int n_samples, double process_noise, double measurement_noise) : n_samples(n_samples) {
-        // the state is a 8x1 vector [theta, omega, A_x, B_x, C_x, A_y, B_y, C_y]
-        int state_dim = 8;
+    EKF(double dt, double a_noise, double c_noise, double omega_noise, double measurement_noise) : _dt(dt),
+                                                                                                   _a_noise(a_noise),
+                                                                                                   _c_noise(c_noise),
+                                                                                                   _omega_noise(
+                                                                                                           omega_noise) {
+        // the state is a 7x1 vector [omega, phi_x, a_x, c_x, phi_y, a_y, c_y]
+        int state_dim = 7;
         I = Eigen::MatrixXd::Identity(state_dim, state_dim);
-        F = Eigen::MatrixXd::Identity(state_dim, state_dim);
-        P = Eigen::MatrixXd::Identity(state_dim, state_dim) * 100.; // Initial covariance matrix
-        // we are more certain about omega, respect to the other parameters
-        P(1, 1) = 100.0;
-        // high uncertainty over c_x and c_y
-        P(4, 4) = 100.;
-        P(7, 7) = 100.;
-        Q = Eigen::MatrixXd::Identity(state_dim, state_dim) * process_noise;
-        R = Eigen::MatrixXd::Identity(2 * n_samples, 2 * n_samples) * measurement_noise;
 
-        residuals = Eigen::VectorXd(2 * n_samples);
-        H = Eigen::MatrixXd::Zero(2 * n_samples, state_dim);
+        F = Eigen::MatrixXd::Identity(state_dim, state_dim);
+
+        P = Eigen::MatrixXd::Identity(state_dim, state_dim) * 100.; // Initial covariance matrix
+        P(0, 0) = 1.;
+
+        Q = Eigen::MatrixXd::Identity(state_dim, state_dim);
+
+        R = Eigen::MatrixXd::Identity(2, 2) * measurement_noise;
+
+        residuals = Eigen::VectorXd(2);
+
+        H = Eigen::MatrixXd::Zero(2, state_dim);
     }
 
-    void initialize(double omega, double A, double phi, double C_x, double C_y) {
-        A_x = A * std::sin(0.);
-        B_x = A * std::cos(0.);
-        A_y = A * std::sin((phi == 0.0 ? M_PI / 2. : phi));
-        B_y = A * std::cos((phi == 0.0 ? M_PI / 2. : phi));
-        this->C_x = C_x;
-        this->C_y = C_y;
-        this->omega = omega;
+    inline void computeF(double dt) {
+        F(1, 0) = dt;
+        F(4, 0) = dt;
+    }
+
+    void computeQ(double dt) {
+        const auto dt2 = dt * dt;
+        const auto dt3 = dt2 * dt;
+
+        // [omega, phi_x, a_x, c_x, phi_y, a_y, c_y]
+        // Omega noise (for x and y)
+        Q(0, 0) = dt * _omega_noise;  // X-axis
+        Q(1, 1) = dt3 * _omega_noise / 3.;
+        Q(0, 1) = Q(1, 0) = dt2 * _omega_noise / 2.;
+
+        Q(2, 2) = dt * _a_noise;
+        Q(3, 3) = dt * _c_noise;
+
+        Q(4, 4) = dt3 * _omega_noise / 3.;
+        Q(0, 4) = Q(4, 0) = dt2 * _omega_noise / 2.;
+
+        // Amplitude noise
+        Q(5, 5) = dt * _a_noise;
+        Q(6, 6) = dt * _c_noise;
+    }
+
+    void f() {
+        _phi_x = wrap_phase(_phi_x + _omega * _dt);
+        _phi_y = wrap_phase(_phi_y + _omega * _dt);
+    }
+
+    inline void h() {
+        x_pred = _a_x * sin(_phi_x) + _c_x;
+        y_pred = _a_y * sin(_phi_y) + _c_y;
+    }
+
+    void initialize(double omega, double a_x, double a_y, double c_x, double c_y, double phase_shift) {
+        _a_x = a_x;
+        _a_y = a_y;
+        _phi_x = 0.;
+        _phi_y = phase_shift;
+        _omega = omega;
+        _c_x = c_x;
+        _c_y = c_y;
+        x_pred = _a_x * sin(_phi_x) + _c_x;
+        y_pred = _a_y * sin(_phi_y) + _c_y;
     }
 
     bool update(double x, double y, double t) {
@@ -48,27 +91,86 @@ public:
             computeEKF(x, y, t);
             return true;
         } else {
-            theta = std::atan2(y, x);
             prev_t = t;
             return false;
         }
     }
 
-    [[nodiscard]] inline std::optional<std::tuple<int, int>> compensate(int x, int y, double delta_t) const {
-        if (prev_t == -1) return std::nullopt;
-        // according to out camera projection model
-        const double theta_hat = theta + omega * delta_t;
-        const double u = x - (A_x * std::sin(theta_hat) + B_x * std::cos(theta_hat));
-        const double v = y - (A_y * std::sin(theta_hat) + B_y * std::cos(theta_hat));
-        return std::make_tuple(static_cast<int>(u), static_cast<int>(v));
+    void computeH(double dt) {
+        // Jacobian of measurement function h(x) with respect to state variables
+        H.setZero();
+
+        // Partial derivatives for x = a_x * sin(phi_x) + c_x
+        // H(0, 0) = _a_x * cos(_phi_x) * dt;                      // d(h_x)/d(omega)
+        H(0, 1) = _a_x * cos(_phi_x);       // d(h_x)/d(phi_x)
+        H(0, 2) = sin(_phi_x);              // d(h_x)/d(a_x)
+        H(0, 3) = 1.;                       // d(h_x)/d(c_x)
+
+        // Partial derivatives for y = a_y * sin(phi_y) + c_y
+        // H(1, 0) = _a_y * cos(_phi_y) * dt;                      // d(h_y)/d(omega)
+        H(1, 4) = _a_y * cos(_phi_y);      // d(h_y)/d(phi_y)
+        H(1, 5) = sin(_phi_y);             // d(h_y)/d(a_y)
+        H(1, 6) = 1.;                      // d(h_y)/d(c_y)
     }
 
-    inline std::tuple<double, double> getComp(double delta_t) const {
-        if (prev_t == -1) return std::make_tuple(0., 0.);
+    void updateState(Eigen::VectorXd &state_update) {
+        _omega += state_update(0);
+
+        _phi_x = wrap_phase(_phi_x + state_update(1));
+        _a_x += state_update(2);
+        _c_x += state_update(3);
+
+        _phi_y = wrap_phase(_phi_y + state_update(4));
+        _a_y += state_update(5);
+        _c_y += state_update(6);
+    }
+
+    void computeEKF(double x_meas, double y_meas, double t) {
+        double delta_t = t - prev_t;
+
+        // ========== PREDICTION STEP ==========
+        computeF(delta_t);
+        f();
+        computeQ(delta_t);
+        P = F * P * F.transpose() + Q;
+
+        // ========== UPDATE STEP ==========
+        // prediction
+        h();
+
+        residuals(0) = x_meas - x_pred;
+        residuals(1) = y_meas - y_pred;
+        residuals_vec.push_back(residuals(0));
+        residuals_vec.push_back(residuals(1));
+
+        computeH(delta_t);
+
+        Eigen::MatrixXd S = H * P * H.transpose() + R;
+        Eigen::MatrixXd K = P * H.transpose() * S.inverse();
+
+        Eigen::VectorXd state_update = K * residuals;
+        updateState(state_update);
+
+        Eigen::MatrixXd IKH = I - K * H;
+        P = IKH * P * IKH.transpose() + K * R * K.transpose();
+        P = 0.5 * (P + P.transpose());
+
+        _trajectory.emplace_back(_c_x, _c_y);
+        prev_t = t;
+
+        // print state
+        std::cout << "\romega: " << rad2Hz(_omega) << " a_x: " << _a_x << " phi_x: " << _phi_x << " c_x: " << _c_x
+                  << " a_y: " << _a_y << " phi_y: "
+                  << _phi_y
+                  << " c_y: " << _c_y;
+        std::cout.flush();
+    }
+
+
+    [[nodiscard]] inline std::tuple<double, double> getComp(double delta_t) const {
         // according to out camera projection model
-        const double theta_hat = theta + omega * delta_t;
-        return std::make_tuple((A_x * std::sin(theta_hat) + B_x * std::cos(theta_hat)),
-                               (A_y * std::sin(theta_hat) + B_y * std::cos(theta_hat)));
+        const double theta_hat = _omega * delta_t;
+        return std::make_tuple(_a_x * std::sin(_phi_x - theta_hat), _a_y * std::sin(_phi_y - theta_hat));
     }
 
     [[nodiscard]] std::tuple<double, double> getPred() const {
@@ -84,148 +186,44 @@ public:
         return std::make_pair(_trajectory.back().first, _trajectory.back().second);
     }
 
-    void computeEKF(double x_meas, double y_meas, double t) {
-        double delta_t = t - prev_t;
-
-        // ========== PREDICT STEP ==========
-        F(0, 1) = delta_t; // d(theta)/d(omega)
-
-        // 2. Predict state (theta is updated here)
-        theta = wrap_phase(theta + omega * delta_t);
-
-        // 3. Propagate covariance
-        P = F * P * F.transpose() + Q;
-
-        // ========== UPDATE STEP ==========
-        // 1. Compute predicted measurements
-        x_pred = A_x * std::sin(theta) + B_x * std::cos(theta) + C_x;
-        y_pred = A_y * std::sin(theta) + B_y * std::cos(theta) + C_y;
-
-        // 2. Compute residual
-        const Eigen::Vector2d residual(x_meas - x_pred, y_meas - y_pred);
-
-        // 3. Compute Jacobian H (2x8 for this measurement)
-        const double dxdtheta = A_x * std::cos(theta) - B_x * std::sin(theta);
-        const double dydtheta = A_y * std::cos(theta) - B_y * std::sin(theta);
-
-        H.setZero();
-        // dx/dtheta, dx/dA_x, dx/dB_x, dx/dC_x
-        H(0, 0) = dxdtheta;
-        H(0, 1) = delta_t * dxdtheta;
-        H(0, 2) = std::sin(theta);
-        H(0, 3) = std::cos(theta);
-        H(0, 4) = 1.0;
-        // dy/dtheta, dy/dA_y, dy/dB_y, dy/dC_y
-        H(1, 0) = dydtheta;
-        H(1, 1) = delta_t * dydtheta;
-        H(1, 5) = std::sin(theta);
-        H(1, 6) = std::cos(theta);
-        H(1, 7) = 1.0;
-
-        // 4. Kalman gain and covariance update
-        const Eigen::MatrixXd S = H * P * H.transpose() + R;
-
-        // --------- Mahalanobis distance check ---------
-        // double mahalanobisSq = residual.transpose() * S.inverse() * residual;
-        // const double threshold = 9.21;  // Example: 99% confidence threshold for 2 DOF
-        // if (mahalanobisSq > threshold) {
-        //     // Measurement considered an outlier. Option: skip update.
-        //     prev_t = t;  // Still update time stamp
-        //     return;
-        // }
-
-        const Eigen::MatrixXd K = P * H.transpose() * S.inverse();
-
-        // 5. Update state
-        Eigen::VectorXd state_update = K * residual;
-        theta = wrap_phase(theta + state_update(0)); // Wrap phase
-        omega += state_update(1);
-        A_x += state_update(2);
-        B_x += state_update(3);
-        C_x += state_update(4);
-        A_y += state_update(5);
-        B_y += state_update(6);
-        C_y += state_update(7);
-
-        // 6. Update covariance (Joseph form)
-        I = Eigen::MatrixXd::Identity(P.rows(), P.cols());
-        P = (I - K * H) * P * (I - K * H).transpose() + K * R * K.transpose();
-        P = 0.5 * (P + P.transpose()); // Ensure symmetry
-
-        _trajectory.emplace_back(C_x, C_y);
-        prev_t = t;
-    }
-
     [[nodiscard]] double getPrevT() const {
         return prev_t;
     }
 
-    [[nodiscard]] double getTheta() const {
-        return theta;
-    }
-
     [[nodiscard]] double getHz() const {
-        return rad2Hz(std::abs(omega));
+        return rad2Hz(std::abs(_omega));
     }
 
     [[nodiscard]] double getRadS() const {
-        return std::abs(omega);
+        return std::abs(_omega);
     }
 
     [[nodiscard]] double getAmplX() const {
-        return std::sqrt(A_x * A_x + B_x * B_x);
+        return _a_x;
     }
 
     [[nodiscard]] double getAmplY() const {
-        return std::sqrt(A_y * A_y + B_y * B_y);
+        return _a_y;
     }
 
     [[nodiscard]] double getShiftX() const {
-        return C_x;
+        return _c_x;
     }
 
     [[nodiscard]] double getShiftY() const {
-        return C_y;
+        return _c_y;
     }
 
-    [[nodiscard]] double getPhaseX() const {
-        // switch A and B signs, must be both positive
-        return wrap_phase(std::atan2(std::abs(B_x), std::abs(A_x)));
-    }
 
-    [[nodiscard]] double getPhaseY() const {
-        return wrap_phase(std::atan2(std::abs(B_y), std::abs(A_y)));
-    }
-
-    [[nodiscard]] std::tuple<double, double, double, double, double, double, double, double> getState() const {
-        return std::make_tuple(theta, omega, A_x, B_x, C_x, A_y, B_y, C_y);
-    }
-
-    [[nodiscard]] std::tuple<double, double, double, double, double, double, double, double> getCov() const {
-        return std::make_tuple(P(0, 0), P(1, 1), P(2, 2), P(3, 3), P(4, 4), P(5, 5), P(6, 6), P(7, 7));
+    [[nodiscard]] std::tuple<double, double, double, double> getCov() const {
+        return std::make_tuple(P(0, 0), P(1, 1), P(2, 2), P(3, 3));
     }
 
     [[nodiscard]] double getOmegaCov() const {
         return P(1, 1);
     }
 
-    [[nodiscard]] double getAmplXCov() const {
-        return P(2, 2);
-    }
-
-    [[nodiscard]] double getAmplYCov() const {
-        return P(5, 5);
-    }
-
-    [[nodiscard]] double getShiftXCov() const {
-        return P(4, 4);
-    }
-
-    [[nodiscard]] double getShiftYCov() const {
-        return P(7, 7);
-    }
-
-    [[nodiscard]] std::vector<std::tuple<double, double>> getResiduals() {
+    [[nodiscard]] std::vector<double> getResiduals() {
         return residuals_vec;
     }
 
@@ -233,8 +231,6 @@ public:
         os << "omega: " << ekf.getRadS() << " rad/s, " << ekf.getHz() << " Hz, ";
         os << "Amplitude X: " << ekf.getAmplX() << " px, ";
         os << "Amplitude Y: " << ekf.getAmplY() << " px, ";
-        os << "Phase X: " << ekf.getPhaseX() << " rad, ";
-        os << "Phase Y: " << ekf.getPhaseY() << " rad, ";
         os << "Shift X: " << ekf.getShiftX() << " px, ";
         os << "Shift Y: " << ekf.getShiftY() << " px";
         return os;
@@ -242,14 +238,14 @@ public:
 
 
 private:
-    // sinusoids of the form A * sin(omega * t) + B * cos(omega * t) + C
-    // where amplitude = sqrt(A^2 + B^2) and phase = atan2(B, A)
-    double omega;
-    double A_x = 0, A_y = 0, B_x = 0, B_y = 0;
-    double C_x = 0, C_y = 0;
-    double theta = 0;
+    double _omega = 0., _a_x = 0., _phi_x = 0., _c_x = 0., _a_y = 0., _phi_y = 0., _c_y = 0.;
     double prev_t = -1;
-    const int n_samples;
+
+    const double _a_noise = 0, _c_noise = 0, _omega_noise = 0;
+
+    double x_pred = 0., y_pred = 0.;
+
+    const double _dt = 0.;
 
     Eigen::MatrixXd P;
     Eigen::MatrixXd F;
@@ -261,10 +257,10 @@ private:
     Eigen::VectorXd residuals;
     Eigen::MatrixXd H;
 
-    std::vector<std::tuple<double, double>> residuals_vec;
+    std::vector<double> residuals_vec;
     std::vector<std::pair<double, double>> _trajectory;
 
-    [[nodiscard]] double wrap_phase(double phase) const {
+    [[nodiscard]] inline double wrap_phase(double phase) const {
         while (phase > 2 * M_PI) {
             phase -= 2 * M_PI;
         }
@@ -273,8 +269,6 @@ private:
         }
         return phase;
     }
-
-    double x_pred, y_pred;
 };
 
 // double EKF::omega = 1.0;
