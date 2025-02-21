@@ -53,7 +53,7 @@ public:
               _fixed_bin(fixed_bin),
               _motion_compensation(motion_compensation) {
         auto centroid_freq = 1. / (10. * rad2Hz(target_omega));
-        _centroid = std::make_shared<CMassCalculation>(width, height, 10'000, centroid_freq); // 1e-3); //
+        _centroid = std::make_shared<CMassCalculation>(width, height, 10, centroid_freq); // 1e-3); //
 
         ekf = std::make_shared<EKF>(centroid_freq, 1., 1., .1, 3.);
         // double omega, double A, double phi, double C_x, double C_y

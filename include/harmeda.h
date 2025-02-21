@@ -27,7 +27,7 @@ public:
 
     HARMEDA(int n_samples, double f_min, double f_max, int widht, int height)
             : _fourierFreqEst(n_samples, f_min, f_max) {
-        _initializer = std::make_shared<CMassCalculation>(widht, height, 10000, 1e-3);
+        _initializer = std::make_shared<CMassCalculation>(widht, height, 10, 1e-3);
 
         _loading_text.loading("Initializing HARMEDA");
     }

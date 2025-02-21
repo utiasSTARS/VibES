@@ -188,7 +188,7 @@ int main(int argc, char *argv[]) {
     // keep running until the camera is off, the recording is finished or the escape key was pressed
     while (cam.is_running() && !signal_caught.load(std::memory_order::relaxed) && !window.should_close()) {
         // we need to update the visualizer
-        // vis->update();
+        vis->update();
 
         static constexpr std::int64_t kSleepPeriodMs = 5;
         Metavision::EventLoop::poll_and_dispatch(kSleepPeriodMs);

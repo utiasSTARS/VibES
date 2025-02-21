@@ -58,3 +58,7 @@ target_link_libraries(harmeda_filter PRIVATE Open3D::Open3D finufft MetavisionSD
 
 add_executable(harmeda_motion_comp_filter demo/harmeda_motion_comp_filter.cpp)
 target_link_libraries(harmeda_motion_comp_filter PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX)
+
+
+add_executable(viewer demo/viewer.cpp)
+target_link_libraries(viewer PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX)

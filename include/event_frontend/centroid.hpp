@@ -38,8 +38,8 @@ public:
 
         opt_tuple centroid;
         const double delta_t = t - _init_t;
-//        if (delta_t > _time_window) {  // Time window exceeded
-        if (centroid = getCMass(); centroid.has_value()) {
+        if (delta_t > _time_window) {  // Time window exceeded
+            centroid = getCMass();
             reset(x, y, t);
             return centroid;
         }
@@ -62,7 +62,7 @@ public:
             _weights[i] = _weights[i] * icc;
             _x += _bins_x[i] * _weights[i];
         }
-        for (int i = 0; i < _n_bins_y ; i++) {
+        for (int i = 0; i < _n_bins_y; i++) {
             _y += _bins_y[i] * _weights[i];
         }
         return std::make_tuple(_x * icc, _y * icc, _t * icc);
