@@ -66,7 +66,7 @@ if __name__ == "__main__":
     sampling_rate = 1000  # Define the correct sampling rate (Hz)
 
     signal = load_signal(
-        "./scripts/centroid_data_real/centroids_x_pattern.txt",
+        "./scripts/centroid_data_real/centroids_x_dot.txt",
     )
     top_frequencies, top_magnitudes, freqs, magnitudes = compute_fft(signal, sampling_rate)
 

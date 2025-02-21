@@ -25,8 +25,8 @@ public:
         // init bins and weights with 0
         _bins_x.reserve(_n_bins_x);
         _bins_x.assign(_n_bins_x, 0);
-        _bins_y.reserve(_n_bins_x);
-        _bins_y.assign(_n_bins_x, 0);
+        _bins_y.reserve(_n_bins_y);
+        _bins_y.assign(_n_bins_y, 0);
         _weights.reserve(_n_bins_x * _n_bins_y);
         _weights.assign(_n_bins_x * _n_bins_y, 0);
     }
@@ -44,10 +44,12 @@ public:
             return centroid;
         }
 
-        const auto idx = _n_bins_x * int(y / _bin_height) + int(x / _bin_width);
+        const auto x_idx = static_cast<int>(x / _bin_width);
+        const auto y_idx = static_cast<int>(y / _bin_height);
+        const auto idx = _n_bins_x * y_idx + x_idx;
         _weights.at(idx) += 1;
-        _bins_x.at(idx) += x;
-        _bins_y.at(idx) += y;
+        _bins_x.at(x_idx) += x;
+        _bins_y.at(y_idx) += y;
         _t += t;
         _counter++;
         return centroid;
