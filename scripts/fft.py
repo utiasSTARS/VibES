@@ -63,7 +63,7 @@ def plot_fft(freqs, magnitudes, top_frequencies):
 
 
 if __name__ == "__main__":
-    sampling_rate = 1000  # Define the correct sampling rate (Hz)
+    sampling_rate = 100  # Define the correct sampling rate (Hz)
 
     signal = load_signal(
         "./scripts/centroid_data_real/centroids_x_dot.txt",

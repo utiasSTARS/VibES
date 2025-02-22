@@ -177,7 +177,7 @@ def fourier(signal):
 
 
 # Example usage:
-filename = "./scripts/centroid_data_real/centroids_y_pattern.txt"
+filename = "./scripts/centroid_data_real/centroids_y_dot.txt"
 t, signal, t_est, ekf_predictions, residuals = run_ekf_on_real_data(filename)
 fourier(residuals)
 plot_results(t, signal, t_est, ekf_predictions, residuals)

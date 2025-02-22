@@ -135,7 +135,7 @@ def run_ekf_on_real_data():
     # 1) Load your real data.
     #    Columns assumed: [ measurement (signal), time_stamp ].
     data = np.loadtxt(
-        "./scripts/centroid_data_real/centroids_y_april.txt",
+        "./scripts/centroid_data_real/centroids_y_dot.txt",
         delimiter=","
     )
     signal = data[:, 0]  # measured signal (e.g., centroid y position)
