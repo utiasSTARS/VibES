@@ -19,13 +19,14 @@ CPMAddPackage(
         EXCLUDE_FROM_ALL Yes
         SYSTEM
 )
+set(CMAKE_INSTALL_RPATH "/usr/local/lib")
 
 # find_package(TBB REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Open3D REQUIRED)
-find_package(Boost 1.74 REQUIRED COMPONENTS filesystem system)
+find_package(Boost 1.74 REQUIRED COMPONENTS filesystem system program_options)
 find_package(MetavisionSDK COMPONENTS base cv driver ui REQUIRED)
 
 #find_package(dv-processing REQUIRED)
@@ -62,3 +63,6 @@ target_link_libraries(harmeda_motion_comp_filter PRIVATE Open3D::Open3D finufft 
 
 add_executable(viewer demo/viewer.cpp)
 target_link_libraries(viewer PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX)
+
+add_executable(undistort_and_store demo/undistort_and_store.cpp)
+target_link_libraries(undistort_and_store PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)

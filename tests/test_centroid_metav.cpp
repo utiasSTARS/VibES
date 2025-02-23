@@ -16,7 +16,7 @@
 #include <fstream>
 
 TEST(CENTROID, Estimation) {
-    CMassCalculation centroid(1280, 720, 100, 1e-2);
+    CMassCalculation centroid(1280, 720, 100, 1e-3);
 
     auto cam = Metavision::Camera::from_file(
             "/home/viciopoli/datasets/event_harmeda/dot_static.raw");
@@ -78,7 +78,7 @@ TEST(CENTROID, Estimation) {
             n_of_events++;
         }
 
-        if (samples.size() > 500) {
+        if (samples.size() > 1000) {
             std::cout << "N. of samples: " << samples.size() << ", n_of_events" << n_of_events << std::endl;
 
             // show samples on an image

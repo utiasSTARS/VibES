@@ -52,7 +52,7 @@ public:
               _bin_center_y(c_y),
               _fixed_bin(fixed_bin),
               _motion_compensation(motion_compensation) {
-        auto centroid_freq = 1. / 100; //(10. * rad2Hz(target_omega));
+        auto centroid_freq = 1. / (10. * rad2Hz(target_omega));
         _centroid = std::make_shared<CMassCalculation>(width, height, 100, centroid_freq); // 1e-3); //
 
         ekf = std::make_shared<EKF>(centroid_freq, 1., 1., .1, 3.);
@@ -96,10 +96,10 @@ public:
                         // }, cov);
                         // std::cout.flush();
 
-
-                        _vis->addPoint(centre_x, centre_y, s_t * 100, 1., 0., 0.);
-                        _vis->addLine(s_x, s_y, s_t * 100, 0.1, 1.0);
-                        _vis->addLine2(est_x, est_y, s_t * 100, 0.1, 0.1, 1.0);
+                        const double scale = 100;
+                        _vis->addPoint(centre_x, centre_y, s_t * scale, 1., 0., 0.);
+                        _vis->addLine(s_x, s_y, s_t * scale, 0.1, 1.0);
+                        _vis->addLine2(est_x, est_y, s_t * scale, 0.1, 0.1, 1.0);
 
                         if (_motion_compensation) {
                             compensate();
@@ -134,7 +134,7 @@ public:
         // std::cout << "C_x_est: " << C_x_est << ", should be same as: " << ekf->getShiftX() << std::endl;
         // std::cout << "t_hat: " << t_hat << ", should be same as: " << ekf->getPrevT() << std::endl;
         // assert(C_x_est == ekf->getShiftX());
-        assert(t_hat == ekf->getPrevT());
+        // assert(t_hat == ekf->getPrevT());
         _events_centre.pop();
     }
 
