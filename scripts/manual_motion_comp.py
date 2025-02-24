@@ -27,7 +27,7 @@ def update_plot(val):
 
         compensated_y = int(y - A_y * np.sin(frequency_rads_us * (timestamp - init_t) + phase_y))
         if 0 <= compensated_x < width and 0 <= compensated_y < height:
-            image[compensated_y, compensated_x] += 1  # if polarity else -1
+            image[compensated_y, compensated_x] += 1 if polarity else -1
 
     scatter.set_offsets(np.column_stack((timestamps, compensated_x_values)))
 
@@ -68,10 +68,10 @@ timestamps = np.linspace(0, time_window_us, 1000)
 if __name__ == "__main__":
     # Parameters
     width, height = 1280, 720  # Image dimensions
-    time_window = .01  # Time window in seconds
+    time_window = .1  # Time window in seconds
     time_window_us = time_window * 1e6  # Time window in microseconds
 
-    file_path = '/home/viciopoli/datasets/event_harmeda/checkerboard.hdf5'
+    file_path = '/home/viciopoli/datasets/event_harmeda/dot_static_undist.hdf5'
     events = read_events_from_hdf5(file_path, time_window_us)
 
     # scatter plot events x and time with small dots

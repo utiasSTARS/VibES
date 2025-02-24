@@ -34,6 +34,24 @@ def update_plot():
     plt.pause(0.05)
 
 
+def compensation_vis(events, frequency, amplitude_x, amplitude_y, phase_shift, time_window, width,
+                                      height):
+    image = np.zeros((height, width), dtype=np.float64)
+    freq_rads = 2 * np.pi * frequency
+    frequency_rads_us = freq_rads / 1e-6
+    init_t = events[0][0]
+    idx = 0
+    for timestamp, x, y, polarity in events:
+        compensated_x = int(x - amplitude_x * np.sin(frequency_rads_us * (timestamp - init_t) + phase_shift[0]))
+        compensated_x_values[idx] = compensated_x
+        idx += 1
+
+        compensated_y = int(y - amplitude_y * np.sin(frequency_rads_us * (timestamp - init_t) + phase_shift[1]))
+        if 0 <= compensated_x < width and 0 <= compensated_y < height:
+            image[compensated_y, compensated_x] += 1 if polarity else -1
+    cv2.normalize(image, image, 0, 255, cv2.NORM_MINMAX)
+    return image
+
 def compensate_motion_with_sinusoidal(events, frequency, amplitude_x, amplitude_y, phase_shift, time_window, width,
                                       height):
     image = np.zeros((height, width), dtype=np.float64)
@@ -114,10 +132,10 @@ def read_events_from_hdf5(file_path, time_window_us):
 if __name__ == "__main__":
     # Parameters
     width, height = 1280, 720  # Image dimensions
-    time_window = .1  # Time window in seconds
+    time_window = .01  # Time window in seconds
     time_window_us = time_window * 1e6  # Time window in microseconds
 
-    file_path = '/home/viciopoli/datasets/event_harmeda/dot_static_undist.hdf5'
+    file_path = '/home/viciopoli/datasets/event_harmeda/april_2v.hdf5'
     events = read_events_from_hdf5(file_path, time_window_us)
 
     # scatter plot events x and time with small dots
@@ -155,17 +173,16 @@ if __name__ == "__main__":
     plt.ioff()  # Turn off interactive mode
     plt.show()
 
-    # Optionally: visualize the final compensated image using optimal parameters
-    # final_compensated_image = compensate_motion_with_sinusoidal(
-    #     events, optimal_params[2], optimal_params[0], optimal_params[1],
-    #     (optimal_params[3], optimal_params[4]), time_window, width, height
-    # )
-    # final_compensated_image = cv2.normalize(final_compensated_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    final_compensated_image = compensation_vis(
+        events, optimal_params[2], optimal_params[0], optimal_params[1],
+        (optimal_params[3], optimal_params[4]), time_window, width, height
+    )
+    final_compensated_image = cv2.normalize(final_compensated_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
     # Display the final compensated image
-    # cv2.imshow("Final Compensated Image", final_compensated_image)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
+    cv2.imshow("Final Compensated Image", final_compensated_image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
     plt.plot(np.array(sharpness_values))
     plt.xlabel("Iteration")
