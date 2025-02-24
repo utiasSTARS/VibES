@@ -24,27 +24,36 @@ def accumulate_events(events, width, height, time_window):
     return image  # Return raw float32 image instead of normalizing
 
 
-compensated_x_values = []
-timestamps = []
+compensated_x_values_pos = []
+compensated_x_values_neg = []
+timestamps_pos = []
+timestamps_neg = []
 
 
 # Define function to update plot
 def update_plot():
-    scatter.set_offsets(np.column_stack((timestamps, compensated_x_values)))
+    scatter.set_offsets(np.column_stack((timestamps_pos, compensated_x_values_pos)))
+    scatter_neg.set_offsets(np.column_stack((timestamps_neg, compensated_x_values_neg)))
     plt.pause(0.05)
 
 
 def compensation_vis(events, frequency, amplitude_x, amplitude_y, phase_shift, time_window, width,
-                                      height):
+                     height):
     image = np.zeros((height, width), dtype=np.float64)
     freq_rads = 2 * np.pi * frequency
     frequency_rads_us = freq_rads / 1e-6
     init_t = events[0][0]
-    idx = 0
+    idx_neg = 0
+    idx_pos = 0
     for timestamp, x, y, polarity in events:
         compensated_x = int(x - amplitude_x * np.sin(frequency_rads_us * (timestamp - init_t) + phase_shift[0]))
-        compensated_x_values[idx] = compensated_x
-        idx += 1
+        if polarity:
+            compensated_x_values_pos[idx_pos] = compensated_x
+            idx_pos += 1
+        else:
+            compensated_x_values_neg[idx_neg] = compensated_x
+            idx_neg += 1
+
 
         compensated_y = int(y - amplitude_y * np.sin(frequency_rads_us * (timestamp - init_t) + phase_shift[1]))
         if 0 <= compensated_x < width and 0 <= compensated_y < height:
@@ -52,21 +61,27 @@ def compensation_vis(events, frequency, amplitude_x, amplitude_y, phase_shift, t
     cv2.normalize(image, image, 0, 255, cv2.NORM_MINMAX)
     return image
 
+
 def compensate_motion_with_sinusoidal(events, frequency, amplitude_x, amplitude_y, phase_shift, time_window, width,
                                       height):
     image = np.zeros((height, width), dtype=np.float64)
     freq_rads = 2 * np.pi * frequency
     frequency_rads_us = freq_rads / 1e-6
     init_t = events[0][0]
-    idx = 0
+    idx_neg = 0
+    idx_pos = 0
     for timestamp, x, y, polarity in events:
         compensated_x = int(x - amplitude_x * np.sin(frequency_rads_us * (timestamp - init_t) + phase_shift[0]))
-        compensated_x_values[idx] = compensated_x
-        idx += 1
+        if polarity:
+            compensated_x_values_pos[idx_pos] = compensated_x
+            idx_pos += 1
+        else:
+            compensated_x_values_neg[idx_neg] = compensated_x
+            idx_neg += 1
 
         compensated_y = int(y - amplitude_y * np.sin(frequency_rads_us * (timestamp - init_t) + phase_shift[1]))
         if 0 <= compensated_x < width and 0 <= compensated_y < height:
-            image[compensated_y, compensated_x] += 1 # if polarity else -1
+            image[compensated_y, compensated_x] += 1  # if polarity else -1
     update_plot()
     return image  # Return raw float32 image instead of normalizing
 
@@ -132,19 +147,22 @@ def read_events_from_hdf5(file_path, time_window_us):
 if __name__ == "__main__":
     # Parameters
     width, height = 1280, 720  # Image dimensions
-    time_window = .01  # Time window in seconds
+    time_window = .1  # Time window in seconds
     time_window_us = time_window * 1e6  # Time window in microseconds
 
-    file_path = '/home/viciopoli/datasets/event_harmeda/april_2v.hdf5'
+    file_path = '/home/viciopoli/datasets/event_harmeda/dot_static_undist.hdf5'
     events = read_events_from_hdf5(file_path, time_window_us)
 
     # scatter plot events x and time with small dots
-    compensated_x_values = [x for _, x, _, _ in events]
-    timestamps = [t for t, _, _, _ in events]
+    compensated_x_values_pos = [x for _, x, _, p in events if p]
+    compensated_x_values_neg = [x for _, x, _, p in events if not p]
+    timestamps_pos = [t for t, _, _, p in events if p]
+    timestamps_neg = [t for t, _, _, p in events if not p]
 
     # Initialize plot
     fig, ax = plt.subplots()
-    scatter = ax.scatter([], [], c='b', s=5)  # Blue scatter points
+    scatter = ax.scatter(compensated_x_values_pos, timestamps_pos, c='b', s=2)  # Blue scatter points
+    scatter_neg = ax.scatter(compensated_x_values_neg, timestamps_neg, c='r', s=2)  # Red scatter points
     ax.set_xlim(0, time_window_us)  # Will be updated dynamically
     ax.set_ylim(0, 1280)  # Adjust based on expected range
     ax.set_xlabel("Time (s)")
@@ -160,7 +178,7 @@ if __name__ == "__main__":
         initial_guess,
         args=(events, time_window, width, height),
         method='Nelder-Mead',
-        options={'maxiter': 5000, 'disp': True}
+        options={'maxiter': 100, 'disp': True}
     )
 
     # print opt message
