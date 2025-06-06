@@ -47,13 +47,13 @@ public:
 
         // If this is the first point, store it and return
         if (_line_set->points_.empty()) {
-            _line_set->points_.emplace_back(Eigen::Vector3d(x, y, z));
+            _line_set->points_.emplace_back(x, y, z);
             return;
         }
 
         // Update LineSet
-        _line_set->points_.emplace_back(Eigen::Vector3d(x, y, z));
-        _line_set->lines_.emplace_back(Eigen::Vector2i(_line_set->points_.size() - 2, _line_set->points_.size() - 1));
+        _line_set->points_.emplace_back(x, y, z);
+        _line_set->lines_.emplace_back(_line_set->points_.size() - 2, _line_set->points_.size() - 1);
 
         // Ensure colors array matches the number of lines
         _line_set->colors_.resize(_line_set->lines_.size(), Eigen::Vector3d(r, g, b));

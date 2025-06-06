@@ -66,3 +66,7 @@ target_link_libraries(viewer PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} Metav
 
 add_executable(undistort_and_store demo/undistort_and_store.cpp)
 target_link_libraries(undistort_and_store PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
+
+
+add_executable(centroid_ema demo/centroid_ema.cpp)
+target_link_libraries(centroid_ema PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
