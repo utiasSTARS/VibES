@@ -61,7 +61,7 @@ def read_events_from_hdf5(file_path, time_window_us):
 
 
 # Parameters
-time_window_us = 1.0  # 1 second window
+time_window_us = .03  # 1 second window
 width, height = 1280, 720  # Image dimensions
 timestamps = np.linspace(0, time_window_us, 1000)
 
@@ -71,7 +71,7 @@ if __name__ == "__main__":
     time_window = .1  # Time window in seconds
     time_window_us = time_window * 1e6  # Time window in microseconds
 
-    file_path = '/home/viciopoli/datasets/event_harmeda/dot_static_undist.hdf5'
+    file_path = '/home/viciopoli/datasets/event_harmeda/rotate.hdf5'
     events = read_events_from_hdf5(file_path, time_window_us)
 
     # scatter plot events x and time with small dots
