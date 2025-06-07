@@ -17,6 +17,7 @@
 #include <opencv2/opencv.hpp>
 
 #include "ema.hpp"
+#include "arma.hpp"
 
 namespace po = boost::program_options;
 
@@ -70,6 +71,10 @@ int main(int argc, char *argv[]) {
     auto t_window = 1000.;
     CentroidEMA ema_calculator(tau, t_window);
 
+    // ARMA models for each polarity's x and y coordinates
+    std::map<int, ARMA> arma_x_models;
+    std::map<int, ARMA> arma_y_models;
+
     // OpenCV visualization setup
     const int crop_size = 150;
     const int vis_width = 1920;
@@ -81,26 +86,26 @@ int main(int argc, char *argv[]) {
     auto vis = std::make_shared<open3d::visualization::Visualizer>();
     std::shared_ptr<open3d::geometry::PointCloud> events_pcd_p0;
     std::shared_ptr<open3d::geometry::LineSet> centroids_trace;
+    std::shared_ptr<open3d::geometry::LineSet> arma_trace;
 
     if (do_plot) {
-        vis->CreateVisualizerWindow("Events and Centroids", 1600, 900);
+        vis->CreateVisualizerWindow("Events, Centroids, and ARMA Prediction", 1600, 900);
         events_pcd_p0 = std::make_shared<open3d::geometry::PointCloud>();
         centroids_trace = std::make_shared<open3d::geometry::LineSet>();
+        arma_trace = std::make_shared<open3d::geometry::LineSet>();
         vis->AddGeometry(events_pcd_p0);
         vis->AddGeometry(centroids_trace);
+        vis->AddGeometry(arma_trace);
 
         auto bounding_box = std::make_shared<open3d::geometry::AxisAlignedBoundingBox>(
                 Eigen::Vector3d(0, 0, 0.0),
                 Eigen::Vector3d(camera_width, camera_height, 1));
-
-        // Set bounding box color for visibility
-        bounding_box->color_ = Eigen::Vector3d(0.0, 1.0, 0.0);  // Green color
-
+        bounding_box->color_ = Eigen::Vector3d(0.0, 1.0, 0.0);
         vis->AddGeometry(bounding_box);
     }
 
     Metavision::timestamp last_print_time = 0;
-    Metavision::timestamp first_event_t = -1; // To normalize time for visualization
+    Metavision::timestamp first_event_t = -1;
 
     double time_scale = 1000.;
     std::mutex _mtx;
@@ -110,46 +115,26 @@ int main(int argc, char *argv[]) {
         }
 
         std::lock_guard<std::mutex> lock(_mtx);
-        if (do_plot) {
-            for (auto it = begin; it != end; ++it) {
-                const auto &ev = *it;
-                events_pcd_p0->points_.emplace_back(ev.x, ev.y, ev.t / time_scale);
-                if (ev.p == 0) {
-                    events_pcd_p0->colors_.emplace_back(0, 0, 1); // Blue
-                } else {
-                    events_pcd_p0->colors_.emplace_back(1, 0, 0); // Red
-                }
-            }
-        }
-
         for (auto it = begin; it != end; ++it) {
             const auto &event = *it;
 
             if (do_plot) {
                 events_pcd_p0->points_.emplace_back(event.x, event.y, event.t / time_scale);
                 if (event.p == 0) {
-                    events_pcd_p0->colors_.emplace_back(0, 0, 1); // Blue
+                    events_pcd_p0->colors_.emplace_back(0, 0, 1);
                 } else {
-                    events_pcd_p0->colors_.emplace_back(1, 0, 0); // Red
+                    events_pcd_p0->colors_.emplace_back(1, 0, 0);
                 }
             }
-
-            // Normalize time for x-axis in the visualization
             const int vis_x_time = static_cast<int>((event.t - first_event_t) / time_scale);
 
-            // Stop processing if the visualization reaches the edge of the window
             if (vis_x_time >= vis_width) {
-                // save the opencv visualization to a file
-                cv::imwrite("/home/viciopoli/STARS/courses/centroid_ema_visualization.png", crop_vis);
-                std::cout << "Saved visualization to /home/viciopoli/STARS/courses/centroid_ema_visualization.png"
-                          << std::endl;
                 if (camera.is_running()) {
                     camera.stop();
                 }
                 continue;
             }
 
-            // Check if the event is within the crop region for OpenCV visualization
             if (event.x >= crop_x_start && event.x < crop_x_start + crop_size &&
                 event.y >= crop_y_start && event.y < crop_y_start + crop_size) {
                 int vis_y_pos = event.x - crop_x_start;
@@ -160,6 +145,7 @@ int main(int argc, char *argv[]) {
             auto updated_centroid = ema_calculator.update(event);
             if (updated_centroid.has_value()) {
                 auto centroid = updated_centroid.value();
+                int p = event.p;
 
                 if (do_plot) {
                     Eigen::Vector3d new_point(centroid[0], centroid[1], (event.t + t_window / 2) / time_scale);
@@ -169,23 +155,49 @@ int main(int argc, char *argv[]) {
                         Eigen::Vector2i line_indices(centroids_trace->points_.size() - 2,
                                                      centroids_trace->points_.size() - 1);
                         centroids_trace->lines_.push_back(line_indices);
-                        centroids_trace->colors_.push_back(Eigen::Vector3d(0, 1, 0)); // Green
+                        centroids_trace->colors_.push_back(Eigen::Vector3d(0, 1, 0));
                     }
                 }
 
-                // Check if centroid x-coordinate is within the crop region
+                if (arma_x_models.find(p) == arma_x_models.end()) {
+                    arma_x_models.emplace(p, ARMA({0.9}, {}, centroid[0]));
+                    arma_y_models.emplace(p, ARMA({0.9}, {}, centroid[1]));
+                }
+                
+                arma_x_models.at(p).update(centroid[0]);
+                arma_y_models.at(p).update(centroid[1]);
+                double pred_x = arma_x_models.at(p).predict();
+                double pred_y = arma_y_models.at(p).predict();
+
+                if (do_plot) {
+                    Eigen::Vector3d pred_point(pred_x, pred_y, (event.t + t_window * 1.5) / time_scale);
+                    arma_trace->points_.push_back(pred_point);
+
+                    if(arma_trace->points_.size() > 1){
+                         Eigen::Vector2i line_indices(arma_trace->points_.size() - 2, arma_trace->points_.size() - 1);
+                         arma_trace->lines_.push_back(line_indices);
+                         arma_trace->colors_.push_back(Eigen::Vector3d(1, 1, 0)); // Yellow
+                    }
+                }
+
                 float cx = centroid[0];
                 int vis_y_pos = cx - crop_x_start;
                 if (vis_y_pos >= 0 && vis_y_pos < crop_size) {
                     cv::Point centroid_point(vis_x_time - (t_window / 2) / time_scale, vis_y_pos);
                     cv::circle(crop_vis, centroid_point, 2, cv::Scalar(0, 255, 0), -1);
+
+                    int pred_vis_y_pos = pred_x - crop_x_start;
+                    if(pred_vis_y_pos >=0 && pred_vis_y_pos < crop_size){
+                        cv::Point pred_point(vis_x_time + (t_window / 2) / time_scale, pred_vis_y_pos);
+                        cv::circle(crop_vis, pred_point, 2, cv::Scalar(255, 0, 255), -1); // Magenta
+                    }
                 }
             }
         }
 
         if (end > begin) {
             Metavision::timestamp current_t = (end - 1)->t;
-            if (current_t - last_print_time > 100000) { // Print every ~100ms
+            if (current_t - last_print_time > 100000) {
                 last_print_time = current_t;
                 std::cout << "Timestamp: " << std::fixed << std::setprecision(2) << current_t / 1e6 << "s" << std::endl;
                 const auto &centroids = ema_calculator.get_centroids();
@@ -206,12 +218,11 @@ int main(int argc, char *argv[]) {
                 std::lock_guard<std::mutex> lock(_mtx);
                 vis->UpdateGeometry(events_pcd_p0);
                 vis->UpdateGeometry(centroids_trace);
+                vis->UpdateGeometry(arma_trace);
                 vis->PollEvents();
                 vis->UpdateRender();
 
                 crop_vis.copyTo(frame_to_show);
-                // Clear the visualization mat for the next batch of events
-//                crop_vis.setTo(cv::Scalar(0, 0, 0));
             }
 
             if (!frame_to_show.empty()) {
@@ -237,12 +248,12 @@ int main(int argc, char *argv[]) {
         }
         camera.stop();
     }
+
     while (vis->PollEvents()) {
         vis->UpdateRender();
     }
     vis->DestroyVisualizerWindow();
     cv::destroyAllWindows();
 
-
     return 0;
-}
+} 
