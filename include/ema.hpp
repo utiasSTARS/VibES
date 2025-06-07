@@ -35,10 +35,10 @@ public:
      * @brief Updates the centroid calculation with a new event.
      * A new centroid is computed and returned only when a time window is completed.
      * @param event The new event.
-     * @return An optional containing the updated centroid for the event's polarity if a window completed.
+     * @return An optional containing the updated centroid and its average timestamp if a window completed.
      */
-    std::optional<std::array<float, 2>> update(const Metavision::EventCD &event) {
-        int p = 0; //event.p;
+    std::optional<std::pair<std::array<float, 2>, Metavision::timestamp>> update(const Metavision::EventCD &event) {
+        int p = event.p;
 
         if (window_start_timestamps_.find(p) == window_start_timestamps_.end()) {
             window_start_timestamps_[p] = event.t;
@@ -53,15 +53,17 @@ public:
             }
 
             double sum_x = 0, sum_y = 0;
+            double sum_t = 0;
             for (const auto &ev: event_buffers_[p]) {
                 sum_x += ev.x;
                 sum_y += ev.y;
+                sum_t += ev.t;
             }
             std::array<float, 2> buffer_centroid = {
                     static_cast<float>(sum_x / event_buffers_[p].size()),
                     static_cast<float>(sum_y / event_buffers_[p].size())};
-
-            Metavision::timestamp new_centroid_timestamp = event_buffers_[p].back().t;
+            
+            Metavision::timestamp new_centroid_timestamp = static_cast<Metavision::timestamp>(sum_t / event_buffers_[p].size());
 
             if (centroids_.find(p) == centroids_.end()) {
                 centroids_[p] = buffer_centroid;
@@ -80,10 +82,10 @@ public:
             window_start_timestamps_.erase(p);
             prev_centroids_ = centroids_[p];
 
-            return centroids_[p];
+            return std::make_pair(centroids_[p], new_centroid_timestamp);
         }
 
-        return prev_centroids_;
+        return std::nullopt;
     }
 
     /**
