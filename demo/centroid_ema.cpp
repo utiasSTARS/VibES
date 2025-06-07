@@ -17,6 +17,7 @@
 #include <opencv2/opencv.hpp>
 
 #include "ema.hpp"
+#include "sinusoid_fitter.hpp"
 
 namespace po = boost::program_options;
 
@@ -70,9 +71,13 @@ int main(int argc, char *argv[]) {
     auto t_window = 1000.;
     CentroidEMA ema_calculator(tau, t_window);
 
+    // Sinusoid fitter for each polarity's x and y coordinates
+    SinusoidFitter x_fitters;
+    SinusoidFitter y_fitters;
+
     // OpenCV visualization setup
     const int crop_size = 150;
-    const int vis_width = 1920;
+    const int vis_width = 2100;
     cv::Mat crop_vis = cv::Mat::zeros(crop_size, vis_width, CV_8UC3);
     const int crop_x_start = camera_width / 2 - crop_size / 2;
     const int crop_y_start = camera_height / 2 - crop_size / 2;
@@ -81,13 +86,16 @@ int main(int argc, char *argv[]) {
     auto vis = std::make_shared<open3d::visualization::Visualizer>();
     std::shared_ptr<open3d::geometry::PointCloud> events_pcd_p0;
     std::shared_ptr<open3d::geometry::LineSet> centroids_trace;
+    std::shared_ptr<open3d::geometry::LineSet> sinusoid_trace;
 
     if (do_plot) {
         vis->CreateVisualizerWindow("Events and Centroids", 1600, 900);
         events_pcd_p0 = std::make_shared<open3d::geometry::PointCloud>();
         centroids_trace = std::make_shared<open3d::geometry::LineSet>();
+        sinusoid_trace = std::make_shared<open3d::geometry::LineSet>();
         vis->AddGeometry(events_pcd_p0);
         vis->AddGeometry(centroids_trace);
+        vis->AddGeometry(sinusoid_trace);
 
         auto bounding_box = std::make_shared<open3d::geometry::AxisAlignedBoundingBox>(
                 Eigen::Vector3d(0, 0, 0.0),
@@ -101,6 +109,8 @@ int main(int argc, char *argv[]) {
 
     Metavision::timestamp last_print_time = 0;
     Metavision::timestamp first_event_t = -1; // To normalize time for visualization
+    const Metavision::timestamp fitting_duration = 0.5 * 1000 * 1000; // 2 seconds
+    bool fitting_complete = false;
 
     double time_scale = 1000.;
     std::mutex _mtx;
@@ -124,9 +134,11 @@ int main(int argc, char *argv[]) {
 
         for (auto it = begin; it != end; ++it) {
             const auto &event = *it;
+            const Metavision::timestamp current_relative_t = (event.t - first_event_t);
+            const double current_relative_t_sec = current_relative_t / 1.e6;
 
             if (do_plot) {
-                events_pcd_p0->points_.emplace_back(event.x, event.y, event.t / time_scale);
+                events_pcd_p0->points_.emplace_back(event.x, event.y, current_relative_t_sec);
                 if (event.p == 0) {
                     events_pcd_p0->colors_.emplace_back(0, 0, 1); // Blue
                 } else {
@@ -161,8 +173,20 @@ int main(int argc, char *argv[]) {
             if (updated_centroid.has_value()) {
                 auto centroid = updated_centroid.value();
 
+                if (current_relative_t < fitting_duration) {
+                    x_fitters.add_point(current_relative_t_sec, centroid[0]);
+                    y_fitters.add_point(current_relative_t_sec, centroid[1]);
+                } else if (!fitting_complete) {
+                    std::cout << "--- Fitting Sinusoid ---" << std::endl;
+                    std::cout << "X-Coordinate: ";
+                    x_fitters.fit();
+                    std::cout << "Y-Coordinate: ";
+                    y_fitters.fit();
+                    fitting_complete = true;
+                }
+
                 if (do_plot) {
-                    Eigen::Vector3d new_point(centroid[0], centroid[1], (event.t + t_window / 2) / time_scale);
+                    Eigen::Vector3d new_point(centroid[0], centroid[1], (current_relative_t + t_window / 2) / 1.e6);
                     centroids_trace->points_.push_back(new_point);
 
                     if (centroids_trace->points_.size() > 1) {
@@ -179,8 +203,34 @@ int main(int argc, char *argv[]) {
                 if (vis_y_pos >= 0 && vis_y_pos < crop_size) {
                     cv::Point centroid_point(vis_x_time - (t_window / 2) / time_scale, vis_y_pos);
                     cv::circle(crop_vis, centroid_point, 2, cv::Scalar(0, 255, 0), -1);
+
+                    if (fitting_complete) {
+                        double pred_x = x_fitters.predict(current_relative_t_sec);
+                        int pred_vis_y_pos = pred_x - crop_x_start;
+                        if (pred_vis_y_pos >= 0 && pred_vis_y_pos < crop_size) {
+                            cv::Point pred_point(vis_x_time, pred_vis_y_pos);
+                            cv::circle(crop_vis, pred_point, 2, cv::Scalar(255, 0, 255), -1); // Magenta for sinusoid
+                        }
+                    }
+                }
+                if (fitting_complete && do_plot) {
+                    double pred_x = x_fitters.predict(current_relative_t_sec);
+                    double pred_y = y_fitters.predict(current_relative_t_sec);
+                    Eigen::Vector3d pred_point(pred_x, pred_y, current_relative_t_sec);
+                    sinusoid_trace->points_.push_back(pred_point);
+                    if (sinusoid_trace->points_.size() > 1) {
+                        Eigen::Vector2i line_indices(sinusoid_trace->points_.size() - 2,
+                                                     sinusoid_trace->points_.size() - 1);
+                        sinusoid_trace->lines_.push_back(line_indices);
+                        sinusoid_trace->colors_.push_back(Eigen::Vector3d(0.5, 0, 0.5)); // Purple
+                    }
                 }
             }
+        }
+        const Metavision::timestamp current_relative_t_end = (end - 1 > begin) ? ((end - 1)->t - first_event_t) : 0;
+        if (!fitting_complete && current_relative_t_end >= fitting_duration) {
+            fitting_complete = true;
+            std::cout << "\n--- Sinusoid Fitting Complete ---\n" << std::endl;
         }
 
         if (end > begin) {
@@ -206,6 +256,7 @@ int main(int argc, char *argv[]) {
                 std::lock_guard<std::mutex> lock(_mtx);
                 vis->UpdateGeometry(events_pcd_p0);
                 vis->UpdateGeometry(centroids_trace);
+                if (fitting_complete) vis->UpdateGeometry(sinusoid_trace);
                 vis->PollEvents();
                 vis->UpdateRender();
 

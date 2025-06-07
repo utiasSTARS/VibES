@@ -78,11 +78,12 @@ public:
 
             event_buffers_[p].clear();
             window_start_timestamps_.erase(p);
+            prev_centroids_ = centroids_[p];
 
             return centroids_[p];
         }
 
-        return std::nullopt;
+        return prev_centroids_;
     }
 
     /**
@@ -97,6 +98,7 @@ private:
     double tau_;
     Metavision::timestamp t_window_;
     std::map<int, std::array<float, 2>> centroids_;
+    std::optional<std::array<float, 2>> prev_centroids_ = std::nullopt;
     std::map<int, Metavision::timestamp> last_timestamps_;
     std::map<int, Metavision::timestamp> window_start_timestamps_;
     std::map<int, std::vector<Metavision::EventCD>> event_buffers_;
