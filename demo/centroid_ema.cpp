@@ -85,7 +85,7 @@ int main(int argc, char *argv[]) {
     int camera_width = camera.geometry().width();
     int camera_height = camera.geometry().height();
 
-    auto t_window = 1000.;
+    auto t_window = 500.;
     CentroidEMA ema_calculator(tau, t_window);
 
     // Sinusoid fitter for each polarity's x and y coordinates
@@ -93,9 +93,11 @@ int main(int argc, char *argv[]) {
     auto y_fitter = create_iekf();
 
     // OpenCV visualization setup
-    const int crop_size = 150;
+    const int crop_size = 200;
     const int vis_width = 1920;
-    cv::Mat crop_vis = cv::Mat::zeros(crop_size, vis_width, CV_8UC3);
+    cv::Mat crop_vis = cv::Mat::ones(crop_size, vis_width, CV_8UC3);
+    // Initialize the crop visualization with a white background
+    crop_vis.setTo(cv::Scalar(255, 255, 255)); // Set to white background
     cv::Mat crop_vis_compensated = cv::Mat::zeros(crop_size, vis_width, CV_8UC3);
     const int crop_x_start = camera_width / 2 - crop_size / 2;
     const int crop_y_start = camera_height / 2 - crop_size / 2;
@@ -134,6 +136,7 @@ int main(int argc, char *argv[]) {
     bool fitting_complete = false;
 
     double time_scale = 1000.;
+    bool filter_converged = false;
     std::mutex _mtx;
     camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         if (first_event_t < 0 && begin != end) {
@@ -146,21 +149,6 @@ int main(int argc, char *argv[]) {
             const Metavision::timestamp current_relative_t = (event.t - first_event_t);
             const double current_t_sec = current_relative_t / 1.e6;
 
-            // Check if the event is within the crop region for OpenCV visualization
-//            if (!(event.x >= crop_x_start && event.x < crop_x_start + crop_size &&
-//                event.y >= crop_y_start && event.y < crop_y_start + crop_size)) {
-//                continue;
-//            }
-
-            // if (do_plot) {
-            //     events_pcd_p0->points_.emplace_back(event.x, event.y, current_t_sec);
-            //     if (event.p == 0) {
-            //         events_pcd_p0->colors_.emplace_back(0, 0, 1); // Blue
-            //     } else {
-            //         events_pcd_p0->colors_.emplace_back(1, 0, 0); // Red
-            //     }
-            // }
-
             // Normalize time for x-axis in the visualization
             const int vis_x_time = static_cast<int>(current_t_sec * (time_scale)); // Rescale time for visualization
 
@@ -168,11 +156,21 @@ int main(int argc, char *argv[]) {
             if (vis_x_time >= vis_width) {
                 // save the opencv visualization to a file
                 cv::imwrite("/home/viciopoli/STARS/courses/centroid_ema_visualization.png", crop_vis);
-                cv::imwrite("/home/viciopoli/STARS/courses/centroid_ema_visualization_compensated.png", crop_vis_compensated);
+                cv::imwrite("/home/viciopoli/STARS/courses/centroid_ema_visualization_compensated.png",
+                            crop_vis_compensated);
                 std::cout << "Saved visualization to /home/viciopoli/STARS/courses/centroid_ema_visualization.png"
                           << std::endl;
-                std::cout << "Saved visualization to /home/viciopoli/STARS/courses/centroid_ema_visualization_compensated.png"
-                          << std::endl;
+                std::cout
+                        << "Saved visualization to /home/viciopoli/STARS/courses/centroid_ema_visualization_compensated.png"
+                        << std::endl;
+
+                // print the fitting results
+                std::cout << "\n--- Fitting Results ---\n" << std::endl;
+                std::cout << "X Fitter Frequencies:" << std::endl;
+                x_fitter.print_frequencies();
+                std::cout << "Y Fitter Frequencies:" << std::endl;
+                y_fitter.print_frequencies();
+
                 if (camera.is_running()) {
                     camera.stop();
                 }
@@ -187,43 +185,67 @@ int main(int argc, char *argv[]) {
                 cv::circle(crop_vis, point, 1, (event.p == 0) ? cv::Scalar(255, 0, 0) : cv::Scalar(0, 0, 255), -1);
             }
 
+            // Motion compensation for every event, once the filter is stable
+            bool filter_is_ready = (event.t - first_event_t) > fitting_duration;
+            if (filter_is_ready) {
+                if (event.x >= crop_x_start && event.x < crop_x_start + crop_size &&
+                    event.y >= crop_y_start && event.y < crop_y_start + crop_size) {
+
+                    // Predict at the event's actual time for accurate compensation
+                    double pred_x_for_comp = x_fitter.predict(current_t_sec);
+
+                    int vis_y_compensated = (event.x - pred_x_for_comp) + (crop_size / 2);
+                    if (vis_y_compensated >= 0 && vis_y_compensated < crop_size) {
+                        cv::Point point_comp(vis_x_time, vis_y_compensated);
+                        cv::circle(crop_vis_compensated, point_comp, 1,
+                                   (event.p == 0) ? cv::Scalar(255, 0, 0) : cv::Scalar(0, 0, 255), -1);
+                    }
+                }
+            }
+
             auto result = ema_calculator.update(event);
             if (result.has_value()) {
-                auto& [centroid, centroid_ts] = *result;
+                auto &[centroid, centroid_ts] = *result;
 
                 double current_t_sec_update = (centroid_ts - first_event_t) / 1.e6;
 
                 x_fitter.update(current_t_sec_update, centroid[0]);
                 y_fitter.update(current_t_sec_update, centroid[1]);
-                
-                bool filter_converged = (centroid_ts - first_event_t) > fitting_duration;
-                
+
+                filter_converged = (centroid_ts - first_event_t) > fitting_duration;
+
                 // Check if centroid x-coordinate is within the crop region
                 float cx = centroid[0];
                 int vis_y_pos = cx - crop_x_start;
                 if (vis_y_pos >= 0 && vis_y_pos < crop_size) {
                     const int vis_x_time_centroid = static_cast<int>(current_t_sec_update * (time_scale));
-                    cv::Point centroid_point(vis_x_time_centroid, vis_y_pos);
+                    cv::Point centroid_point(vis_x_time_centroid, vis_y_pos + 50);
                     cv::circle(crop_vis, centroid_point, 3, cv::Scalar(0, 255, 0), -1);
+                }
+                if (filter_converged) {
+                    // Predict ahead to compensate for the processing delay and align the signals
+                    double time_to_predict = current_t_sec_update - (t_window / 2.e6);
+                    double pred_x = x_fitter.predict(time_to_predict);
+                    int pred_vis_y_pos = pred_x - crop_x_start;
 
-                    if (filter_converged) {
-                        double pred_x = x_fitter.predict(current_t_sec_update);
-                        int pred_vis_y_pos = pred_x - crop_x_start;
-                        if (pred_vis_y_pos >= 0 && pred_vis_y_pos < crop_size) {
-                            cv::Point pred_point(vis_x_time_centroid, pred_vis_y_pos);
-                            cv::circle(crop_vis, pred_point, 3, cv::Scalar(0, 165, 255), -1);
-                        }
-                        
-                        // Motion compensation
-                        if (event.x >= crop_x_start && event.x < crop_x_start + crop_size &&
-                            event.y >= crop_y_start && event.y < crop_y_start + crop_size) {
-                            // Center the compensated coordinate in the middle of the window
-                            int vis_y_compensated = (event.x - pred_x) + (crop_size / 2);
-                            if (vis_y_compensated >= 0 && vis_y_compensated < crop_size){
-                                cv::Point point_comp(vis_x_time, vis_y_compensated);
-                                cv::circle(crop_vis_compensated, point_comp, 1, (event.p == 0) ? cv::Scalar(255, 0, 0) : cv::Scalar(0, 0, 255), -1);
-                            }
-                        }
+                    if (pred_vis_y_pos >= 0 && pred_vis_y_pos < crop_size) {
+                        const int vis_x_time_pred = static_cast<int>(time_to_predict * time_scale) - 20;
+                        cv::Point pred_point(vis_x_time_pred, pred_vis_y_pos + 60);
+                        cv::circle(crop_vis, pred_point, 3, cv::Scalar(0, 165, 255), -1);
+                    }
+                }
+            }
+            if (filter_converged) {
+                // Motion compensation
+                if (event.x >= crop_x_start && event.x < crop_x_start + crop_size &&
+                    event.y >= crop_y_start && event.y < crop_y_start + crop_size) {
+                    // Predict at the event's actual time for accurate compensation
+                    double pred_x_for_comp = x_fitter.predict(current_t_sec-((2000) / 1e6));
+                    int vis_y_compensated = (event.x - pred_x_for_comp) + (crop_size / 2);
+                    if (vis_y_compensated >= 0 && vis_y_compensated < crop_size) {
+                        cv::Point point_comp(vis_x_time, vis_y_compensated);
+                        cv::circle(crop_vis_compensated, point_comp, 1,
+                                   (event.p == 0) ? cv::Scalar(255, 0, 0) : cv::Scalar(0, 0, 255), -1);
                     }
                 }
             }
@@ -239,11 +261,9 @@ int main(int argc, char *argv[]) {
             if (current_t - last_print_time > 100000) { // Print every ~100ms
                 last_print_time = current_t;
                 std::cout << "Timestamp: " << std::fixed << std::setprecision(2) << current_t / 1e6 << "s" << std::endl;
-                const auto &centroids = ema_calculator.get_centroids();
-                for (const auto &pair: centroids) {
-                    std::cout << "  Polarity " << pair.first << ": (" << std::fixed << std::setprecision(2)
-                              << pair.second[0] << ", " << pair.second[1] << ")" << std::endl;
-                }
+                const auto &centroid = ema_calculator.get_centroids();
+                std::cout << "  Centroid: (" << std::fixed << std::setprecision(2)
+                          << centroid[0] << ", " << centroid[1] << ")" << std::endl;
             }
         }
     });

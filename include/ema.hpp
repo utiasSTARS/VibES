@@ -29,7 +29,7 @@ public:
      * @param tau The time constant for the EMA. A smaller tau gives more weight to recent events.
      * @param t_window The time window in microseconds to group events together.
      */
-    CentroidEMA(double tau, Metavision::timestamp t_window) : tau_(tau), t_window_(t_window) {}
+    CentroidEMA(double tau, Metavision::timestamp t_window) : tau_(tau), t_window_(t_window), window_start_timestamps_(-1) {}
 
     /**
      * @brief Updates the centroid calculation with a new event.
@@ -38,51 +38,48 @@ public:
      * @return An optional containing the updated centroid and its average timestamp if a window completed.
      */
     std::optional<std::pair<std::array<float, 2>, Metavision::timestamp>> update(const Metavision::EventCD &event) {
-        int p = event.p;
-
-        if (window_start_timestamps_.find(p) == window_start_timestamps_.end()) {
-            window_start_timestamps_[p] = event.t;
+        if (window_start_timestamps_ < 0) {
+            window_start_timestamps_ = event.t;
         }
 
-        event_buffers_[p].push_back(event);
+        event_buffers_.push_back(event);
 
-        if (event.t - window_start_timestamps_[p] >= t_window_) {
-            if (event_buffers_[p].empty()) {
-                window_start_timestamps_.erase(p);
+        if (event.t - window_start_timestamps_ >= t_window_) {
+            if (event_buffers_.empty()) {
+                window_start_timestamps_ = -1;
                 return std::nullopt;
             }
 
             double sum_x = 0, sum_y = 0;
             double sum_t = 0;
-            for (const auto &ev: event_buffers_[p]) {
+            for (const auto &ev: event_buffers_) {
                 sum_x += ev.x;
                 sum_y += ev.y;
                 sum_t += ev.t;
             }
             std::array<float, 2> buffer_centroid = {
-                    static_cast<float>(sum_x / event_buffers_[p].size()),
-                    static_cast<float>(sum_y / event_buffers_[p].size())};
+                    static_cast<float>(sum_x / event_buffers_.size()),
+                    static_cast<float>(sum_y / event_buffers_.size())};
             
-            Metavision::timestamp new_centroid_timestamp = static_cast<Metavision::timestamp>(sum_t / event_buffers_[p].size());
+            Metavision::timestamp new_centroid_timestamp = static_cast<Metavision::timestamp>(sum_t / event_buffers_.size());
 
-            if (centroids_.find(p) == centroids_.end()) {
-                centroids_[p] = buffer_centroid;
+            if (last_timestamps_ < 0) {
+                centroids_ = buffer_centroid;
             } else {
-                double delta_t = new_centroid_timestamp - last_timestamps_[p];
+                double delta_t = new_centroid_timestamp - last_timestamps_;
                 double alpha = 1.0;
                 if (tau_ > 0 && delta_t > 0) {
                     alpha = 1.0 - std::exp(-delta_t / tau_);
                 }
-                centroids_[p][0] = (1.0 - alpha) * centroids_[p][0] + alpha * buffer_centroid[0];
-                centroids_[p][1] = (1.0 - alpha) * centroids_[p][1] + alpha * buffer_centroid[1];
+                centroids_[0] = (1.0 - alpha) * centroids_[0] + alpha * buffer_centroid[0];
+                centroids_[1] = (1.0 - alpha) * centroids_[1] + alpha * buffer_centroid[1];
             }
-            last_timestamps_[p] = new_centroid_timestamp;
+            last_timestamps_ = new_centroid_timestamp;
 
-            event_buffers_[p].clear();
-            window_start_timestamps_.erase(p);
-            prev_centroids_ = centroids_[p];
+            event_buffers_.clear();
+            window_start_timestamps_ = -1;
 
-            return std::make_pair(centroids_[p], new_centroid_timestamp);
+            return std::make_pair(centroids_, new_centroid_timestamp);
         }
 
         return std::nullopt;
@@ -92,18 +89,17 @@ public:
      * @brief Gets the current centroids.
      * @return A const reference to the map of centroids.
      */
-    [[nodiscard]] const std::map<int, std::array<float, 2>> &get_centroids() const {
+    [[nodiscard]] const std::array<float, 2> &get_centroids() const {
         return centroids_;
     }
 
 private:
     double tau_;
     Metavision::timestamp t_window_;
-    std::map<int, std::array<float, 2>> centroids_;
-    std::optional<std::array<float, 2>> prev_centroids_ = std::nullopt;
-    std::map<int, Metavision::timestamp> last_timestamps_;
-    std::map<int, Metavision::timestamp> window_start_timestamps_;
-    std::map<int, std::vector<Metavision::EventCD>> event_buffers_;
+    std::array<float, 2> centroids_{};
+    Metavision::timestamp last_timestamps_ = -1;
+    Metavision::timestamp window_start_timestamps_;
+    std::vector<Metavision::EventCD> event_buffers_;
 };
 
 

@@ -94,8 +94,8 @@ int main(int argc, char *argv[]) {
     std::map<int, ARMA> arma_y_models;
 
     // Sinusoid fitter for each polarity's x and y coordinates
-    auto x_fitter = create_iekf();
-    auto y_fitter = create_iekf();
+    std::map<int, IEKFSinusoidFitter> x_fitters;
+    std::map<int, IEKFSinusoidFitter> y_fitters;
 
     // OpenCV visualization setup
     const int crop_size = 150;
@@ -148,17 +148,17 @@ int main(int argc, char *argv[]) {
         for (auto it = begin; it != end; ++it) {
             const auto &event = *it;
             const Metavision::timestamp current_relative_t = (event.t - first_event_t);
-            const double current_t_sec = current_relative_t / 1.e6;
+            const double current_t_sec_event = current_relative_t / 1.e6;
 
             // if (do_plot) {
-            //     events_pcd_p0->points_.emplace_back(event.x, event.y, current_t_sec);
+            //     events_pcd_p0->points_.emplace_back(event.x, event.y, current_t_sec_event);
             //     if (event.p == 0) {
             //         events_pcd_p0->colors_.emplace_back(0, 0, 1);
             //     } else {
             //         events_pcd_p0->colors_.emplace_back(1, 0, 0);
             //     }
             // }
-            const int vis_x_time = static_cast<int>(current_t_sec * (time_scale/100.));
+            const int vis_x_time = static_cast<int>(current_t_sec_event * (time_scale));
 
             if (vis_x_time >= vis_width) {
                 if (camera.is_running()) {
@@ -174,28 +174,36 @@ int main(int argc, char *argv[]) {
                 cv::circle(crop_vis, point, 1, (event.p == 0) ? cv::Scalar(255, 0, 0) : cv::Scalar(0, 0, 255), -1);
             }
 
+            // Motion compensation for every event, once the filter is stable
+            bool filter_is_ready = (event.t - first_event_t) > fitting_duration;
+            if (filter_is_ready && !x_fitters.empty()) {
+                if (event.x >= crop_x_start && event.x < crop_x_start + crop_size &&
+                    event.y >= crop_y_start && event.y < crop_y_start + crop_size) {
+                    // Since all polarities are merged in EMA, we use the single fitter (key 0)
+                    double pred_x_sinusoid = x_fitters.at(0).predict(current_t_sec_event);
+                    int vis_y_compensated = (event.x - pred_x_sinusoid) + (crop_size / 2);
+                    if(vis_y_compensated >= 0 && vis_y_compensated < crop_size) {
+                        cv::Point point_comp(vis_x_time, vis_y_compensated);
+                        cv::circle(crop_vis_compensated, point_comp, 1, (event.p == 0) ? cv::Scalar(255, 0, 0) : cv::Scalar(0, 0, 255), -1);
+                    }
+                }
+            }
+
             auto result = ema_calculator.update(event);
             if (result.has_value()) {
                 auto& [centroid, centroid_ts] = *result;
-                int p = event.p;
+                int p = 0; //event.p; All events are processed under p=0 now
 
-                double current_t_sec = (centroid_ts - first_event_t) / 1.e6;
-                x_fitter.update(current_t_sec, centroid[0]);
-                y_fitter.update(current_t_sec, centroid[1]);
+                double current_t_sec_centroid = (centroid_ts - first_event_t) / 1.e6;
+
+                if (x_fitters.find(p) == x_fitters.end()) {
+                    x_fitters.emplace(p, create_iekf());
+                    y_fitters.emplace(p, create_iekf());
+                }
+                x_fitters.at(p).update(current_t_sec_centroid, centroid[0]);
+                y_fitters.at(p).update(current_t_sec_centroid, centroid[1]);
                 
-                bool filter_converged = (centroid_ts - first_event_t) > fitting_duration;
-
-                // if (do_plot) {
-                //     Eigen::Vector3d new_point(centroid[0], centroid[1], current_t_sec + t_window / 2.e6);
-                //     centroids_trace->points_.push_back(new_point);
-
-                //     if (centroids_trace->points_.size() > 1) {
-                //         Eigen::Vector2i line_indices(centroids_trace->points_.size() - 2,
-                //                                      centroids_trace->points_.size() - 1);
-                //         centroids_trace->lines_.push_back(line_indices);
-                //         centroids_trace->colors_.push_back(Eigen::Vector3d(0, 1, 0));
-                //     }
-                // }
+                bool filter_converged_centroid = (centroid_ts - first_event_t) > fitting_duration;
 
                 if (arma_x_models.find(p) == arma_x_models.end()) {
                     arma_x_models.emplace(p, ARMA({0.9}, {}, centroid[0]));
@@ -205,23 +213,11 @@ int main(int argc, char *argv[]) {
                 arma_x_models.at(p).update(centroid[0]);
                 arma_y_models.at(p).update(centroid[1]);
                 double pred_x = arma_x_models.at(p).predict();
-                double pred_y = arma_y_models.at(p).predict();
-
-                // if (do_plot) {
-                //     Eigen::Vector3d pred_point(pred_x, pred_y, current_t_sec + t_window * 1.5 / 1.e6);
-                //     arma_trace->points_.push_back(pred_point);
-
-                //     if(arma_trace->points_.size() > 1){
-                //          Eigen::Vector2i line_indices(arma_trace->points_.size() - 2, arma_trace->points_.size() - 1);
-                //          arma_trace->lines_.push_back(line_indices);
-                //          arma_trace->colors_.push_back(Eigen::Vector3d(1, 1, 0)); // Yellow
-                //     }
-                // }
 
                 float cx = centroid[0];
                 int vis_y_pos = cx - crop_x_start;
                 if (vis_y_pos >= 0 && vis_y_pos < crop_size) {
-                    const int vis_x_time_centroid = static_cast<int>(current_t_sec * (time_scale));
+                    const int vis_x_time_centroid = static_cast<int>(current_t_sec_centroid * (time_scale));
                     cv::Point centroid_point(vis_x_time_centroid, vis_y_pos);
                     cv::circle(crop_vis, centroid_point, 2, cv::Scalar(0, 255, 0), -1);
 
@@ -231,21 +227,15 @@ int main(int argc, char *argv[]) {
                         cv::circle(crop_vis, pred_point, 2, cv::Scalar(255, 0, 255), -1); // Magenta
                     }
 
-                    if (filter_converged) {
-                        double sinusoid_pred_x = x_fitter.predict(current_t_sec);
+                    if (filter_converged_centroid) {
+                        // Predict ahead to compensate for the processing delay
+                        double time_to_predict = current_t_sec_centroid + (t_window / 2.e6);
+                        double sinusoid_pred_x = x_fitters.at(p).predict(time_to_predict);
                         int sinusoid_pred_y_pos = sinusoid_pred_x - crop_x_start;
                          if(sinusoid_pred_y_pos >=0 && sinusoid_pred_y_pos < crop_size){
-                            cv::Point pred_point(vis_x_time_centroid, sinusoid_pred_y_pos);
+                            const int vis_x_time_pred = static_cast<int>(time_to_predict * time_scale);
+                            cv::Point pred_point(vis_x_time_pred, sinusoid_pred_y_pos);
                             cv::circle(crop_vis, pred_point, 2, cv::Scalar(0, 165, 255), -1); // Orange for sinusoid
-                        }
-                        
-                        if (event.x >= crop_x_start && event.x < crop_x_start + crop_size &&
-                            event.y >= crop_y_start && event.y < crop_y_start + crop_size) {
-                            int vis_y_compensated = (event.x - sinusoid_pred_x) + (crop_size / 2);
-                            if(vis_y_compensated >= 0 && vis_y_compensated < crop_size) {
-                                cv::Point point_comp(vis_x_time, vis_y_compensated);
-                                cv::circle(crop_vis_compensated, point_comp, 1, (event.p == 0) ? cv::Scalar(255, 0, 0) : cv::Scalar(0, 0, 255), -1);
-                            }
                         }
                     }
                 }
@@ -274,15 +264,20 @@ int main(int argc, char *argv[]) {
                 last_print_time = current_t;
                 std::cout << "Timestamp: " << std::fixed << std::setprecision(2) << current_t / 1e6 << "s" << std::endl;
                 const auto &centroids = ema_calculator.get_centroids();
-                for (const auto &pair: centroids) {
-                    std::cout << "  Polarity " << pair.first << ": (" << std::fixed << std::setprecision(2)
-                              << pair.second[0] << ", " << pair.second[1] << ")" << std::endl;
+                if (!centroids.empty()) {
+                    std::cout << "  Centroid: (" << std::fixed << std::setprecision(2)
+                              << centroids[0] << ", " << centroids[1] << ")" << std::endl;
                 }
+
                 if (filter_converged) {
-                    std::cout << " X Fitter Frequencies:" << std::endl;
-                    x_fitter.print_frequencies();
-                    std::cout << " Y Fitter Frequencies:" << std::endl;
-                    y_fitter.print_frequencies();
+                    for (const auto& fitter_pair : x_fitters) {
+                        std::cout << " X Fitter Frequencies for polarity " << fitter_pair.first << ":" << std::endl;
+                        fitter_pair.second.print_frequencies();
+                    }
+                    for (const auto& fitter_pair : y_fitters) {
+                        std::cout << " Y Fitter Frequencies for polarity " << fitter_pair.first << ":" << std::endl;
+                        fitter_pair.second.print_frequencies();
+                    }
                 }
             }
         }
