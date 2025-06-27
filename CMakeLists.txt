@@ -38,7 +38,16 @@ include_directories(${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp)
 include(tests/CMakeLists.txt)
 
 # Generate the lib using the instructions in the thirdparty repo
-set(FLOW_LIB_PATH "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.so")
+if (NOT EXISTS "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.so" AND NOT EXISTS "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.dll")
+    message(FATAL_ERROR "The VecKM_flow_cpp library is not built. Please follow the instructions in the thirdparty/VecKM_flow_cpp README to build it.")
+endif ()
+if (UNIX)
+    set(FLOW_LIB_PATH "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.so")
+elseif (WIN32)
+    set(FLOW_LIB_PATH "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.dll")
+else ()
+    message(FATAL_ERROR "Unsupported platform for VecKM_flow_cpp library")
+endif ()
 
 #add_executable(helix_vis_thread demo/helix_vis_thread.cpp)
 #target_link_libraries(helix_vis_thread PRIVATE Open3D::Open3D finufft dv::processing)

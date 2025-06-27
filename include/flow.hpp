@@ -22,8 +22,6 @@ public:
     void estimateFlow(
             float *events_txy,
             int *target_indices,
-            float *exp_itA,
-            float *upd_exp_itA,
             float dt,
             int num_targets,
             const float *pred_flow
