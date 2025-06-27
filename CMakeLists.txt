@@ -33,8 +33,12 @@ find_package(MetavisionSDK COMPONENTS base cv driver ui REQUIRED)
 
 include_directories(${EIGEN3_INCLUDE_DIR} ${TORCH_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp)
 
 include(tests/CMakeLists.txt)
+
+# Generate the lib using the instructions in the thirdparty repo
+set(FLOW_LIB_PATH "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.so")
 
 #add_executable(helix_vis_thread demo/helix_vis_thread.cpp)
 #target_link_libraries(helix_vis_thread PRIVATE Open3D::Open3D finufft dv::processing)
@@ -74,6 +78,8 @@ target_link_libraries(centroid_ema PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS}
 add_executable(centroid_ema_comp demo/centroid_ema_with_compensation.cpp)
 target_link_libraries(centroid_ema_comp PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
 
-
 add_executable(centroid_arma demo/centroid_arma.cpp)
 target_link_libraries(centroid_arma PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
+
+add_executable(centroid_ema_flow demo/centroid_ema_with_flow.cpp)
+target_link_libraries(centroid_ema_flow PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options ${FLOW_LIB_PATH} PUBLIC OpenMP::OpenMP_CXX)

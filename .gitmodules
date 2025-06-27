@@ -1,0 +1,3 @@
+[submodule "thirdparty/VecKM_flow_cpp"]
+	path = thirdparty/VecKM_flow_cpp
+	url = https://github.com/dhyuan99/VecKM_flow_cpp.git
