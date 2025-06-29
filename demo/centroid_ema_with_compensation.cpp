@@ -16,8 +16,8 @@
 //#include <open3d/Open3D.h>
 #include <opencv2/opencv.hpp>
 
-#include "ema.hpp"
-#include "iekf_sinusoid_fitter.hpp"
+#include "event_frontend/ema.hpp"
+#include "estimator/iekf_sinusoid_fitter.hpp"
 
 namespace po = boost::program_options;
 
@@ -25,15 +25,15 @@ namespace po = boost::program_options;
 IEKFSinusoidFitter create_iekf() {
     IEKFSinusoidFitter::StateVector initial_state;
     // A1, B1, A2, B2, omega, C
-    initial_state << 0, 0, 0, 0, 5 * 2 * M_PI, 0;
+    initial_state << 1, 1, 1, 1, 30.0 * 2 * M_PI, 240;
 
     IEKFSinusoidFitter::StateCovariance initial_covariance;
     initial_covariance.setIdentity();
-    initial_covariance *= 1e2;
+    initial_covariance *= 1;
 
     IEKFSinusoidFitter::StateCovariance process_noise;
     process_noise.setIdentity();
-    process_noise *= 1e-5;
+    process_noise *= 1e-2;
 
     double measurement_noise = 1e-1;
     return IEKFSinusoidFitter(initial_state, initial_covariance, process_noise, measurement_noise);
@@ -98,6 +98,7 @@ int main(int argc, char *argv[]) {
     cv::Mat crop_vis = cv::Mat::ones(crop_size, vis_width, CV_8UC3);
     // Initialize the crop visualization with a white background
     crop_vis.setTo(cv::Scalar(255, 255, 255)); // Set to white background
+
     cv::Mat crop_vis_compensated = cv::Mat::zeros(crop_size, vis_width, CV_8UC3);
     cv::Mat compensated_frame = cv::Mat::zeros(camera_height, camera_width, CV_8UC3);
     const int crop_x_start = camera_width / 2 - crop_size / 2;
@@ -136,7 +137,13 @@ int main(int argc, char *argv[]) {
     const Metavision::timestamp fitting_duration = 0.5 * 1000 * 1000; // 2 seconds
     bool fitting_complete = false;
 
-    double time_scale = 1000.;
+    double time_scale = 5000.;
+
+    // write a vertical line at x = 1000, this is equivalent to 1 second
+    int second_line_x = 0.1 * time_scale; // 0.1 seconds in the visualization
+    cv::line(crop_vis, cv::Point(second_line_x, 0), cv::Point(second_line_x, crop_size), cv::Scalar(0, 0, 0), 1);
+
+
     bool filter_converged = false;
     std::mutex _mtx;
     camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
@@ -235,7 +242,10 @@ int main(int argc, char *argv[]) {
                         const int vis_x_time_pred = static_cast<int>(time_to_predict * time_scale) - 20;
                         cv::Point pred_point(vis_x_time_pred, pred_vis_y_pos + 60);
                         cv::circle(crop_vis, pred_point, 3, cv::Scalar(0, 165, 255), -1);
-                        compensated_frame.at<cv::Vec3b>(int(event.y), int(event.x - x_fitter.predict_rel(time_to_predict))) = cv::Vec3b(255, 0, 0);
+                        compensated_frame.at<cv::Vec3b>(int(event.y), int(event.x)) = cv::Vec3b(0, 0, 255);
+                        compensated_frame.at<cv::Vec3b>(int(event.y), int(event.x - x_fitter.predict_rel(
+                                time_to_predict))) = cv::Vec3b(255, 0, 0);
+
                     }
                 }
             }
@@ -244,7 +254,7 @@ int main(int argc, char *argv[]) {
                 if (event.x >= crop_x_start && event.x < crop_x_start + crop_size &&
                     event.y >= crop_y_start && event.y < crop_y_start + crop_size) {
                     // Predict at the event's actual time for accurate compensation
-                    double pred_x_for_comp = x_fitter.predict(current_t_sec-((2000) / 1e6));
+                    double pred_x_for_comp = x_fitter.predict(current_t_sec - ((2000) / 1e6));
                     int vis_y_compensated = (event.x - pred_x_for_comp) + (crop_size / 2);
                     if (vis_y_compensated >= 0 && vis_y_compensated < crop_size) {
                         cv::Point point_comp(vis_x_time, vis_y_compensated);

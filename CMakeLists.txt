@@ -92,3 +92,7 @@ target_link_libraries(centroid_arma PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS
 
 add_executable(centroid_ema_flow demo/centroid_ema_with_flow.cpp)
 target_link_libraries(centroid_ema_flow PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options ${FLOW_LIB_PATH} PUBLIC OpenMP::OpenMP_CXX)
+
+
+add_executable(motion_estimation demo/motion_estimation.cpp)
+target_link_libraries(motion_estimation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options ${FLOW_LIB_PATH} PUBLIC OpenMP::OpenMP_CXX)

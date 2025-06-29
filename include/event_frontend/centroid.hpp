@@ -7,10 +7,10 @@
 #include <deque>
 #include <tuple>
 #include <optional>
+#include "event_frontend/centroid_base.h"
 
-using opt_tuple = std::optional<std::tuple<double, double, double>>;
 
-class CMassCalculation {
+class CMassCalculation : CentroidBase {
 public:
     CMassCalculation(int width, int height, int counter_threshold = 50, double time_window = 1e-4,
                      int n_bins_x = 10, int n_bins_y = 10)
@@ -29,28 +29,28 @@ public:
         _img = cv::Mat::zeros(_height, _width, CV_8UC3);
     }
 
-    opt_tuple feed(int x, int y, double t) {
-        if (x < 0 || x >= _width || y < 0 || y >= _height) return std::nullopt;
+    std::optional<Metavision::EventCD> feed(const Metavision::EventCD &event) override {
         _counter++;
 
-        if (_init_t < 0) _init_t = t; // Initialize start time
+        if (_init_t < 0) _init_t = event.t; // Initialize start time
 
         // Determine bin index
-        int x_idx = x / _bin_width;
-        int y_idx = y / _bin_height;
+        int x_idx = event.x / _bin_width;
+        int y_idx = event.y / _bin_height;
         int bin_idx = _n_bins_x * y_idx + x_idx;
 
         // Add event to the bin's queue
-        _event_queues[bin_idx].emplace_back(x, y, t);
+        _event_queues[bin_idx].emplace_back(event.x, event.y, event.t);
 
         // Update running sums for this bin
-        _sum_x[bin_idx] += x;
-        _sum_y[bin_idx] += y;
-        _sum_t[bin_idx] += t;
+        _sum_x[bin_idx] += event.x;
+        _sum_y[bin_idx] += event.y;
+        _sum_t[bin_idx] += event.t;
         _sum_w[bin_idx] += 1;
 
         // Remove old events (sliding window)
-        while (!_event_queues[bin_idx].empty() && (t - std::get<2>(_event_queues[bin_idx].front()) > _time_window)) {
+        while (!_event_queues[bin_idx].empty() &&
+               (event.t - std::get<2>(_event_queues[bin_idx].front()) > _time_window)) {
             auto [old_x, old_y, old_t] = _event_queues[bin_idx].front();
             _event_queues[bin_idx].pop_front();
             _sum_x[bin_idx] -= old_x;
@@ -61,8 +61,8 @@ public:
         }
 
         // Check if it's time to generate a new centroid
-        if (t - _last_centroid_time >= _time_window) {
-            auto centroid = getCMass(t);
+        if (event.t - _last_centroid_time >= _time_window) {
+            auto centroid = getCMass(event.t);
 
             // Remove the most recent time_window / 4 events after computing centroid
 //            double discard_threshold = t - (_time_window / 4);
@@ -79,7 +79,7 @@ public:
         return std::nullopt;
     }
 
-    opt_tuple getCMass(double t) {
+    std::optional<Metavision::EventCD> getCMass(double t) {
         if (_counter < _counter_threshold) return std::nullopt;
 
         double total_x = 0.0, total_y = 0.0, total_t = 0.0, total_w = 0.0;
@@ -95,7 +95,12 @@ public:
         }
         _last_centroid_time = t;
 
-        return std::make_tuple(total_x, total_y, total_t);
+        return Metavision::EventCD{
+                static_cast<unsigned short>(total_x),
+                static_cast<unsigned short>(total_y),
+                0, // polarity is not used in this context
+                static_cast<Metavision::timestamp>(total_t)
+        };
     }
 
 private:

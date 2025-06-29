@@ -210,7 +210,7 @@ int main(int argc, char *argv[]) {
             // Get the output filename
             const auto in_relative_path = std::filesystem::relative(in_directory_item, in_path);
             auto out_relative_path = in_relative_path;
-            out_relative_path.replace_extension(".hdf5");
+            out_relative_path.replace_extension("_undist.hdf5");
             const auto out_directory_item = out_path / out_relative_path;
             // Convert the input file
             if (verbose) {

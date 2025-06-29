@@ -17,19 +17,21 @@
 #include <chrono>
 #include <atomic>
 #include <optional>
+#include "event_frontend/centroid_base.h"
 
 /**
  * @brief Calculates the exponential moving average (EMA) of centroids for event data.
  * This class maintains separate centroids for different polarities.
  */
-class CentroidEMA {
+class CentroidEMA : CentroidBase {
 public:
     /**
      * @brief Initializes the CentroidEMA calculator.
      * @param tau The time constant for the EMA. A smaller tau gives more weight to recent events.
      * @param t_window The time window in microseconds to group events together.
      */
-    CentroidEMA(double tau, Metavision::timestamp t_window) : tau_(tau), t_window_(t_window), window_start_timestamps_(-1) {}
+    CentroidEMA(double tau, Metavision::timestamp t_window) : tau_(tau), t_window_(t_window),
+                                                              window_start_timestamps_(-1) {}
 
     /**
      * @brief Updates the centroid calculation with a new event.
@@ -37,7 +39,7 @@ public:
      * @param event The new event.
      * @return An optional containing the updated centroid and its average timestamp if a window completed.
      */
-    std::optional<std::pair<std::array<float, 2>, Metavision::timestamp>> update(const Metavision::EventCD &event) {
+    std::optional<Metavision::EventCD> feed(const Metavision::EventCD &event) override {
         if (window_start_timestamps_ < 0) {
             window_start_timestamps_ = event.t;
         }
@@ -60,8 +62,9 @@ public:
             std::array<float, 2> buffer_centroid = {
                     static_cast<float>(sum_x / event_buffers_.size()),
                     static_cast<float>(sum_y / event_buffers_.size())};
-            
-            Metavision::timestamp new_centroid_timestamp = static_cast<Metavision::timestamp>(sum_t / event_buffers_.size());
+
+            Metavision::timestamp new_centroid_timestamp = static_cast<Metavision::timestamp>(sum_t /
+                                                                                              event_buffers_.size());
 
             if (last_timestamps_ < 0) {
                 centroids_ = buffer_centroid;
@@ -79,7 +82,12 @@ public:
             event_buffers_.clear();
             window_start_timestamps_ = -1;
 
-            return std::make_pair(centroids_, new_centroid_timestamp);
+            return Metavision::EventCD{
+                    static_cast<unsigned short>(centroids_[0]),
+                    static_cast<unsigned short>(centroids_[1]),
+                    0, // polarity is not used in this context
+                    new_centroid_timestamp
+            };
         }
 
         return std::nullopt;

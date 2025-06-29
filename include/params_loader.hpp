@@ -1,0 +1,84 @@
+//
+// Created by viciopoli on 29/06/25.
+//
+
+#ifndef PROJECT_PARAMS_LOADER_H
+#define PROJECT_PARAMS_LOADER_H
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <map>
+#include <array>
+#include <cmath>
+#include <fstream>
+#include <iomanip>
+#include <thread>
+#include <chrono>
+#include <atomic>
+
+#include <metavision/sdk/driver/camera.h>
+#include <metavision/sdk/base/events/event_cd.h>
+#include <boost/program_options.hpp>
+#include <open3d/Open3D.h>
+#include <opencv2/opencv.hpp>
+
+#include "event_frontend/ema.hpp"
+#include "estimator/iekf_sinusoid_fitter.hpp"
+
+namespace po = boost::program_options;
+namespace HARMEDA {
+    struct Params {
+        std::string input_path;
+        double tau = 100000.0; // Default time constant for EMA in microseconds
+        bool do_plot = false;  // Flag to enable 3D visualization
+    };
+
+    class ParamsLoader {
+    public:
+        ParamsLoader(int argc, char *argv[]) {
+            po::options_description desc("Allowed options");
+            desc.add_options()
+                    ("help,h", "produce help message")
+                    ("input-event-file,i", po::value<std::string>(&params->input_path),
+                     "Path to input event file (RAW or HDF5). If not specified, the camera live stream is used.")
+                    ("tau", po::value<double>(&params->tau)->default_value(100000.0),
+                     "Time constant for EMA in microseconds.")
+                    ("plot", "Enable 3D visualization of events and centroids.");
+
+            po::variables_map vm;
+
+            try {
+                po::store(po::parse_command_line(argc, argv, desc), vm);
+                po::notify(vm);
+            } catch (const po::error &e) {
+                std::cerr << "Error: " << e.what() << std::endl;
+                std::cerr << desc << std::endl;
+                throw std::runtime_error("Failed to parse command line arguments.");
+            }
+
+            if (vm.count("help")) {
+                std::cout << desc << std::endl;
+                throw std::runtime_error("Help requested.");
+            }
+
+            params->do_plot = vm.count("plot");
+
+            try {
+                if (!params->input_path.empty()) {
+                    camera = Metavision::Camera::from_file(params->input_path);
+                } else {
+                    camera = Metavision::Camera::from_first_available();
+                }
+            } catch (const Metavision::CameraException &e) {
+                std::cerr << "Camera initialization error: " << e.what() << std::endl;
+                throw std::runtime_error("Failed to initialize camera.");
+            }
+        }
+
+        std::shared_ptr<Params> params;
+
+        Metavision::Camera camera;
+    }
+}
+#endif //PROJECT_PARAMS_LOADER_H

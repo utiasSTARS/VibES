@@ -61,8 +61,8 @@ public:
             // Calculate measurement prediction h(eta)
             double sin_wt = std::sin(omega * t);
             double cos_wt = std::cos(omega * t);
-            double sin_2wt = std::sin(2 * omega * t);
-            double cos_2wt = std::cos(2 * omega * t);
+            double sin_2wt = 0.0; // std::sin(2 * omega * t);
+            double cos_2wt = 0.0; // std::cos(2 * omega * t);
             double y_pred = A * sin_wt + B * cos_wt + D * sin_2wt + E * cos_2wt + C;
 
             // Calculate Jacobian H
@@ -131,7 +131,7 @@ public:
         }
         double omega = state_(4);
         double freq_hz_1 = omega / (2 * M_PI);
-        double freq_hz_2 = (2 * omega) / (2 * M_PI);
+        double freq_hz_2 = 0.0; // (2 * omega) / (2 * M_PI);
         std::cout << "  Harmonic 1 (Fundamental): " << std::fixed << std::setprecision(2) << freq_hz_1 << " Hz" << std::endl;
         std::cout << "  Harmonic 2: " << std::fixed << std::setprecision(2) << freq_hz_2 << " Hz" << std::endl;
     }

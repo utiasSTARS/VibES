@@ -16,8 +16,8 @@
 
 #include <opencv2/opencv.hpp>
 
-#include "ema.hpp"
-#include "iekf_sinusoid_fitter.hpp"
+#include "event_frontend/ema.hpp"
+#include "estimator/iekf_sinusoid_fitter.hpp"
 #include "flow.hpp"
 
 namespace po = boost::program_options;
