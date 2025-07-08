@@ -29,7 +29,7 @@ public:
         _img = cv::Mat::zeros(_height, _width, CV_8UC3);
     }
 
-    std::optional<Metavision::EventCD> feed(const Metavision::EventCD &event) override {
+    std::optional<Centroid> feed(const Metavision::EventCD &event) override {
         _counter++;
 
         if (_init_t < 0) _init_t = event.t; // Initialize start time
@@ -79,7 +79,7 @@ public:
         return std::nullopt;
     }
 
-    std::optional<Metavision::EventCD> getCMass(double t) {
+    std::optional<Centroid> getCMass(double t) {
         if (_counter < _counter_threshold) return std::nullopt;
 
         double total_x = 0.0, total_y = 0.0, total_t = 0.0, total_w = 0.0;
@@ -95,12 +95,7 @@ public:
         }
         _last_centroid_time = t;
 
-        return Metavision::EventCD{
-                static_cast<unsigned short>(total_x),
-                static_cast<unsigned short>(total_y),
-                0, // polarity is not used in this context
-                static_cast<Metavision::timestamp>(total_t)
-        };
+        return Centroid(total_t, total_x, total_y);
     }
 
 private:

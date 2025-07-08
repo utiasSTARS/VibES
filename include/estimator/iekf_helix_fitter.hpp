@@ -146,6 +146,16 @@ public:
         update(relative_time, measurement);
     }
 
+    void update(const long long time, double x, double y) {
+        if (!is_initialized_) {
+            reference_time_ = static_cast<double>(time) * time_scale_;
+        }
+        double relative_time = (static_cast<double>(time) * time_scale_) - reference_time_;
+        HelixPoint measurement(x, y, relative_time);
+        update(relative_time, measurement);
+    }
+
+
     void update(double t, const HelixPoint &measurement) {
         // --- PREDICTION STEP ---
         Eigen::VectorXd predicted_state = state_;
@@ -258,7 +268,7 @@ public:
             return;
         }
 
-        for(int h = 0; h < num_harmonics_; ++h) {
+        for (int h = 0; h < num_harmonics_; ++h) {
             int base_idx = h * 6;
             double A_x = state_(base_idx);
             double B_x = state_(base_idx + 1);

@@ -1,3 +1,9 @@
 [submodule "thirdparty/VecKM_flow_cpp"]
 	path = thirdparty/VecKM_flow_cpp
 	url = https://github.com/dhyuan99/VecKM_flow_cpp.git
+[submodule "thirdparty/deep_ev_tracker"]
+	path = thirdparty/deep_ev_tracker
+	url = https://github.com/uzh-rpg/deep_ev_tracker.git
+[submodule "thirdparty/haste"]
+	path = thirdparty/haste
+	url = https://github.com/ialzugaray/haste.git

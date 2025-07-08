@@ -37,6 +37,14 @@ include_directories(${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp)
 
 include(tests/CMakeLists.txt)
 
+# Build HASTE AND INTEGRATE IT INTO THE PROJECT
+#add_subdirectory(thirdparty/haste)
+
+find_package(gflags REQUIRED)
+find_package(glog REQUIRED)
+add_subdirectory(thirdparty/haste/thirdparty/quickgui)
+include_directories(thirdparty/haste/include)
+
 # Generate the lib using the instructions in the thirdparty repo
 if (NOT EXISTS "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.so" AND NOT EXISTS "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.dll")
     message(FATAL_ERROR "The VecKM_flow_cpp library is not built. Please follow the instructions in the thirdparty/VecKM_flow_cpp README to build it.")
@@ -96,3 +104,7 @@ target_link_libraries(centroid_ema_flow PRIVATE Open3D::Open3D finufft ${OpenCV_
 
 add_executable(motion_estimation demo/motion_estimation.cpp)
 target_link_libraries(motion_estimation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options ${FLOW_LIB_PATH} PUBLIC OpenMP::OpenMP_CXX)
+
+
+add_executable(haste_comp demo/haste_comp.cpp)
+target_link_libraries(haste_comp PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options ${FLOW_LIB_PATH} PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)

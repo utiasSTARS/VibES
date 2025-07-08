@@ -32,16 +32,21 @@ namespace HARMEDA {
         std::string input_path;
         double tau = 100000.0; // Default time constant for EMA in microseconds
         bool do_plot = false;  // Flag to enable 3D visualization
+        std::string calib_file; // Path to camera calibration file
     };
 
     class ParamsLoader {
     public:
         ParamsLoader(int argc, char *argv[]) {
+            params = std::make_shared<Params>();
+
             po::options_description desc("Allowed options");
             desc.add_options()
                     ("help,h", "produce help message")
                     ("input-event-file,i", po::value<std::string>(&params->input_path),
                      "Path to input event file (RAW or HDF5). If not specified, the camera live stream is used.")
+                    ("calibration-file,c", po::value<std::string>(&params->calib_file),
+                     "Path to camera calibration file (optional). If specified, events will be undistorted.")
                     ("tau", po::value<double>(&params->tau)->default_value(100000.0),
                      "Time constant for EMA in microseconds.")
                     ("plot", "Enable 3D visualization of events and centroids.");
@@ -62,7 +67,7 @@ namespace HARMEDA {
                 throw std::runtime_error("Help requested.");
             }
 
-            params->do_plot = vm.count("plot");
+//            params->do_plot = vm.count("plot");
 
             try {
                 if (!params->input_path.empty()) {
@@ -79,6 +84,6 @@ namespace HARMEDA {
         std::shared_ptr<Params> params;
 
         Metavision::Camera camera;
-    }
+    };
 }
 #endif //PROJECT_PARAMS_LOADER_H

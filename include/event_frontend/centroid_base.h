@@ -8,6 +8,13 @@
 #include <optional>
 #include <metavision/sdk/base/events/event_cd.h>
 
+struct Centroid {
+    double t;
+    double x;
+    double y;
+};
+
+
 class CentroidBase {
 public:
     virtual ~CentroidBase() = default;
@@ -18,8 +25,7 @@ public:
      * @param e The event to be processed, containing x, y coordinates and timestamp t.
      * @return An optional tuple containing the centroid (x, y, t) if available.
      */
-    virtual s#include "event_frontend/centroid_base.h"
-td::optional<Metavision::EventCD> feed(const Metavision::EventCD &event) = 0;
+    virtual std::optional<Centroid> feed(const Metavision::EventCD &event) = 0;
 };
 
 #endif //PROJECT_CENTROID_BASE_H

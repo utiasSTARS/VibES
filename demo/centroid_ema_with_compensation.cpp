@@ -134,11 +134,10 @@ int main(int argc, char *argv[]) {
 
     Metavision::timestamp last_print_time = 0;
     Metavision::timestamp first_event_t = -1; // To normalize time for visualization
-    const Metavision::timestamp fitting_duration = 0.5 * 1000 * 1000; // 2 seconds
+    const Metavision::timestamp fitting_duration = 0.5 * 1000 * 1000;
     bool fitting_complete = false;
 
     double time_scale = 5000.;
-
     // write a vertical line at x = 1000, this is equivalent to 1 second
     int second_line_x = 0.1 * time_scale; // 0.1 seconds in the visualization
     cv::line(crop_vis, cv::Point(second_line_x, 0), cv::Point(second_line_x, crop_size), cv::Scalar(0, 0, 0), 1);
@@ -213,19 +212,19 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            auto result = ema_calculator.update(event);
+            auto result = ema_calculator.feed(event);
             if (result.has_value()) {
-                auto &[centroid, centroid_ts] = *result;
+                auto e = *result;
 
-                double current_t_sec_update = (centroid_ts - first_event_t) / 1.e6;
+                double current_t_sec_update = (e.t - first_event_t) / 1.e6;
 
-                x_fitter.update(current_t_sec_update, centroid[0]);
-                y_fitter.update(current_t_sec_update, centroid[1]);
+                x_fitter.update(current_t_sec_update, e.x);
+                y_fitter.update(current_t_sec_update, e.y);
 
-                filter_converged = (centroid_ts - first_event_t) > fitting_duration;
+                filter_converged = (e.t - first_event_t) > fitting_duration;
 
                 // Check if centroid x-coordinate is within the crop region
-                float cx = centroid[0];
+                float cx = e.x;
                 int vis_y_pos = cx - crop_x_start;
                 if (vis_y_pos >= 0 && vis_y_pos < crop_size) {
                     const int vis_x_time_centroid = static_cast<int>(current_t_sec_update * (time_scale));

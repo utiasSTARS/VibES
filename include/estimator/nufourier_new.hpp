@@ -23,7 +23,7 @@ struct FinufftOptsDeleter {
     }
 };
 
-class FourierFreqEst {
+class NUFFT {
 public:
     // Delete default constructor – parameters must be specified.
     FourierFreqEst() = delete;
