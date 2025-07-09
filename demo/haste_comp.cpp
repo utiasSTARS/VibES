@@ -24,15 +24,22 @@ IEKFSinusoidFitter create_iekf(double A, double B, double omega) {
     initial_state << A, B, omega, 0;
 
     IEKFSinusoidFitter::StateCovariance initial_covariance;
+    // More conservative initial covariance
     initial_covariance.setIdentity();
-    initial_covariance *= 1e3;
-    initial_covariance(2, 2) = 1e5; // Set a smaller initial uncertainty for omega
+    initial_covariance(0,0) = 1e2; // A
+    initial_covariance(1,1) = 1e2; // B
+    initial_covariance(2,2) = 1e0; // omega (if well-known)
+    initial_covariance(3,3) = 1e3; // C (DC offset)
 
+    // Differentiated process noise
     IEKFSinusoidFitter::StateCovariance process_noise;
     process_noise.setIdentity();
-    process_noise *= 1e-1;
+    process_noise(0,0) = 1e0;  // A can vary
+    process_noise(1,1) = 1e0;  // B can vary
+    process_noise(2,2) = 1e-4; // omega changes slowly
+    process_noise(3,3) = 1e0; // C can vary
 
-    double measurement_noise = 1e-1;
+    double measurement_noise = 1.;
     return IEKFSinusoidFitter(initial_state, initial_covariance, process_noise, measurement_noise);
 }
 
