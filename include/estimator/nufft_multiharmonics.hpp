@@ -37,7 +37,7 @@ class NUFFTHelixEstimator {
 public:
     // Constructor
     NUFFTHelixEstimator(double f_min_hz, double f_max_hz, int max_harmonics = 3)
-            : N(200), f_min(Hz2rad(f_min_hz)), f_max(Hz2rad(f_max_hz)),
+            : N(500), f_min(Hz2rad(f_min_hz)), f_max(Hz2rad(f_max_hz)),
               max_harmonics_(max_harmonics),
               t_data(N), x_data(N), y_data(N),
               n_modes(4 * static_cast<int>(Hz2rad(f_max_hz))), // Increased resolution

@@ -61,30 +61,12 @@ int main(int argc, char *argv[]) {
     Metavision::Window window("Frames", w, h, Metavision::BaseWindow::RenderMode::BGR);
     Metavision::Window window_compensated("Frames compensated", w, h, Metavision::BaseWindow::RenderMode::BGR);
 
-    int shift_x = params.params->tracker_x; // -25; // -100;
-    int shift_y = params.params->tracker_y; // -25; // 10;
-    frame_gen.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
-        // draw a square of size 113 in the center of the frame
-        double x_square_center = w / 2.0 + shift_x;
-        double y_square_center = h / 2.0 + shift_y;
-        int size = haste::HypothesisPatchTracker::kPatchSize;
-        int half_size = size / 2;
-        cv::rectangle(frame, cv::Point(x_square_center - half_size, y_square_center - half_size + 1),
-                      cv::Point(x_square_center + half_size, y_square_center + half_size + 1),
-                      cv::Scalar(0, 0, 255), 2);
-
-        window.show(frame);
-    });
-
-    frame_gen_comp.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
-        window_compensated.show(frame);
-    });
 
     std::unique_ptr<IEKFSinusoidFitter> x_fitter, y_fitter;
 
-    double f_min = 10.0;   // Minimum frequency in Hz
-    double f_max = 100.0;  // Maximum frequency in Hz
-    int max_harmonics = 4; // Maximum number of harmonics to estimate
+    double f_min = 5.0;   // Minimum frequency in Hz
+    double f_max = 80.0;  // Maximum frequency in Hz
+    int max_harmonics = 1; // Maximum number of harmonics to estimate
     NUFFTHelixEstimator nufft_estimator(f_min, f_max, max_harmonics);
 
     // create tracker
@@ -98,6 +80,32 @@ int main(int argc, char *argv[]) {
 
     cv::namedWindow("Slice X Visualizer", cv::WINDOW_NORMAL);
     cv::namedWindow("Slice Y Visualizer", cv::WINDOW_NORMAL);
+
+
+    int shift_x = params.params->tracker_x; // -25; // -100;
+    int shift_y = params.params->tracker_y; // -25; // 10;
+    frame_gen.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
+        // draw a square of size 113 in the center of the frame
+        double x_square_center = w / 2.0 + shift_x;
+        double y_square_center = h / 2.0 + shift_y;
+        if (x_fitter && y_fitter) {
+            // draw the predicted position of the tracker
+            cv::circle(frame, cv::Point(x_fitter->getShift(),
+                                        y_fitter->getShift()), 5, cv::Scalar(0, 255, 0), -1);
+        }
+        int size = haste::HypothesisPatchTracker::kPatchSize;
+        int half_size = size / 2;
+        cv::rectangle(frame, cv::Point(x_square_center - half_size, y_square_center - half_size + 1),
+                      cv::Point(x_square_center + half_size, y_square_center + half_size + 1),
+                      cv::Scalar(0, 0, 255), 2);
+
+        window.show(frame);
+    });
+
+    frame_gen_comp.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
+        window_compensated.show(frame);
+    });
+
 
     std::mutex mtx;
 //    std::fstream filex, filey;
@@ -177,7 +185,7 @@ int main(int argc, char *argv[]) {
                                                          y_undistorted);
 
             if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
-                std::cout << "N samples: " << nufft_estimator.getCurrentIndex() << std::endl;
+//                std::cout << "N samples: " << nufft_estimator.getCurrentIndex() << std::endl;
 //                std::cout << "Tracker state updated to: {t=" << tracker->t() << ",\t x=" << tracker->x()
 //                          << ",\t y=" << tracker->y() << ",\t theta=" << tracker->theta() << "}" << std::endl;
                 if (!nufft_estimator.done() &&

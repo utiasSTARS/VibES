@@ -123,6 +123,8 @@ public:
 
     const StateVector &get_state() const { return state_; }
 
+    const double getShift() const { return state_(3); }
+
     bool is_initialized() const { return is_initialized_; }
 
     void print_frequencies() const {
