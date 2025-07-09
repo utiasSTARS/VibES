@@ -18,6 +18,8 @@
 #include "haste/tracking.hpp"
 #include "event_frontend/undistort.hpp"
 
+//#define VISUALIZE
+
 IEKFSinusoidFitter create_iekf(double A, double B, double omega) {
     IEKFSinusoidFitter::StateVector initial_state;
     // A1, B1, omega, C
@@ -26,18 +28,18 @@ IEKFSinusoidFitter create_iekf(double A, double B, double omega) {
     IEKFSinusoidFitter::StateCovariance initial_covariance;
     // More conservative initial covariance
     initial_covariance.setIdentity();
-    initial_covariance(0,0) = 1e2; // A
-    initial_covariance(1,1) = 1e2; // B
-    initial_covariance(2,2) = 1e0; // omega (if well-known)
-    initial_covariance(3,3) = 1e3; // C (DC offset)
+    initial_covariance(0, 0) = 1e2; // A
+    initial_covariance(1, 1) = 1e2; // B
+    initial_covariance(2, 2) = 1e0; // omega (if well-known)
+    initial_covariance(3, 3) = 1e3; // C (DC offset)
 
     // Differentiated process noise
     IEKFSinusoidFitter::StateCovariance process_noise;
     process_noise.setIdentity();
-    process_noise(0,0) = 1e0;  // A can vary
-    process_noise(1,1) = 1e0;  // B can vary
-    process_noise(2,2) = 1e-4; // omega changes slowly
-    process_noise(3,3) = 1e0; // C can vary
+    process_noise(0, 0) = 1e0;  // A can vary
+    process_noise(1, 1) = 1e0;  // B can vary
+    process_noise(2, 2) = 1e-4; // omega changes slowly
+    process_noise(3, 3) = 1e0; // C can vary
 
     double measurement_noise = 1.;
     return IEKFSinusoidFitter(initial_state, initial_covariance, process_noise, measurement_noise);
@@ -51,22 +53,13 @@ int main(int argc, char *argv[]) {
     const auto w = params.camera.geometry().width();
     const auto h = params.camera.geometry().height();
 
-//    haste::HypothesisPatchTracker::kPatchSize = params.params->tracker_size;
-
     Undistort undistort(params.params->calib_file);
-
-//    auto camera = haste::PinholeRadTanCamera<haste::HypothesisPatchTracker::Scalar>(w, h);
-//    haste::RpgDataset::loadCalibration(params.params->calib_file, camera);
-//    auto undistortion_map = camera.createUndistortionMap();// This undistort mapping could alternatively be used during an online process
-
 
     const std::uint32_t acc = 20000;
     double fps = 50;
-    auto frame_gen = Metavision::PeriodicFrameGenerationAlgorithm(w, h, acc, fps);
+    auto frame_gen_undist = Metavision::PeriodicFrameGenerationAlgorithm(w, h, acc, fps);
     auto frame_gen_comp = Metavision::PeriodicFrameGenerationAlgorithm(w, h, acc, fps);
 
-    Metavision::Window window("Frames", w, h, Metavision::BaseWindow::RenderMode::BGR);
-    Metavision::Window window_compensated("Frames compensated", w, h, Metavision::BaseWindow::RenderMode::BGR);
 
 
     std::unique_ptr<IEKFSinusoidFitter> x_fitter, y_fitter;
@@ -82,17 +75,27 @@ int main(int argc, char *argv[]) {
     // read data from camera and estimate the frequencies
     Metavision::timestamp first_event_t = -1;
 
+#ifdef VISUALIZE
+    Metavision::Window window("Frames", w, h, Metavision::BaseWindow::RenderMode::BGR);
+    Metavision::Window window_compensated("Frames compensated", w, h, Metavision::BaseWindow::RenderMode::BGR);
+
     HARMEDA::SliceVisualizer slice_visualizer_x(h, w, 0, HARMEDA::X_AXIS, 3);
     HARMEDA::SliceVisualizer slice_visualizer_y(h, w, 0, HARMEDA::Y_AXIS, 3);
 
     cv::namedWindow("Slice X Visualizer", cv::WINDOW_NORMAL);
     cv::namedWindow("Slice Y Visualizer", cv::WINDOW_NORMAL);
+#endif
+
+    // These vectors are used to store the undistorted and compensated frames
+    std::vector<cv::Mat> undistorted_frames, compensated_frames;
 
 
     int shift_x = params.params->tracker_x; // -25; // -100;
     int shift_y = params.params->tracker_y; // -25; // 10;
-    frame_gen.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
-        // draw a square of size 113 in the center of the frame
+    frame_gen_undist.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
+        undistorted_frames.emplace_back(frame.clone());
+
+#ifdef VISUALIZE
         double x_square_center = w / 2.0 + shift_x;
         double y_square_center = h / 2.0 + shift_y;
         if (x_fitter && y_fitter) {
@@ -107,10 +110,15 @@ int main(int argc, char *argv[]) {
                       cv::Scalar(0, 0, 255), 2);
 
         window.show(frame);
+#endif
+
     });
 
     frame_gen_comp.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
+        compensated_frames.emplace_back(frame.clone());
+#ifdef VISUALIZE
         window_compensated.show(frame);
+#endif
     });
 
 
@@ -152,8 +160,6 @@ int main(int argc, char *argv[]) {
             const auto current_relative_t = static_cast<double>(event.t - first_event_t);
             const double current_t_sec = current_relative_t / 1.e6;
 
-            slice_visualizer_x.feed(undist_event);
-            slice_visualizer_y.feed(undist_event);
 
             if (y_fitter && x_fitter) {
                 auto y_pred = y_fitter->predict_rel(current_t_sec);
@@ -164,6 +170,9 @@ int main(int argc, char *argv[]) {
                                                 event.p,
                                                 event.t);
             }
+#ifdef VISUALIZE
+            slice_visualizer_x.feed(undist_event);
+            slice_visualizer_y.feed(undist_event);
 
             slice_visualizer_y.editFrame([&](cv::Mat &frame) {
                 if (y_fitter) {
@@ -186,6 +195,7 @@ int main(int argc, char *argv[]) {
                                -1);
                 }
             });
+#endif
 
             const auto &update_type = tracker->pushEvent(current_t_sec,
                                                          x_undistorted,
@@ -233,6 +243,7 @@ int main(int argc, char *argv[]) {
                 tracker_latency = tracker->t() - current_t_sec;
 //                std::cout << "Tracker latency: " << tracker_latency << " seconds" << std::endl;
 
+#ifdef VISUALIZE
                 // Print the centroid data
                 slice_visualizer_y.editFrame([&](cv::Mat &frame) {
                     cv::circle(frame, cv::Point(
@@ -246,14 +257,14 @@ int main(int argc, char *argv[]) {
                                        int(tracker->x())), 1,
                                cv::Scalar(0, 255, 255), -1);
                 });
-
+#endif
                 if (x_fitter && y_fitter) {
                     x_fitter->update(tracker->t() + tracker_latency, tracker->x());
                     y_fitter->update(tracker->t() + tracker_latency, tracker->y());
                 }
             }
         }
-        frame_gen.process_events(events_undistored.begin(), events_undistored.end());
+        frame_gen_undist.process_events(events_undistored.begin(), events_undistored.end());
         frame_gen_comp.process_events(events_compensated.begin(), events_compensated.end());
     });
 
@@ -261,12 +272,15 @@ int main(int argc, char *argv[]) {
 
     while (params.camera.is_running()) {
         // Normalize time for x-axis in the visualization
+
+#ifdef VISUALIZE
         if (tracker) {
             haste::ImshowEigenArrayNormalized(
                     "Feature Event Window Projection",
                     tracker->eventWindowToModel(tracker->event_window(), tracker->state()).transpose());
             haste::ImshowEigenArrayNormalized("Feature Template", tracker->tracker_template().transpose());
         }
+
         cv::imshow("Slice X Visualizer", slice_visualizer_x.getFrameSide());
         cv::imshow("Slice Y Visualizer", slice_visualizer_y.getFrameSide());
         cv::waitKey(1); // Allow OpenCV to process the window events
@@ -274,8 +288,31 @@ int main(int argc, char *argv[]) {
             break;
         }
         Metavision::EventLoop::poll_and_dispatch(20);
+#else
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+#endif
     }
     params.camera.stop();
+
+    // create folder for storing frames
+    std::string output_folder = params.params->output_folder;
+    if (!std::filesystem::exists(output_folder)) {
+        std::filesystem::create_directories(output_folder);
+        std::filesystem::create_directories(output_folder + "/undistorted");
+        std::filesystem::create_directories(output_folder + "/compensated");
+    }
+
+    // save undistorted frames
+    for (size_t i = 0; i < undistorted_frames.size(); ++i) {
+        std::string filename = output_folder + "/undistorted/frame_" + std::to_string(i) + ".png";
+        cv::imwrite(filename, undistorted_frames[i]);
+    }
+    // save compensated frames
+    for (size_t i = 0; i < compensated_frames.size(); ++i) {
+        std::string filename = output_folder + "/compensated/frame_" + std::to_string(i) + ".png";
+        cv::imwrite(filename, compensated_frames[i]);
+    }
+
 
     // print fitter
     if (x_fitter) {

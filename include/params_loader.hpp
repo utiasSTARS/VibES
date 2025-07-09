@@ -30,9 +30,10 @@ namespace po = boost::program_options;
 namespace HARMEDA {
     struct Params {
         std::string input_path;
+        std::string calib_file; // Path to camera calibration file
+        std::string output_folder = "output"; // Default output folder for frames
         double tau = 100000.0; // Default time constant for EMA in microseconds
         bool do_plot = false;  // Flag to enable 3D visualization
-        std::string calib_file; // Path to camera calibration file
         int tracker_x = 0; // Tracker x position
         int tracker_y = 0; // Tracker y position
         int tracker_size = 10; // Tracker size
@@ -51,11 +52,13 @@ namespace HARMEDA {
                     ("calibration-file,c", po::value<std::string>(&params->calib_file),
                      "Path to camera calibration file (optional). If specified, events will be undistorted.")
                     ("tracker-x", po::value<int>(&params->tracker_x)->default_value(0),
-                    "X position of the tracker in pixels (default: 0).")
+                     "X position of the tracker in pixels (default: 0).")
                     ("tracker-y", po::value<int>(&params->tracker_y)->default_value(0),
-                    "Y position of the tracker in pixels (default: 0).")
+                     "Y position of the tracker in pixels (default: 0).")
                     ("tracker-size", po::value<int>(&params->tracker_size)->default_value(10),
-                    "Size of the tracker in pixels (default: 10).");
+                     "Size of the tracker in pixels (default: 10).")
+                    ("output-folder,o", po::value<std::string>(&params->output_folder)->default_value("output"),
+                     "Folder to save output frames (default: 'output').");
 
             po::variables_map vm;
 
