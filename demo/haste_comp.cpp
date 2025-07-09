@@ -9,7 +9,6 @@
 #include <metavision/sdk/ui/utils/window.h>
 #include <metavision/sdk/ui/utils/base_window.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
-#include "estimator/iekf_helix_fitter.hpp"
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
 #include "slice_visualizer.hpp"
@@ -26,11 +25,12 @@ IEKFSinusoidFitter create_iekf(double A, double B, double omega) {
 
     IEKFSinusoidFitter::StateCovariance initial_covariance;
     initial_covariance.setIdentity();
-    initial_covariance *= 1e2;
+    initial_covariance *= 1e3;
+    initial_covariance(2, 2) = 1e5; // Set a smaller initial uncertainty for omega
 
     IEKFSinusoidFitter::StateCovariance process_noise;
     process_noise.setIdentity();
-    process_noise *= 1e-5;
+    process_noise *= 1e-1;
 
     double measurement_noise = 1e-1;
     return IEKFSinusoidFitter(initial_state, initial_covariance, process_noise, measurement_noise);
@@ -44,6 +44,8 @@ int main(int argc, char *argv[]) {
     const auto w = params.camera.geometry().width();
     const auto h = params.camera.geometry().height();
 
+//    haste::HypothesisPatchTracker::kPatchSize = params.params->tracker_size;
+
     Undistort undistort(params.params->calib_file);
 
 //    auto camera = haste::PinholeRadTanCamera<haste::HypothesisPatchTracker::Scalar>(w, h);
@@ -54,19 +56,29 @@ int main(int argc, char *argv[]) {
     const std::uint32_t acc = 20000;
     double fps = 50;
     auto frame_gen = Metavision::PeriodicFrameGenerationAlgorithm(w, h, acc, fps);
-    Metavision::Window window("Frames", w, h, Metavision::BaseWindow::RenderMode::BGR);
+    auto frame_gen_comp = Metavision::PeriodicFrameGenerationAlgorithm(w, h, acc, fps);
 
+    Metavision::Window window("Frames", w, h, Metavision::BaseWindow::RenderMode::BGR);
+    Metavision::Window window_compensated("Frames compensated", w, h, Metavision::BaseWindow::RenderMode::BGR);
+
+    int shift_x = params.params->tracker_x; // -25; // -100;
+    int shift_y = params.params->tracker_y; // -25; // 10;
     frame_gen.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
         // draw a square of size 113 in the center of the frame
-        double x_square_center = w / 2.0 - 25;
-        double y_square_center = h / 2.0 - 25;
-        cv::rectangle(frame, cv::Point(x_square_center - 56, y_square_center - 56),
-                      cv::Point(x_square_center + 57, y_square_center + 57),
+        double x_square_center = w / 2.0 + shift_x;
+        double y_square_center = h / 2.0 + shift_y;
+        int size = haste::HypothesisPatchTracker::kPatchSize;
+        int half_size = size / 2;
+        cv::rectangle(frame, cv::Point(x_square_center - half_size, y_square_center - half_size + 1),
+                      cv::Point(x_square_center + half_size, y_square_center + half_size + 1),
                       cv::Scalar(0, 0, 255), 2);
 
         window.show(frame);
     });
 
+    frame_gen_comp.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
+        window_compensated.show(frame);
+    });
 
     std::unique_ptr<IEKFSinusoidFitter> x_fitter, y_fitter;
 
@@ -78,14 +90,12 @@ int main(int argc, char *argv[]) {
     // create tracker
     std::shared_ptr<haste::HypothesisPatchTracker> tracker;
 
-
     // read data from camera and estimate the frequencies
     Metavision::timestamp first_event_t = -1;
 
     HARMEDA::SliceVisualizer slice_visualizer_x(h, w, 0, HARMEDA::X_AXIS, 3);
     HARMEDA::SliceVisualizer slice_visualizer_y(h, w, 0, HARMEDA::Y_AXIS, 3);
 
-    cv::namedWindow("Accumulated Events Visualizer", cv::WINDOW_NORMAL);
     cv::namedWindow("Slice X Visualizer", cv::WINDOW_NORMAL);
     cv::namedWindow("Slice Y Visualizer", cv::WINDOW_NORMAL);
 
@@ -94,10 +104,11 @@ int main(int argc, char *argv[]) {
 //    filex.open("centroid_data_x.txt", std::ios::out);
 //    filey.open("centroid_data_y.txt", std::ios::out);
 
+    double tracker_latency = 0.0; // seconds
     float x_undistorted, y_undistorted;
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         std::vector<Metavision::EventCD> events_undistored(std::distance(begin, end));
-
+        std::vector<Metavision::EventCD> events_compensated;
         for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
             const Metavision::EventCD &event = *ev;
 
@@ -112,27 +123,37 @@ int main(int argc, char *argv[]) {
                     event.p,
                     event.t
             );
-//            Metavision::EventCD undist_event = event;
 
             events_undistored.push_back(undist_event);
 
             if (first_event_t < 0 && begin != end) {
                 first_event_t = begin->t;
-                tracker = std::make_shared<haste::HasteDifferenceStarTracker>(0.0,
-                                                                              w / 2. - 25,
-                                                                              h / 2. - 25,
+                tracker = std::make_shared<haste::HasteDifferenceStarTracker>(0.01,
+                                                                              w / 2. + shift_x,
+                                                                              h / 2. + shift_y,
                                                                               0.0);
                 continue;
             }
             const auto current_relative_t = static_cast<double>(event.t - first_event_t);
             const double current_t_sec = current_relative_t / 1.e6;
 
-//            slice_visualizer_x.feed(event);
-//            slice_visualizer_y.feed(event);
+            slice_visualizer_x.feed(undist_event);
+            slice_visualizer_y.feed(undist_event);
+
+            if (y_fitter && x_fitter) {
+                auto y_pred = y_fitter->predict_rel(current_t_sec);
+                auto x_pred = x_fitter->predict_rel(current_t_sec);
+                // correct for the motion
+                events_compensated.emplace_back(static_cast<unsigned short>(x_undistorted - x_pred),
+                                                static_cast<unsigned short>(y_undistorted - y_pred),
+                                                event.p,
+                                                event.t);
+            }
 
             slice_visualizer_y.editFrame([&](cv::Mat &frame) {
                 if (y_fitter) {
                     auto y_pred = y_fitter->predict(current_t_sec);
+
                     cv::circle(frame,
                                cv::Point(slice_visualizer_x.time_value, y_pred),
                                1,
@@ -151,17 +172,14 @@ int main(int argc, char *argv[]) {
                 }
             });
 
-
-            slice_visualizer_x.feed(undist_event);
-            slice_visualizer_y.feed(undist_event);
-
             const auto &update_type = tracker->pushEvent(current_t_sec,
                                                          x_undistorted,
                                                          y_undistorted);
 
             if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
-                std::cout << "Tracker state updated to: {t=" << tracker->t() << ",\t x=" << tracker->x()
-                          << ",\t y=" << tracker->y() << ",\t theta=" << tracker->theta() << "}" << std::endl;
+                std::cout << "N samples: " << nufft_estimator.getCurrentIndex() << std::endl;
+//                std::cout << "Tracker state updated to: {t=" << tracker->t() << ",\t x=" << tracker->x()
+//                          << ",\t y=" << tracker->y() << ",\t theta=" << tracker->theta() << "}" << std::endl;
                 if (!nufft_estimator.done() &&
                     nufft_estimator.feed(Centroid(tracker->t(), tracker->x(), tracker->y()))) {
                     std::lock_guard<std::mutex> lock(mtx);
@@ -197,26 +215,31 @@ int main(int argc, char *argv[]) {
                     );
                 }
 
+                tracker_latency = tracker->t() - current_t_sec;
+//                std::cout << "Tracker latency: " << tracker_latency << " seconds" << std::endl;
+
                 // Print the centroid data
                 slice_visualizer_y.editFrame([&](cv::Mat &frame) {
-                    cv::circle(frame, cv::Point(slice_visualizer_x.time_value, int(tracker->y())), 1,
+                    cv::circle(frame, cv::Point(
+                                       tracker->t() * slice_visualizer_x.time_scale,
+                                       int(tracker->y())), 1,
                                cv::Scalar(0, 255, 0), -1);
                 });
                 slice_visualizer_x.editFrame([&](cv::Mat &frame) {
-                    cv::circle(frame, cv::Point(slice_visualizer_y.time_value, int(tracker->x())), 1,
+                    cv::circle(frame, cv::Point(
+                                       tracker->t() * slice_visualizer_y.time_scale,
+                                       int(tracker->x())), 1,
                                cv::Scalar(0, 255, 255), -1);
                 });
 
-                if (x_fitter) {
-                    x_fitter->update(tracker->t(), tracker->x());
-                }
-                if (y_fitter) {
-                    y_fitter->update(tracker->t(), tracker->y());
+                if (x_fitter && y_fitter) {
+                    x_fitter->update(tracker->t() + tracker_latency, tracker->x());
+                    y_fitter->update(tracker->t() + tracker_latency, tracker->y());
                 }
             }
         }
-
         frame_gen.process_events(events_undistored.begin(), events_undistored.end());
+        frame_gen_comp.process_events(events_compensated.begin(), events_compensated.end());
     });
 
     params.camera.start();
@@ -232,7 +255,19 @@ int main(int argc, char *argv[]) {
         cv::imshow("Slice X Visualizer", slice_visualizer_x.getFrameSide());
         cv::imshow("Slice Y Visualizer", slice_visualizer_y.getFrameSide());
         cv::waitKey(1); // Allow OpenCV to process the window events
+        if (cv::waitKey(1) == 27) { // Exit on ESC key
+            break;
+        }
         Metavision::EventLoop::poll_and_dispatch(20);
+    }
+    params.camera.stop();
+
+    // print fitter
+    if (x_fitter) {
+        std::cout << "X Fitter: " << *x_fitter << std::endl;
+    }
+    if (y_fitter) {
+        std::cout << "Y Fitter: " << *y_fitter << std::endl;
     }
 
 //    filex.close();

@@ -95,13 +95,13 @@ namespace HARMEDA {
 
 
         int time_value = 0; // Time value in the visualization
+        int time_scale = 10000; // Scale for time visualization, can be adjusted as needed
     private:
         int _margin{0}, _lower_bound, _upper_bound, _axis_value;
         Axis _axis{X_AXIS}; // Default to X_AXIS
         cv::Mat _frame;
         cv::Mat _frame_side;
         std::mutex _mtx; // Mutex for thread safety
-        int time_scale = 10000; // Scale for time visualization, can be adjusted as needed
         Metavision::timestamp initial_time = 0;
         int time_to_clean = 0; // Flag to indicate if the time value exceeds the frame width
     };

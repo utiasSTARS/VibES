@@ -46,16 +46,16 @@ add_subdirectory(thirdparty/haste/thirdparty/quickgui)
 include_directories(thirdparty/haste/include)
 
 # Generate the lib using the instructions in the thirdparty repo
-if (NOT EXISTS "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.so" AND NOT EXISTS "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.dll")
-    message(FATAL_ERROR "The VecKM_flow_cpp library is not built. Please follow the instructions in the thirdparty/VecKM_flow_cpp README to build it.")
-endif ()
-if (UNIX)
-    set(FLOW_LIB_PATH "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.so")
-elseif (WIN32)
-    set(FLOW_LIB_PATH "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.dll")
-else ()
-    message(FATAL_ERROR "Unsupported platform for VecKM_flow_cpp library")
-endif ()
+#if (NOT EXISTS "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.so" AND NOT EXISTS "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.dll")
+#    message(FATAL_ERROR "The VecKM_flow_cpp library is not built. Please follow the instructions in the thirdparty/VecKM_flow_cpp README to build it.")
+#endif ()
+#if (UNIX)
+#    set(FLOW_LIB_PATH "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.so")
+#elseif (WIN32)
+#    set(FLOW_LIB_PATH "${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp/libSliceNormalFlowEstimator.dll")
+#else ()
+#    message(FATAL_ERROR "Unsupported platform for VecKM_flow_cpp library")
+#endif ()
 
 #add_executable(helix_vis_thread demo/helix_vis_thread.cpp)
 #target_link_libraries(helix_vis_thread PRIVATE Open3D::Open3D finufft dv::processing)
@@ -99,12 +99,12 @@ add_executable(centroid_arma demo/centroid_arma.cpp)
 target_link_libraries(centroid_arma PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
 
 add_executable(centroid_ema_flow demo/centroid_ema_with_flow.cpp)
-target_link_libraries(centroid_ema_flow PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options ${FLOW_LIB_PATH} PUBLIC OpenMP::OpenMP_CXX)
+target_link_libraries(centroid_ema_flow PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
 
 
 add_executable(motion_estimation demo/motion_estimation.cpp)
-target_link_libraries(motion_estimation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options ${FLOW_LIB_PATH} PUBLIC OpenMP::OpenMP_CXX)
+target_link_libraries(motion_estimation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
 
 
 add_executable(haste_comp demo/haste_comp.cpp)
-target_link_libraries(haste_comp PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options ${FLOW_LIB_PATH} PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(haste_comp PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)

@@ -12,9 +12,8 @@
 
 class IEKFSinusoidFitter {
 public:
-    // State: [A, B, D, E, omega, C]
+    // State: [A, B, omega, C]
     // A, B: amplitudes for sin(wt), cos(wt)
-    // D, E: amplitudes for sin(2wt), cos(2wt)
     // omega: angular frequency
     // C: offset
     using StateVector = Eigen::Matrix<double, 4, 1>;
@@ -31,7 +30,12 @@ public:
               measurement_noise_r_(measurement_noise_variance),
               iterations_(iterations),
               is_initialized_(false) {
-        omega_ = initial_state(2);
+        // Initialize static omega from the first object created
+        if (omega_ == 0.0) {
+            omega_ = initial_state(2);
+        }
+        // Ensure this object uses the shared omega
+        state_(2) = omega_;
     }
 
     void update(double t, double y) {
@@ -44,7 +48,9 @@ public:
         // --- PREDICTION STEP ---
         // State is assumed constant, so x_k|k-1 = x_k-1|k-1
         StateVector predicted_state = state_;
-        state_(2) = omega_;
+        // Ensure we use the shared omega
+        predicted_state(2) = omega_;
+
         // P_k|k-1 = P_k-1|k-1 + Q
         StateCovariance predicted_covariance = covariance_ + process_noise_q_;
 
@@ -56,24 +62,18 @@ public:
         for (int i = 0; i < iterations_; ++i) {
             double A = eta(0);
             double B = eta(1);
-//            double D = eta(2);
-//            double E = eta(3);
-            double omega = eta(2);
+            double omega = omega_; // Use shared omega, not eta(2)
             double C = eta(3);
 
             // Calculate measurement prediction h(eta)
             double sin_wt = std::sin(omega * t);
             double cos_wt = std::cos(omega * t);
-//            double sin_2wt = 0.0; // std::sin(2 * omega * t);
-//            double cos_2wt = 0.0; // std::cos(2 * omega * t);
-            double y_pred = A * sin_wt + B * cos_wt + C; // + D * sin_2wt + E * cos_2wt;
+            double y_pred = A * sin_wt + B * cos_wt + C;
 
             // Calculate Jacobian H
             H(0, 0) = sin_wt;
             H(0, 1) = cos_wt;
-//            H(0, 2) = sin_2wt;
-//            H(0, 3) = cos_2wt;
-            H(0, 2) = t * (A * cos_wt - B * sin_wt); // + 2 * t * (D * cos_2wt - E * sin_2wt);
+            H(0, 2) = t * (A * cos_wt - B * sin_wt);
             H(0, 3) = 1.0;
 
             // Calculate Kalman Gain K
@@ -82,31 +82,28 @@ public:
 
             // Update state estimate for this iteration
             eta = predicted_state + K * (y - y_pred - H * (predicted_state - eta));
+
+            // Keep omega fixed to the shared value
+            eta(2) = omega_;
         }
 
         // Finalize update
         state_ = eta;
+        // Ensure state uses shared omega
+        state_(2) = omega_;
 
         // Recalculate H at the final state estimate to update covariance
-        double A_final = state_(0), B_final = state_(1), omega_final = state_(
-                2); // D_final = state_(2), E_final = state_(3);
-        double sin_wt_f = std::sin(omega_final * t);
-        double cos_wt_f = std::cos(omega_final * t);
-//        double sin_2wt_f = std::sin(2 * omega_final * t);
-//        double cos_2wt_f = std::cos(2 * omega_final * t);
+        double A_final = state_(0), B_final = state_(1);
+        double sin_wt_f = std::sin(omega_ * t);
+        double cos_wt_f = std::cos(omega_ * t);
 
         H(0, 0) = sin_wt_f;
         H(0, 1) = cos_wt_f;
-//        H(0, 2) = sin_2wt_f;
-//        H(0, 3) = cos_2wt_f;
-        H(0, 2) =
-                t * (A_final * cos_wt_f - B_final * sin_wt_f); // + 2 * t * (D_final * cos_2wt_f - E_final * sin_2wt_f);
+        H(0, 2) = t * (A_final * cos_wt_f - B_final * sin_wt_f);
         H(0, 3) = 1.0;
 
         double innovation_cov_inv_final = 1.0 / (H * predicted_covariance * H.transpose() + measurement_noise_r_);
         Eigen::Matrix<double, 4, 1> K_final = predicted_covariance * H.transpose() * innovation_cov_inv_final;
-
-        omega_ = state_(2);
 
         covariance_ = (StateCovariance::Identity() - K_final * H) * predicted_covariance;
     }
@@ -114,19 +111,14 @@ public:
     double predict(double t) const {
         double A = state_(0);
         double B = state_(1);
-//        double D = state_(2);
-//        double E = state_(3);
-        double omega = state_(2);
         double C = state_(3);
-        return A * std::sin(omega * t) + B * std::cos(omega * t) +
-               C; // + D * std::sin(2 * omega * t) + E * std::cos(2 * omega * t);
+        return A * std::sin(omega_ * t) + B * std::cos(omega_ * t) + C;
     }
 
     double predict_rel(double t) const {
         double A = state_(0);
         double B = state_(1);
-        double omega = state_(2);
-        return A * std::sin(omega * t) + B * std::cos(omega * t);
+        return A * std::sin(omega_ * t) + B * std::cos(omega_ * t);
     }
 
     const StateVector &get_state() const { return state_; }
@@ -138,12 +130,27 @@ public:
             std::cout << "  Fitter not initialized." << std::endl;
             return;
         }
-        double omega = state_(2);
-        double freq_hz_1 = omega / (2 * M_PI);
-//        double freq_hz_2 = 0.0; // (2 * omega) / (2 * M_PI);
+        double freq_hz_1 = omega_ / (2 * M_PI);
         std::cout << "  Harmonic 1 (Fundamental): " << std::fixed << std::setprecision(2) << freq_hz_1 << " Hz"
                   << std::endl;
-//        std::cout << "  Harmonic 2: " << std::fixed << std::setprecision(2) << freq_hz_2 << " Hz" << std::endl;
+    }
+
+    // print on sstream
+    std::string to_string() const {
+        std::ostringstream oss;
+        oss << "IEKFSinusoidFitter State: [A=" << state_(0) << ", B=" << state_(1)
+            << ", omega=" << omega_ << ", C=" << state_(3) << "]" << std::endl;
+        // print the amplitude and shift as G sin(omega t + phi) + C
+        double amplitude = std::sqrt(state_(0) * state_(0) + state_(1) * state_(1));
+        double phase = std::atan2(state_(1), state_(0));
+        oss << " Amplitude=" << amplitude << ", Phase=" << phase << " rad, C=" << state_(3)
+            << ", Frequency=" << omega_ / (2 * M_PI) << " Hz" << std::endl;
+        return oss.str();
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const IEKFSinusoidFitter &fitter) {
+        os << fitter.to_string();
+        return os;
     }
 
 private:
@@ -155,6 +162,7 @@ private:
     int iterations_;
     bool is_initialized_;
 };
+
 inline double IEKFSinusoidFitter::omega_ = 0.0;
 
-#endif //PROJECT_IEKF_SINUSOID_FITTER_HPP 
+#endif //PROJECT_IEKF_SINUSOID_FITTER_HPP

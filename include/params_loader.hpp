@@ -33,6 +33,9 @@ namespace HARMEDA {
         double tau = 100000.0; // Default time constant for EMA in microseconds
         bool do_plot = false;  // Flag to enable 3D visualization
         std::string calib_file; // Path to camera calibration file
+        int tracker_x = 0; // Tracker x position
+        int tracker_y = 0; // Tracker y position
+        int tracker_size = 10; // Tracker size
     };
 
     class ParamsLoader {
@@ -47,9 +50,12 @@ namespace HARMEDA {
                      "Path to input event file (RAW or HDF5). If not specified, the camera live stream is used.")
                     ("calibration-file,c", po::value<std::string>(&params->calib_file),
                      "Path to camera calibration file (optional). If specified, events will be undistorted.")
-                    ("tau", po::value<double>(&params->tau)->default_value(100000.0),
-                     "Time constant for EMA in microseconds.")
-                    ("plot", "Enable 3D visualization of events and centroids.");
+                    ("tracker-x", po::value<int>(&params->tracker_x)->default_value(0),
+                    "X position of the tracker in pixels (default: 0).")
+                    ("tracker-y", po::value<int>(&params->tracker_y)->default_value(0),
+                    "Y position of the tracker in pixels (default: 0).")
+                    ("tracker-size", po::value<int>(&params->tracker_size)->default_value(10),
+                    "Size of the tracker in pixels (default: 10).");
 
             po::variables_map vm;
 

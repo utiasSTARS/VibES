@@ -37,19 +37,17 @@ class NUFFTHelixEstimator {
 public:
     // Constructor
     NUFFTHelixEstimator(double f_min_hz, double f_max_hz, int max_harmonics = 3)
-            : N(int(f_max_hz / f_min_hz)), f_min(Hz2rad(f_min_hz)), f_max(Hz2rad(f_max_hz)),
+            : N(200), f_min(Hz2rad(f_min_hz)), f_max(Hz2rad(f_max_hz)),
               max_harmonics_(max_harmonics),
               t_data(N), x_data(N), y_data(N),
               n_modes(4 * static_cast<int>(Hz2rad(f_max_hz))), // Increased resolution
               F_out_x(n_modes), F_out_y(n_modes),
               opts(new finufft_opts, FinufftOptsDeleter()) {
 
-        _window_ema = 1e6 / (10. * f_max_hz);
-
-        // Initialize the frequency grid
+        // Initialize the frequency grid properly
         freqs_grid.resize(n_modes);
         for (int k = 0; k < n_modes; ++k) {
-            freqs_grid[k] = (k - n_modes / 2);
+            freqs_grid[k] = (k - n_modes / 2.0); // Use 2.0 instead of 2 for proper division
         }
 
         finufft_default_opts(opts.get());
@@ -66,17 +64,19 @@ public:
         }
     }
 
+    int getCurrentIndex() const {
+        return index;
+    }
     // Feed new event data
     bool feed(const Centroid &event) {
-        double t = event.t; // Convert to seconds
-        if (index > 0 && t <= t_data[index - 1]) {
-            std::cerr << "Current event time: " << t
+        if (index > 0 && event.t <= t_data[index - 1]) {
+            std::cerr << "Current event time: " << event.t
                       << ", Previous event time: " << t_data[index - 1] << std::endl;
             std::cerr << "Warning: Non-increasing time samples detected." << std::endl;
             return false;
         }
 
-        t_data[index] = t;
+        t_data[index] = event.t;
         x_data[index] = event.x;
         y_data[index] = event.y;
 
@@ -144,7 +144,7 @@ public:
         }
 
         // Refine estimates using least squares
-        refineEstimates();
+//        refineEstimates();
 
 //        reset();
         done_ = true;
