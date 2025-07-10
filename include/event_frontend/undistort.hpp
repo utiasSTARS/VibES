@@ -16,6 +16,16 @@ class Undistort {
 public:
     Undistort(std::string filepath) {
         std::vector<double> K, D;
+
+        if (filepath == "") {
+            // warning text yellow
+            std::cout << "\033[33mWarning: No calibration file provided. Undistortion will not be applied.\033[0m"
+                      << std::endl;
+            _is_calibrated = false;
+            return;
+        }
+        _is_calibrated = true;
+
         parseFile(filepath, K, D);
 
         // populate the look-up table
@@ -49,7 +59,7 @@ public:
                         undistorted_points[0].y * K_mat.at<double>(1, 1) + K_mat.at<double>(1, 2);
             }
         }
-        _populated = true;
+//        _populated = true;
     }
 
     // function that allows to populate the look-up table with a distortion function provided by the user
@@ -61,14 +71,16 @@ public:
                 _undistort_y[y * _width + x] = y_undist;
             }
         }
-        _populated = true;
+//        _populated = true;
     }
 
     // override operator() to get the undistorted coordinates
     std::pair<double, double> operator()(int x, int y) const {
-        if (!_populated) {
-            throw std::runtime_error("Undistort not populated.");
-        }
+//        if (!_populated) {
+//            throw std::runtime_error("Undistort not populated.");
+//        }
+        if (!_is_calibrated) { return {static_cast<double>(x), static_cast<double>(y)}; }
+
         const auto idx = y * _width + x;
         return {_undistort_x[idx], _undistort_y[idx]};
     }
@@ -78,6 +90,7 @@ private:
     std::vector<double> _undistort_x, _undistort_y;
     int _width, _height;
     bool _populated = false;
+    bool _is_calibrated = false;
 
     void parseFile(std::string &filepath, std::vector<double> &K, std::vector<double> &D) {
         try {

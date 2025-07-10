@@ -18,7 +18,13 @@
 #include "haste/tracking.hpp"
 #include "event_frontend/undistort.hpp"
 
-//#define VISUALIZE
+/*
+ * Value for sim new_pattern: no calibration, --tracker-x -55 --tracker-y -150
+ *
+ *
+ */
+#define VISUALIZE
+//#define VISUALIZE_SLICES
 
 IEKFSinusoidFitter create_iekf(double A, double B, double omega) {
     IEKFSinusoidFitter::StateVector initial_state;
@@ -30,7 +36,7 @@ IEKFSinusoidFitter create_iekf(double A, double B, double omega) {
     initial_covariance.setIdentity();
     initial_covariance(0, 0) = 1e2; // A
     initial_covariance(1, 1) = 1e2; // B
-    initial_covariance(2, 2) = 1e0; // omega (if well-known)
+    initial_covariance(2, 2) = 1e1; // omega (if well-known)
     initial_covariance(3, 3) = 1e3; // C (DC offset)
 
     // Differentiated process noise
@@ -38,10 +44,10 @@ IEKFSinusoidFitter create_iekf(double A, double B, double omega) {
     process_noise.setIdentity();
     process_noise(0, 0) = 1e0;  // A can vary
     process_noise(1, 1) = 1e0;  // B can vary
-    process_noise(2, 2) = 1e-4; // omega changes slowly
+    process_noise(2, 2) = 1e-3; // omega changes slowly
     process_noise(3, 3) = 1e0; // C can vary
 
-    double measurement_noise = 1.;
+    double measurement_noise = 0.5;
     return IEKFSinusoidFitter(initial_state, initial_covariance, process_noise, measurement_noise);
 }
 
@@ -61,7 +67,6 @@ int main(int argc, char *argv[]) {
     auto frame_gen_comp = Metavision::PeriodicFrameGenerationAlgorithm(w, h, acc, fps);
 
 
-
     std::unique_ptr<IEKFSinusoidFitter> x_fitter, y_fitter;
 
     double f_min = 5.0;   // Minimum frequency in Hz
@@ -79,11 +84,13 @@ int main(int argc, char *argv[]) {
     Metavision::Window window("Frames", w, h, Metavision::BaseWindow::RenderMode::BGR);
     Metavision::Window window_compensated("Frames compensated", w, h, Metavision::BaseWindow::RenderMode::BGR);
 
+#ifdef VISUALIZE_SLICES
     HARMEDA::SliceVisualizer slice_visualizer_x(h, w, 0, HARMEDA::X_AXIS, 3);
     HARMEDA::SliceVisualizer slice_visualizer_y(h, w, 0, HARMEDA::Y_AXIS, 3);
 
     cv::namedWindow("Slice X Visualizer", cv::WINDOW_NORMAL);
     cv::namedWindow("Slice Y Visualizer", cv::WINDOW_NORMAL);
+#endif
 #endif
 
     // These vectors are used to store the undistorted and compensated frames
@@ -170,7 +177,8 @@ int main(int argc, char *argv[]) {
                                                 event.p,
                                                 event.t);
             }
-#ifdef VISUALIZE
+
+#ifdef VISUALIZE_SLICES
             slice_visualizer_x.feed(undist_event);
             slice_visualizer_y.feed(undist_event);
 
@@ -240,10 +248,10 @@ int main(int argc, char *argv[]) {
                     );
                 }
 
-                tracker_latency = tracker->t() - current_t_sec;
+//                tracker_latency = tracker->t() - current_t_sec;
 //                std::cout << "Tracker latency: " << tracker_latency << " seconds" << std::endl;
 
-#ifdef VISUALIZE
+#ifdef VISUALIZE_SLICES
                 // Print the centroid data
                 slice_visualizer_y.editFrame([&](cv::Mat &frame) {
                     cv::circle(frame, cv::Point(
@@ -280,9 +288,10 @@ int main(int argc, char *argv[]) {
                     tracker->eventWindowToModel(tracker->event_window(), tracker->state()).transpose());
             haste::ImshowEigenArrayNormalized("Feature Template", tracker->tracker_template().transpose());
         }
-
+#ifdef VISUALIZE_SLICES
         cv::imshow("Slice X Visualizer", slice_visualizer_x.getFrameSide());
         cv::imshow("Slice Y Visualizer", slice_visualizer_y.getFrameSide());
+#endif
         cv::waitKey(1); // Allow OpenCV to process the window events
         if (cv::waitKey(1) == 27) { // Exit on ESC key
             break;
@@ -298,18 +307,24 @@ int main(int argc, char *argv[]) {
     std::string output_folder = params.params->output_folder;
     if (!std::filesystem::exists(output_folder)) {
         std::filesystem::create_directories(output_folder);
-        std::filesystem::create_directories(output_folder + "/undistorted");
-        std::filesystem::create_directories(output_folder + "/compensated");
     }
+    std::filesystem::create_directories(output_folder + "/undistorted");
+    std::filesystem::create_directories(output_folder + "/compensated");
 
     // save undistorted frames
     for (size_t i = 0; i < undistorted_frames.size(); ++i) {
-        std::string filename = output_folder + "/undistorted/frame_" + std::to_string(i) + ".png";
+        std::ostringstream ss;
+        ss << std::setw(4) << std::setfill('0') << i;
+        std::string filename =
+                output_folder + "/undistorted/" + ss.str() + ".png";
         cv::imwrite(filename, undistorted_frames[i]);
     }
     // save compensated frames
     for (size_t i = 0; i < compensated_frames.size(); ++i) {
-        std::string filename = output_folder + "/compensated/frame_" + std::to_string(i) + ".png";
+        std::ostringstream ss;
+        ss << std::setw(4) << std::setfill('0') << i;
+        std::string filename =
+                output_folder + "/compensated/" + ss.str() + ".png";
         cv::imwrite(filename, compensated_frames[i]);
     }
 

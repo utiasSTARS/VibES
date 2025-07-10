@@ -70,9 +70,9 @@ public:
     // Feed new event data
     bool feed(const Centroid &event) {
         if (index > 0 && event.t <= t_data[index - 1]) {
-            std::cerr << "Current event time: " << event.t
-                      << ", Previous event time: " << t_data[index - 1] << std::endl;
-            std::cerr << "Warning: Non-increasing time samples detected." << std::endl;
+//            std::cerr << "Current event time: " << event.t
+//                      << ", Previous event time: " << t_data[index - 1] << std::endl;
+//            std::cerr << "Warning: Non-increasing time samples detected." << std::endl;
             return false;
         }
 

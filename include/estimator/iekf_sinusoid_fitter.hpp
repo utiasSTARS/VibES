@@ -23,7 +23,7 @@ public:
                        const StateCovariance &initial_covariance,
                        const StateCovariance &process_noise,
                        double measurement_noise_variance,
-                       int iterations = 5)
+                       int iterations = 1)
             : state_(initial_state),
               covariance_(initial_covariance),
               process_noise_q_(process_noise),
@@ -62,7 +62,7 @@ public:
         for (int i = 0; i < iterations_; ++i) {
             double A = eta(0);
             double B = eta(1);
-            double omega = omega_; // Use shared omega, not eta(2)
+            double omega = eta(2);
             double C = eta(3);
 
             // Calculate measurement prediction h(eta)
@@ -84,13 +84,13 @@ public:
             eta = predicted_state + K * (y - y_pred - H * (predicted_state - eta));
 
             // Keep omega fixed to the shared value
-            eta(2) = omega_;
+//            eta(2) = omega_;
         }
 
         // Finalize update
         state_ = eta;
         // Ensure state uses shared omega
-        state_(2) = omega_;
+        omega_ = state_(2);
 
         // Recalculate H at the final state estimate to update covariance
         double A_final = state_(0), B_final = state_(1);

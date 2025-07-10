@@ -49,7 +49,7 @@ namespace HARMEDA {
                     ("help,h", "produce help message")
                     ("input-event-file,i", po::value<std::string>(&params->input_path),
                      "Path to input event file (RAW or HDF5). If not specified, the camera live stream is used.")
-                    ("calibration-file,c", po::value<std::string>(&params->calib_file),
+                    ("calibration-file,c", po::value<std::string>(&params->calib_file)->default_value(""),
                      "Path to camera calibration file (optional). If specified, events will be undistorted.")
                     ("tracker-x", po::value<int>(&params->tracker_x)->default_value(0),
                      "X position of the tracker in pixels (default: 0).")
