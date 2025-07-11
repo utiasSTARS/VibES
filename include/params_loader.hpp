@@ -37,6 +37,7 @@ namespace HARMEDA {
         int tracker_x = 0; // Tracker x position
         int tracker_y = 0; // Tracker y position
         int tracker_size = 10; // Tracker size
+        int iekf_iterations = 1; // Number of iterations for IEKF fitting
     };
 
     class ParamsLoader {
@@ -57,6 +58,8 @@ namespace HARMEDA {
                      "Y position of the tracker in pixels (default: 0).")
                     ("tracker-size", po::value<int>(&params->tracker_size)->default_value(10),
                      "Size of the tracker in pixels (default: 10).")
+                    ("iekf-iterations", po::value<int>(&params->iekf_iterations)->default_value(1),
+                     "Number of iterations for IEKF fitting (default: 1).")
                     ("output-folder,o", po::value<std::string>(&params->output_folder)->default_value("output"),
                      "Folder to save output frames (default: 'output').");
 

@@ -25,11 +25,12 @@
  */
 #define VISUALIZE
 //#define VISUALIZE_SLICES
+//#define STORE_RESULTS
 
-IEKFSinusoidFitter create_iekf(double A, double B, double omega) {
+IEKFSinusoidFitter create_iekf(double A, double B, double omega, double C, int num_iterations = 1) {
     IEKFSinusoidFitter::StateVector initial_state;
     // A1, B1, omega, C
-    initial_state << A, B, omega, 0;
+    initial_state << A, B, omega, C;
 
     IEKFSinusoidFitter::StateCovariance initial_covariance;
     // More conservative initial covariance
@@ -48,7 +49,7 @@ IEKFSinusoidFitter create_iekf(double A, double B, double omega) {
     process_noise(3, 3) = 1e0; // C can vary
 
     double measurement_noise = 0.5;
-    return IEKFSinusoidFitter(initial_state, initial_covariance, process_noise, measurement_noise);
+    return IEKFSinusoidFitter(initial_state, initial_covariance, process_noise, measurement_noise, num_iterations);
 }
 
 int main(int argc, char *argv[]) {
@@ -61,8 +62,8 @@ int main(int argc, char *argv[]) {
 
     Undistort undistort(params.params->calib_file);
 
-    const std::uint32_t acc = 20000;
-    double fps = 50;
+    const std::uint32_t acc = 10000;
+    double fps = 100;
     auto frame_gen_undist = Metavision::PeriodicFrameGenerationAlgorithm(w, h, acc, fps);
     auto frame_gen_comp = Metavision::PeriodicFrameGenerationAlgorithm(w, h, acc, fps);
 
@@ -93,22 +94,44 @@ int main(int argc, char *argv[]) {
 #endif
 #endif
 
+#ifdef STORE_RESULTS
+    // create folder for storing frames
+    std::string output_folder = params.params->output_folder;
+    if (!std::filesystem::exists(output_folder)) {
+        std::filesystem::create_directories(output_folder);
+    }
+    std::filesystem::create_directories(output_folder + "/undistorted");
+    std::filesystem::create_directories(output_folder + "/compensated");
+
     // These vectors are used to store the undistorted and compensated frames
     std::vector<cv::Mat> undistorted_frames, compensated_frames;
 
+    // create output files for storing centroid data and compensation
+    std::fstream file_event, file_comp;
+    file_event.open(output_folder + "/event.txt", std::ios::out);
+    file_comp.open(output_folder + "compensation_data.txt", std::ios::out);
+#endif
 
     int shift_x = params.params->tracker_x; // -25; // -100;
     int shift_y = params.params->tracker_y; // -25; // 10;
-    frame_gen_undist.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
-        undistorted_frames.emplace_back(frame.clone());
 
 #ifdef VISUALIZE
-        double x_square_center = w / 2.0 + shift_x;
-        double y_square_center = h / 2.0 + shift_y;
+    double x_square_center = w / 2.0 + shift_x;
+    double y_square_center = h / 2.0 + shift_y;
+#endif
+
+    frame_gen_undist.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
+#ifdef STORE_RESULTS
+        undistorted_frames.emplace_back(frame.clone());
+#endif
+
+#ifdef VISUALIZE
         if (x_fitter && y_fitter) {
             // draw the predicted position of the tracker
             cv::circle(frame, cv::Point(x_fitter->getShift(),
                                         y_fitter->getShift()), 5, cv::Scalar(0, 255, 0), -1);
+            x_square_center = x_fitter->getShift();
+            y_square_center = y_fitter->getShift();
         }
         int size = haste::HypothesisPatchTracker::kPatchSize;
         int half_size = size / 2;
@@ -122,7 +145,10 @@ int main(int argc, char *argv[]) {
     });
 
     frame_gen_comp.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
+#ifdef STORE_RESULTS
         compensated_frames.emplace_back(frame.clone());
+#endif
+
 #ifdef VISUALIZE
         window_compensated.show(frame);
 #endif
@@ -130,9 +156,6 @@ int main(int argc, char *argv[]) {
 
 
     std::mutex mtx;
-//    std::fstream filex, filey;
-//    filex.open("centroid_data_x.txt", std::ios::out);
-//    filey.open("centroid_data_y.txt", std::ios::out);
 
     double tracker_latency = 0.0; // seconds
     float x_undistorted, y_undistorted;
@@ -150,9 +173,13 @@ int main(int argc, char *argv[]) {
             Metavision::EventCD undist_event(
                     static_cast<unsigned short>(x_undistorted),
                     static_cast<unsigned short>(y_undistorted),
-                    event.p,
+                    0, //event.p,
                     event.t
             );
+
+#ifdef STORE_RESULTS
+            file_event << undist_event.t << " " << undist_event.x << " " << undist_event.y << "\n";
+#endif
 
             events_undistored.push_back(undist_event);
 
@@ -169,12 +196,15 @@ int main(int argc, char *argv[]) {
 
 
             if (y_fitter && x_fitter) {
-                auto y_pred = y_fitter->predict_rel(current_t_sec);
                 auto x_pred = x_fitter->predict_rel(current_t_sec);
+                auto y_pred = y_fitter->predict_rel(current_t_sec);
+#ifdef STORE_RESULTS
+                file_comp << current_t_sec << " " << x_pred << " " << y_pred << "\n";
+#endif
                 // correct for the motion
                 events_compensated.emplace_back(static_cast<unsigned short>(x_undistorted - x_pred),
                                                 static_cast<unsigned short>(y_undistorted - y_pred),
-                                                event.p,
+                                                0, // event.p,
                                                 event.t);
             }
 
@@ -240,12 +270,11 @@ int main(int argc, char *argv[]) {
 
                     if (Ax.empty()) { throw std::runtime_error("No harmonics estimated yet."); }
 
-                    auto fitter = create_iekf(Ax[0], Bx[0], omegas[0]);
-                    x_fitter = std::make_unique<IEKFSinusoidFitter>(fitter);
+                    x_fitter = std::make_unique<IEKFSinusoidFitter>(
+                            create_iekf(Ax[0], Bx[0], omegas[0], offsets[0], params.params->iekf_iterations));
 
                     y_fitter = std::make_unique<IEKFSinusoidFitter>(
-                            create_iekf(Ay[0], By[0], omegas[0])
-                    );
+                            create_iekf(Ay[0], By[0], omegas[0], offsets[1], params.params->iekf_iterations));
                 }
 
 //                tracker_latency = tracker->t() - current_t_sec;
@@ -303,14 +332,7 @@ int main(int argc, char *argv[]) {
     }
     params.camera.stop();
 
-    // create folder for storing frames
-    std::string output_folder = params.params->output_folder;
-    if (!std::filesystem::exists(output_folder)) {
-        std::filesystem::create_directories(output_folder);
-    }
-    std::filesystem::create_directories(output_folder + "/undistorted");
-    std::filesystem::create_directories(output_folder + "/compensated");
-
+#ifdef STORE_RESULTS
     // save undistorted frames
     for (size_t i = 0; i < undistorted_frames.size(); ++i) {
         std::ostringstream ss;
@@ -328,6 +350,10 @@ int main(int argc, char *argv[]) {
         cv::imwrite(filename, compensated_frames[i]);
     }
 
+    // close centroid data files
+    file_event.close();
+    file_comp.close();
+#endif
 
     // print fitter
     if (x_fitter) {
@@ -337,8 +363,6 @@ int main(int argc, char *argv[]) {
         std::cout << "Y Fitter: " << *y_fitter << std::endl;
     }
 
-//    filex.close();
-//    filey.close();
 
     std::cout << "Processing complete." << std::endl;
     return 0;
