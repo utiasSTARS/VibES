@@ -17,7 +17,7 @@
 
 // Main example function
 int main(int argc, char *argv[]) {
-    std::cout << "\033[1;31mThis is a demo for the HARMEDA project.\nPress ESC to close the windows.\033[0m" << std::endl;
+    std::cout << "\033[1;31mThis is a demo_old for the HARMEDA project.\nPress ESC to close the windows.\033[0m" << std::endl;
     bool NO_SIM = true;
     std::unique_ptr<dv::io::CameraInputBase> reader;
     if (argc >= 2) {

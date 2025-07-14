@@ -28,7 +28,7 @@ RUN bash /tmp/install_deps.sh
 # Install HARMEDA
 COPY cmake /HARMEDA/cmake
 COPY include /HARMEDA/include
-COPY demo /HARMEDA/demo
+COPY demo_old /HARMEDA/demo
 COPY CMakeLists.txt /HARMEDA/CMakeLists.txt
 COPY camera /HARMEDA/camera
 COPY tests /HARMEDA/tests
@@ -38,5 +38,5 @@ RUN mkdir -p /HARMEDA/build
 WORKDIR /HARMEDA/build
 RUN cmake .. -DCMAKE_BUILD_TYPE=Release && make -j4
 
-# Run demo
+# Run demo_old
 CMD ["./helix_vis_thread"]

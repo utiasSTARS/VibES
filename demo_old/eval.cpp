@@ -14,12 +14,10 @@
 #include "tracker/bin_thread.hpp"
 #include "sim/ini_sim.hpp"
 #include "visualizer/open3d_visualizer.hpp"
-#include "visualizer/ev2image.hpp"
 
 // Main example function
 int main(int argc, char *argv[]) {
-    std::cout << "\033[1;31mThis is a demo for the HARMEDA project.\nPress ESC to close the windows.\033[0m"
-              << std::endl;
+    std::cout << "\033[1;31mThis is a demo_old for the HARMEDA project.\nPress ESC to close the windows.\033[0m" << std::endl;
     bool NO_SIM = true;
     std::unique_ptr<dv::io::CameraInputBase> reader;
     if (argc >= 2) {
@@ -38,7 +36,6 @@ int main(int argc, char *argv[]) {
         } else {
             std::cout << "Reading from file: " << arg1 << std::endl;
             reader = std::make_unique<dv::io::MonoCameraRecording>(arg1);
-            NO_SIM = false; // TODO: Change this, if the calibration file is passed then it's loaded
         }
     } else {
         NO_SIM = false;
@@ -48,25 +45,20 @@ int main(int argc, char *argv[]) {
         reader = std::make_unique<EventsFreqCalibPattern>(0, cv::Size(640, 480), target_freq, 5, 5, 0., false);
     }
 
-    // if not simulation try to load the camera calibration
+    // if not simulation try to laod the camera calibration
     std::shared_ptr<dv::camera::CameraGeometry> geometry;
     if (NO_SIM) {
-        try {
-            const auto calibrationSet = dv::camera::CalibrationSet::LoadFromFile("../camera/calib.xml");
-            dv::camera::calibrations::CameraCalibration dvx_calib;
+        const auto calibrationSet = dv::camera::CalibrationSet::LoadFromFile("../camera/calib.xml");
+        dv::camera::calibrations::CameraCalibration dvx_calib;
 
-            if (!calibrationSet.getCameraList().empty()) {
-                const auto &calibs = calibrationSet.getCameraCalibrations();
-                dvx_calib = calibs.begin()->second;
-                std::cout << "Found calibration for camera with name [" << dvx_calib.name << "]" <<
-                          std::endl;
-            }
-
-            geometry = std::make_shared<dv::camera::CameraGeometry>(dvx_calib.getCameraGeometry());
-        } catch (const std::exception &e) {
-            std::cerr << "Failed to load camera calibration: " << e.what() << std::endl;
-            return 1;
+        if (!calibrationSet.getCameraList().empty()) {
+            const auto &calibs = calibrationSet.getCameraCalibrations();
+            dvx_calib = calibs.begin()->second;
+            std::cout << "Found calibration for camera with name [" << dvx_calib.name << "]" <<
+                      std::endl;
         }
+
+        geometry = std::make_shared<dv::camera::CameraGeometry>(dvx_calib.getCameraGeometry());
     }
 
     cv::Size resolution = reader->getEventResolution().value();
@@ -107,7 +99,7 @@ int main(int argc, char *argv[]) {
     int num_bins_w = resolution.width / bin_w;
 
 
-    // initialize the NUFFT to estimate the frequency
+    // initiailize the NUFFT to estimate the frequency
     FourierFreqEst fourier(1000, 500, 900);
 
     double estimated_freq = 0;
@@ -185,19 +177,6 @@ int main(int argc, char *argv[]) {
             } else {
                 events = events_dist.value();
             }
-
-            std::vector<EventStruct> events_struct;
-            for (const auto &e: events) {
-                events_struct.emplace_back(EventStruct(e.timestamp(), e.x(), e.y(), e.polarity()));
-            }
-
-            // check the ev 2 image
-            cv::Mat out_img(resolution, CV_8U);
-            ev2img(events_struct, out_img, EventRepresentation::AVERAGE_TS);
-
-            cv::imshow("img", out_img);
-            cv::waitKey(1);
-
             accumulator.accumulate(events);
             for (const auto &event: events) {
                 if (starting_timestamp == 0) {
@@ -236,7 +215,7 @@ int main(int argc, char *argv[]) {
             std::cout << "\rLoop frequency: " << frequency << " Hz";
             std::cout.flush();
 
-            vis->update();
+            // vis->update();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }

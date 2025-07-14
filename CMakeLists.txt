@@ -57,54 +57,55 @@ include_directories(thirdparty/haste/include)
 #    message(FATAL_ERROR "Unsupported platform for VecKM_flow_cpp library")
 #endif ()
 
-#add_executable(helix_vis_thread demo/helix_vis_thread.cpp)
+#add_executable(helix_vis_thread demo_old/helix_vis_thread.cpp)
 #target_link_libraries(helix_vis_thread PRIVATE Open3D::Open3D finufft dv::processing)
 #
-#add_executable(helix_vis_thread_vis demo/helix_vis_thread_vis.cpp)
+#add_executable(helix_vis_thread_vis demo_old/helix_vis_thread_vis.cpp)
 #target_link_libraries(helix_vis_thread_vis PRIVATE Open3D::Open3D finufft dv::processing)
 #
-#add_executable(motion_comp demo/motion_comp.cpp)
+#add_executable(motion_comp demo_old/motion_comp.cpp)
 #target_link_libraries(motion_comp PRIVATE Open3D::Open3D finufft dv::processing)
 #
-#add_executable(harmeda demo/harmeda.cpp)
+#add_executable(harmeda demo_old/harmeda.cpp)
 #target_link_libraries(harmeda PRIVATE Open3D::Open3D finufft dv::processing PUBLIC OpenMP::OpenMP_CXX) # TBB::tbb)
-
-add_executable(harmeda_metav demo/harmeda_metavision.cpp)
-target_link_libraries(harmeda_metav PRIVATE Open3D::Open3D finufft MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX) # TBB::tbb)
-
-add_executable(harmeda_motion_comp demo/harmeda_motion_comp.cpp)
-target_link_libraries(harmeda_motion_comp PRIVATE Open3D::Open3D finufft MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX) # TBB::tbb)
-
-add_executable(harmeda_filter demo/harmeda_filter.cpp)
-target_link_libraries(harmeda_filter PRIVATE Open3D::Open3D finufft MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX) # TBB::tbb)
-
-add_executable(harmeda_motion_comp_filter demo/harmeda_motion_comp_filter.cpp)
-target_link_libraries(harmeda_motion_comp_filter PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX)
-
-
-add_executable(viewer demo/viewer.cpp)
-target_link_libraries(viewer PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX)
-
-add_executable(undistort_and_store demo/undistort_and_store.cpp)
-target_link_libraries(undistort_and_store PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
-
-
-add_executable(centroid_ema demo/centroid_ema.cpp)
-target_link_libraries(centroid_ema PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
-
-add_executable(centroid_ema_comp demo/centroid_ema_with_compensation.cpp)
-target_link_libraries(centroid_ema_comp PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
-
-add_executable(centroid_arma demo/centroid_arma.cpp)
-target_link_libraries(centroid_arma PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
-
-add_executable(centroid_ema_flow demo/centroid_ema_with_flow.cpp)
-target_link_libraries(centroid_ema_flow PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
-
-
-add_executable(motion_estimation demo/motion_estimation.cpp)
-target_link_libraries(motion_estimation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
-
+#
+#add_executable(harmeda_metav demo_old/harmeda_metavision.cpp)
+#target_link_libraries(harmeda_metav PRIVATE Open3D::Open3D finufft MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX) # TBB::tbb)
+#
+#add_executable(harmeda_motion_comp demo_old/harmeda_motion_comp.cpp)
+#target_link_libraries(harmeda_motion_comp PRIVATE Open3D::Open3D finufft MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX) # TBB::tbb)
+#
+#add_executable(harmeda_filter demo_old/harmeda_filter.cpp)
+#target_link_libraries(harmeda_filter PRIVATE Open3D::Open3D finufft MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX) # TBB::tbb)
+#
+#add_executable(harmeda_motion_comp_filter demo_old/harmeda_motion_comp_filter.cpp)
+#target_link_libraries(harmeda_motion_comp_filter PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX)
+#
+#
+#add_executable(viewer demo_old/viewer.cpp)
+#target_link_libraries(viewer PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX)
+#
+#add_executable(undistort_and_store demo_old/undistort_and_store.cpp)
+#target_link_libraries(undistort_and_store PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
+#
+#
+#add_executable(centroid_ema demo_old/centroid_ema.cpp)
+#target_link_libraries(centroid_ema PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
+#
+#add_executable(centroid_ema_comp demo_old/centroid_ema_with_compensation.cpp)
+#target_link_libraries(centroid_ema_comp PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
+#
+#add_executable(centroid_arma demo_old/centroid_arma.cpp)
+#target_link_libraries(centroid_arma PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
+#
+#add_executable(centroid_ema_flow demo_old/centroid_ema_with_flow.cpp)
+#target_link_libraries(centroid_ema_flow PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
+#
+#add_executable(motion_estimation demo_old/motion_estimation.cpp)
+#target_link_libraries(motion_estimation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
 
 add_executable(haste_comp demo/haste_comp.cpp)
 target_link_libraries(haste_comp PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+
+add_executable(multi_tracker demo/multi_tracker.cpp)
+target_link_libraries(multi_tracker PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)

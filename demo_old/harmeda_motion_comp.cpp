@@ -29,7 +29,7 @@ std::atomic<bool> signal_caught{false};
 
 // Main example function
 int main(int argc, char *argv[]) {
-    std::cout << "\033[1;31mThis is a demo for the HARMEDA project.\nPress ESC to close the windows.\033[0m"
+    std::cout << "\033[1;31mThis is a demo_old for the HARMEDA project.\nPress ESC to close the windows.\033[0m"
               << std::endl;
 
     // register the signal handler

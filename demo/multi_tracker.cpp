@@ -7,6 +7,7 @@
 #include <metavision/sdk/ui/utils/window.h>
 #include <metavision/sdk/ui/utils/base_window.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
+#include <boost/lockfree/stack.hpp>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -25,6 +26,8 @@
 #include "haste/app/command_parser.hpp"
 #include "haste/tracking.hpp"
 #include "event_frontend/undistort.hpp"
+#include "visualizer/interactive_frame_visualizer.hpp"
+#include "haste_wrapper.hpp"
 
 // Configuration flags
 #define VISUALIZE
@@ -35,15 +38,13 @@
 namespace {
     constexpr double DEFAULT_FPS = 100.0;
     constexpr std::uint32_t DEFAULT_ACCUMULATION = 10000;
-    constexpr double MIN_FREQUENCY = 5.0;   // Hz
-    constexpr double MAX_FREQUENCY = 80.0;  // Hz
-    constexpr int MAX_HARMONICS = 1;
-    constexpr double TRACKER_RATE = 0.01;
     constexpr double DEFAULT_MEASUREMENT_NOISE = 0.5;
     constexpr int ESC_KEY = 27;
     constexpr int POLL_TIMEOUT_MS = 20;
     constexpr int SLEEP_DURATION_MS = 2;
+    bool NUFFT_ESTIMATION_DONE = false;
 }
+
 
 /**
  * Creates and configures an IEKF sinusoid fitter with given parameters
@@ -197,8 +198,8 @@ void signal_handler(int signal) {
     std::exit(signal);
 }
 
-int main(int argc, char *argv[]) {
 
+int main(int argc, char *argv[]) {
     // Print the filter state when exiting
     std::signal(SIGTERM, signal_handler);
     std::signal(SIGINT, signal_handler);
@@ -223,20 +224,14 @@ int main(int argc, char *argv[]) {
     NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
 
     // Initialize tracker
-    std::shared_ptr<haste::HypothesisPatchTracker> tracker;
+    std::vector<std::shared_ptr<HasteWrapper>> trackers;
 
-
-    // Tracker positioning
-    int shift_x = params.params->tracker_x;
-    int shift_y = params.params->tracker_y;
-
+    std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
 #ifdef VISUALIZE
     // Initialize visualization windows
     Metavision::Window window("Frames", width, height, Metavision::BaseWindow::RenderMode::BGR);
     Metavision::Window window_compensated("Frames compensated", width, height,
                                           Metavision::BaseWindow::RenderMode::BGR);
-    double x_square_center = width / 2.0 + shift_x;
-    double y_square_center = height / 2.0 + shift_y;
 #endif
 
 #ifdef VISUALIZE_SLICES
@@ -259,31 +254,51 @@ int main(int argc, char *argv[]) {
 #endif
 
     std::mutex processing_mutex;
-    double tracker_latency = 0.0;
+
+    EventFrameVisualizer visualizer("Event Frame Visualizer");
+
+    // everytime there is a new point added, add a new tracker
+    visualizer.set_tracker_point_callback([&](const int x, const int y) {
+        std::lock_guard<std::mutex> lock(processing_mutex);
+        trackers.push_back(std::make_shared<HasteWrapper>(x, y, TRACKER_RATE));
+        if (NUFFT_ESTIMATION_DONE) {
+            trackers.back()->addFitters(std::make_unique<IEKFSinusoidFitter>(
+                                                createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
+                                                                 params.params->iekf_iterations)),
+                                        std::make_unique<IEKFSinusoidFitter>(
+                                                createIEKFFitter(Ay[0], By[0], omegas[0], offsets[1],
+                                                                 params.params->iekf_iterations)));
+        } else {
+            visualizer.block();
+        }
+    });
 
     // Setup frame generation callbacks
     frame_gen_undist.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
-#ifdef STORE_RESULTS
-        undistorted_frames.emplace_back(frame.clone());
-#endif
-
+        visualizer.set_frame(frame);
 #ifdef VISUALIZE
-        if (x_fitter && y_fitter) {
-            // Draw predicted position
-            cv::circle(frame, cv::Point(x_fitter->getShift(), y_fitter->getShift()),
-                       5, cv::Scalar(0, 255, 0), -1);
-            x_square_center = x_fitter->getShift();
-            y_square_center = y_fitter->getShift();
+        if (!trackers.empty()) {
+            if (NUFFT_ESTIMATION_DONE) {
+                for (auto t: trackers) {
+                    if (auto shift = t->getShift(); shift.has_value()) {
+                        int x = std::get<0>(shift.value());
+                        int y = std::get<1>(shift.value());
+
+                        // Draw predicted position
+                        cv::circle(frame, cv::Point(x, y), 5, cv::Scalar(0, 255, 0), -1);
+
+                        // Draw tracking rectangle
+                        int size = haste::HypothesisPatchTracker::kPatchSize;
+                        int half_size = size / 2;
+                        int c = t->color();
+                        cv::rectangle(frame,
+                                      cv::Point(x - half_size, y - half_size + 1),
+                                      cv::Point(x + half_size, y + half_size + 1),
+                                      cv::Scalar(c, 255 - c, 255 - int(0.2 * c)), 2);
+                    }
+                }
+            }
         }
-
-        // Draw tracking rectangle
-        int size = haste::HypothesisPatchTracker::kPatchSize;
-        int half_size = size / 2;
-        cv::rectangle(frame,
-                      cv::Point(x_square_center - half_size, y_square_center - half_size + 1),
-                      cv::Point(x_square_center + half_size, y_square_center + half_size + 1),
-                      cv::Scalar(0, 0, 255), 2);
-
         window.show(frame);
 #endif
     });
@@ -322,89 +337,44 @@ int main(int argc, char *argv[]) {
                     0, ev->t
             );
 
-#ifdef STORE_RESULTS
-            file_event << undist_event.t << " " << undist_event.x << " " << undist_event.y << "\n";
-#endif
+            {
+                std::lock_guard<std::mutex> lock(processing_mutex);
+                for (auto &tracker: trackers) {
+                    // Feed event to each tracker
+                    tracker->feed(undist_event);
+                    if (!NUFFT_ESTIMATION_DONE) {
+                        if (auto centroid = tracker->getCentroid(); centroid.has_value()) {
+                            if (nufft_estimator.feed(*centroid)) {
+                                if (nufft_estimator.compute()) {
+                                    nufft_estimator.printResults();
 
-            events_undistorted.push_back(undist_event);
+                                    // Extract harmonic parameters
+                                    extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
 
-            // Initialize tracker on first event
-            if (not_init) {
-                // measure time now
-                start_time = std::chrono::steady_clock::now();
-                first_event_t = ev->t;
-                tracker = std::make_shared<haste::HasteDifferenceStarTracker>(
-                        TRACKER_RATE, width / 2.0 + shift_x, height / 2.0 + shift_y, 0.0);
-                not_init = false;
+                                    if (Ax.empty()) {
+                                        std::cout << "No harmonics found, skipping tracker initialization."
+                                                  << std::endl;
+                                        continue;
+                                    }
 
-                continue;
-            }
+                                    trackers.back()->addFitters(std::make_unique<IEKFSinusoidFitter>(
+                                                                        createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
+                                                                                         params.params->iekf_iterations)),
+                                                                std::make_unique<IEKFSinusoidFitter>(
+                                                                        createIEKFFitter(Ay[0], By[0], omegas[0],
+                                                                                         offsets[1],
+                                                                                         params.params->iekf_iterations)));
 
-            const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6;
-
-            // Apply motion compensation if fitters are available
-            if (x_fitter && y_fitter) {
-                auto x_pred = x_fitter->predict_rel(current_t_sec);
-                auto y_pred = y_fitter->predict_rel(current_t_sec);
-
-#ifdef STORE_RESULTS
-                file_comp << current_t_sec << " " << x_pred << " " << y_pred << "\n";
-#endif
-
-                events_compensated.emplace_back(
-                        static_cast<unsigned short>(x_undist - x_pred),
-                        static_cast<unsigned short>(y_undist - y_pred),
-                        0, ev->t
-                );
-            }
-
-#ifdef VISUALIZE_SLICES
-            slice_visualizer_x.feed(undist_event);
-            slice_visualizer_y.feed(undist_event);
-            updateSliceVisualizers(slice_visualizer_x, slice_visualizer_y,
-                                   x_fitter, y_fitter, current_t_sec);
-#endif
-
-            // Update tracker
-            const auto update_type = tracker->pushEvent(current_t_sec, x_undist, y_undist);
-
-            if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
-                // Process NUFFT estimation
-                if (!nufft_estimator.done() &&
-                    nufft_estimator.feed(Centroid(tracker->t(), tracker->x(), tracker->y()))) {
-
-                    std::lock_guard<std::mutex> lock(processing_mutex);
-
-                    if (nufft_estimator.compute()) {
-                        nufft_estimator.printResults();
-
-                        // Extract harmonic parameters
-                        std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
-                        extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
-
-                        if (!Ax.empty()) {
-                            // Create new fitters with estimated parameters
-                            x_fitter = std::make_unique<IEKFSinusoidFitter>(
-                                    createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
-                                                     params.params->iekf_iterations));
-
-                            y_fitter = std::make_unique<IEKFSinusoidFitter>(
-                                    createIEKFFitter(Ay[0], By[0], omegas[0], offsets[1],
-                                                     params.params->iekf_iterations));
+                                    NUFFT_ESTIMATION_DONE = true;
+                                    visualizer.unblock();
+                                }
+                            }
                         }
                     }
                 }
-
-#ifdef VISUALIZE_SLICES
-                updateTrackerVisualization(slice_visualizer_x, slice_visualizer_y, tracker);
-#endif
-
-                // Update fitters with new tracker state
-                if (x_fitter && y_fitter) {
-                    x_fitter->update(tracker->t() + tracker_latency, tracker->x());
-                    y_fitter->update(tracker->t() + tracker_latency, tracker->y());
-                }
             }
+
+            events_undistorted.push_back(undist_event);
         }
 
         // Process events through frame generators
@@ -418,14 +388,14 @@ int main(int argc, char *argv[]) {
 
     // Main processing loop
     while (params.camera.is_running()) {
-#ifdef VISUALIZE
-        if (tracker) {
-            haste::ImshowEigenArrayNormalized(
-                    "Feature Event Window Projection",
-                    tracker->eventWindowToModel(tracker->event_window(), tracker->state()).transpose());
-            haste::ImshowEigenArrayNormalized("Feature Template", tracker->tracker_template().transpose());
-        }
-#endif
+//#ifdef VISUALIZE
+//        if (tracker) {
+//            haste::ImshowEigenArrayNormalized(
+//                    "Feature Event Window Projection",
+//                    tracker->eventWindowToModel(tracker->event_window(), tracker->state()).transpose());
+//            haste::ImshowEigenArrayNormalized("Feature Template", tracker->tracker_template().transpose());
+//        }
+//#endif
 
 #ifdef VISUALIZE_SLICES
         cv::imshow("Slice X Visualizer", slice_visualizer_x.getFrameSide());
@@ -445,7 +415,7 @@ int main(int argc, char *argv[]) {
     end_time = std::chrono::steady_clock::now();
 
     // Stop camera
-    if(params.camera.is_running()) {
+    if (params.camera.is_running()) {
         params.camera.stop();
     }
 
