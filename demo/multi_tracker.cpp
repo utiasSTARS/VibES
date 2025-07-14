@@ -36,11 +36,11 @@
 
 // Constants
 namespace {
-    constexpr double DEFAULT_FPS = 100.0;
+    constexpr double DEFAULT_FPS = 1000.0;
     constexpr std::uint32_t DEFAULT_ACCUMULATION = 10000;
     constexpr double DEFAULT_MEASUREMENT_NOISE = 0.5;
     constexpr int ESC_KEY = 27;
-    constexpr int POLL_TIMEOUT_MS = 20;
+    constexpr int POLL_TIMEOUT_MS = 2;
     constexpr int SLEEP_DURATION_MS = 2;
     bool NUFFT_ESTIMATION_DONE = false;
 }
@@ -74,28 +74,6 @@ IEKFSinusoidFitter createIEKFFitter(double A, double B, double omega, double C, 
 }
 
 /**
- * Sets up output directories for storing results
- */
-void setupOutputDirectories(const std::string &output_folder) {
-    if (!std::filesystem::exists(output_folder)) {
-        std::filesystem::create_directories(output_folder);
-    }
-    std::filesystem::create_directories(output_folder + "/undistorted");
-    std::filesystem::create_directories(output_folder + "/compensated");
-}
-
-/**
- * Saves frames to disk with sequential naming
- */
-void saveFrames(const std::vector<cv::Mat> &frames, const std::string &folder_path) {
-    for (size_t i = 0; i < frames.size(); ++i) {
-        std::ostringstream filename;
-        filename << folder_path << "/" << std::setw(4) << std::setfill('0') << i << ".png";
-        cv::imwrite(filename.str(), frames[i]);
-    }
-}
-
-/**
  * Extracts harmonic parameters from NUFFT estimator results
  */
 void extractHarmonicParameters(const NUFFTHelixEstimator &estimator,
@@ -121,48 +99,6 @@ void extractHarmonicParameters(const NUFFTHelixEstimator &estimator,
         offsets.push_back(harmonic.offset_y);
     }
 }
-
-#ifdef VISUALIZE_SLICES
-/**
- * Updates slice visualizers with prediction circles
- */
-void updateSliceVisualizers(HARMEDA::SliceVisualizer& slice_x, HARMEDA::SliceVisualizer& slice_y,
-                            const std::unique_ptr<IEKFSinusoidFitter>& x_fitter,
-                            const std::unique_ptr<IEKFSinusoidFitter>& y_fitter,
-                            double current_time) {
-    if (y_fitter) {
-        slice_y.editFrame([&](cv::Mat& frame) {
-            auto y_pred = y_fitter->predict(current_time);
-            cv::circle(frame, cv::Point(slice_x.time_value, y_pred), 1, cv::Scalar(255, 255, 0), -1);
-        });
-    }
-
-    if (x_fitter) {
-        slice_x.editFrame([&](cv::Mat& frame) {
-            auto x_pred = x_fitter->predict(current_time);
-            cv::circle(frame, cv::Point(slice_x.time_value, x_pred), 1, cv::Scalar(255, 255, 0), -1);
-        });
-    }
-}
-
-
-/**
- * Updates tracker visualization on slice frames
- */
-void updateTrackerVisualization(HARMEDA::SliceVisualizer &slice_x, HARMEDA::SliceVisualizer &slice_y,
-                                const std::shared_ptr<haste::HypothesisPatchTracker> &tracker) {
-
-    slice_y.editFrame([&](cv::Mat& frame) {
-        cv::circle(frame, cv::Point(tracker->t() * slice_x.time_scale, int(tracker->y())),
-                   1, cv::Scalar(0, 255, 0), -1);
-    });
-
-    slice_x.editFrame([&](cv::Mat& frame) {
-        cv::circle(frame, cv::Point(tracker->t() * slice_y.time_scale, int(tracker->x())),
-                   1, cv::Scalar(0, 255, 255), -1);
-    });
-}
-#endif
 
 
 static std::unique_ptr<IEKFSinusoidFitter> x_fitter, y_fitter;
@@ -217,8 +153,6 @@ int main(int argc, char *argv[]) {
     // Create frame generators
     auto frame_gen_undist = Metavision::PeriodicFrameGenerationAlgorithm(
             width, height, DEFAULT_ACCUMULATION, DEFAULT_FPS);
-    auto frame_gen_comp = Metavision::PeriodicFrameGenerationAlgorithm(
-            width, height, DEFAULT_ACCUMULATION, DEFAULT_FPS);
 
     // Initialize fitters and estimator
     NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
@@ -227,32 +161,6 @@ int main(int argc, char *argv[]) {
     std::vector<std::shared_ptr<HasteWrapper>> trackers;
 
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
-#ifdef VISUALIZE
-    // Initialize visualization windows
-    Metavision::Window window("Frames", width, height, Metavision::BaseWindow::RenderMode::BGR);
-    Metavision::Window window_compensated("Frames compensated", width, height,
-                                          Metavision::BaseWindow::RenderMode::BGR);
-#endif
-
-#ifdef VISUALIZE_SLICES
-    // Initialize slice visualizers
-    HARMEDA::SliceVisualizer slice_visualizer_x(height, width, 0, HARMEDA::X_AXIS, 3);
-    HARMEDA::SliceVisualizer slice_visualizer_y(height, width, 0, HARMEDA::Y_AXIS, 3);
-    cv::namedWindow("Slice X Visualizer", cv::WINDOW_NORMAL);
-    cv::namedWindow("Slice Y Visualizer", cv::WINDOW_NORMAL);
-#endif
-
-#ifdef STORE_RESULTS
-    // Setup output storage
-    std::string output_folder = params.params->output_folder;
-    setupOutputDirectories(output_folder);
-
-    std::vector<cv::Mat> undistorted_frames, compensated_frames;
-    std::fstream file_event, file_comp;
-    file_event.open(output_folder + "/event.txt", std::ios::out);
-    file_comp.open(output_folder + "/compensation_data.txt", std::ios::out);
-#endif
-
     std::mutex processing_mutex;
 
     EventFrameVisualizer visualizer("Event Frame Visualizer");
@@ -275,7 +183,6 @@ int main(int argc, char *argv[]) {
 
     // Setup frame generation callbacks
     frame_gen_undist.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
-        visualizer.set_frame(frame);
 #ifdef VISUALIZE
         if (!trackers.empty()) {
             if (NUFFT_ESTIMATION_DONE) {
@@ -299,21 +206,9 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-        window.show(frame);
 #endif
+        visualizer.set_frame(frame);
     });
-
-    frame_gen_comp.set_output_callback([&](Metavision::timestamp, cv::Mat &frame) {
-#ifdef STORE_RESULTS
-        compensated_frames.emplace_back(frame.clone());
-#endif
-
-#ifdef VISUALIZE
-        window_compensated.show(frame);
-#endif
-    });
-
-    bool not_init = true;
 
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
@@ -373,43 +268,22 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
-
             events_undistorted.push_back(undist_event);
         }
 
         // Process events through frame generators
         frame_gen_undist.process_events(events_undistorted.begin(), events_undistorted.end());
-        frame_gen_comp.process_events(events_compensated.begin(), events_compensated.end());
     });
 
     // Start camera
     params.camera.start();
 
-
     // Main processing loop
     while (params.camera.is_running()) {
-//#ifdef VISUALIZE
-//        if (tracker) {
-//            haste::ImshowEigenArrayNormalized(
-//                    "Feature Event Window Projection",
-//                    tracker->eventWindowToModel(tracker->event_window(), tracker->state()).transpose());
-//            haste::ImshowEigenArrayNormalized("Feature Template", tracker->tracker_template().transpose());
-//        }
-//#endif
-
-#ifdef VISUALIZE_SLICES
-        cv::imshow("Slice X Visualizer", slice_visualizer_x.getFrameSide());
-        cv::imshow("Slice Y Visualizer", slice_visualizer_y.getFrameSide());
-#endif
-
-#if defined(VISUALIZE_SLICES) || defined(VISUALIZE)
         if (cv::waitKey(1) == ESC_KEY) {
             break;
         }
         Metavision::EventLoop::poll_and_dispatch(POLL_TIMEOUT_MS);
-#else
-        std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_DURATION_MS));
-#endif
     }
     // time now
     end_time = std::chrono::steady_clock::now();
@@ -419,17 +293,7 @@ int main(int argc, char *argv[]) {
         params.camera.stop();
     }
 
-#ifdef STORE_RESULTS
-    // Save all frames
-    saveFrames(undistorted_frames, output_folder + "/undistorted");
-    saveFrames(compensated_frames, output_folder + "/compensated");
-
-    // Close output files
-    file_event.close();
-    file_comp.close();
-#endif
 
     std::cout << "Processing complete." << std::endl;
     return 0;
-
 }
