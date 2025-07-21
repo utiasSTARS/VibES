@@ -71,25 +71,32 @@ public:
                 _undistort_y[y * _width + x] = y_undist;
             }
         }
-//        _populated = true;
     }
 
     // override operator() to get the undistorted coordinates
     std::pair<double, double> operator()(int x, int y) const {
-//        if (!_populated) {
-//            throw std::runtime_error("Undistort not populated.");
-//        }
         if (!_is_calibrated) { return {static_cast<double>(x), static_cast<double>(y)}; }
 
         const auto idx = y * _width + x;
         return {_undistort_x[idx], _undistort_y[idx]};
     }
 
+    // override operator() to get the undistorted coordinates
+    Metavision::EventCD operator()(const Metavision::EventCD &ev) const {
+        if (!_is_calibrated) { return ev; }
+
+        const auto idx = ev.y * _width + ev.x;
+        return {
+                _undistort_x[idx],
+                _undistort_y[idx],
+                ev.p, ev.t
+        };
+    }
+
 private:
     // make a look-up table for the undistortion
-    std::vector<double> _undistort_x, _undistort_y;
+    std::vector<unsigned short> _undistort_x, _undistort_y;
     int _width, _height;
-    bool _populated = false;
     bool _is_calibrated = false;
 
     void parseFile(std::string &filepath, std::vector<double> &K, std::vector<double> &D) {

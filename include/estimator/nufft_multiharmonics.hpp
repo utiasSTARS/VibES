@@ -64,9 +64,16 @@ public:
         }
     }
 
-    int getCurrentIndex() const {
-        return index;
+
+    bool feed(std::vector<Centroid> &&events) {
+        std::ranges::for_each(events, [this](Centroid &event) {
+            if (feed(event)) {
+                return true;
+            }
+        });
+        return false;
     }
+
     // Feed new event data
     bool feed(const Centroid &event) {
         if (index > 0 && event.t <= t_data[index - 1]) {
@@ -85,7 +92,7 @@ public:
 
         ++index;
         if (index >= N) {
-            std::cout << "Collected enough samples, starting computation..." << std::endl;
+//            std::cout << "Collected enough samples, starting computation..." << std::endl;
             return true; // compute();
         }
         return false;

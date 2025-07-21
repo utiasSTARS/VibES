@@ -11,15 +11,15 @@
 #include <fstream>
 #include <mutex>
 #include <memory>
-#include <thread>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
 #include <csignal>
+#include <metavision/sdk/core/pipeline/pipeline.h>
+#include <metavision/sdk/driver/hdf5_event_file_writer.h>
 
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
-#include "slice_visualizer.hpp"
 #include "estimator/iekf_sinusoid_fitter.hpp"
 #include "event_frontend/centroid.hpp"
 #include "haste/app/command_parser.hpp"
@@ -30,6 +30,7 @@
 #define VISUALIZE
 //#define VISUALIZE_SLICES
 //#define STORE_RESULTS
+//#define STORE_HDF5
 
 // Constants
 namespace {
@@ -225,10 +226,16 @@ int main(int argc, char *argv[]) {
     // Initialize tracker
     std::shared_ptr<haste::HypothesisPatchTracker> tracker;
 
+    Metavision::Pipeline p(true);
 
     // Tracker positioning
     int shift_x = params.params->tracker_x;
     int shift_y = params.params->tracker_y;
+
+#ifdef STORE_HDF5
+    Metavision::HDF5EventFileWriter hdf5_writer(params.params->output_folder + "/compensated.hdf5");
+    hdf5_writer.add_metadata_map_from_camera(params.camera);
+#endif
 
 #ifdef VISUALIZE
     // Initialize visualization windows
@@ -410,6 +417,9 @@ int main(int argc, char *argv[]) {
         // Process events through frame generators
         frame_gen_undist.process_events(events_undistorted.begin(), events_undistorted.end());
         frame_gen_comp.process_events(events_compensated.begin(), events_compensated.end());
+#ifdef STORE_HDF5
+        hdf5_writer.add_events(events_compensated.data(), events_compensated.data() + events_compensated.size());
+#endif
     });
 
     // Start camera
@@ -445,9 +455,13 @@ int main(int argc, char *argv[]) {
     end_time = std::chrono::steady_clock::now();
 
     // Stop camera
-    if(params.camera.is_running()) {
+    if (params.camera.is_running()) {
         params.camera.stop();
     }
+
+#ifdef STORE_HDF5
+    hdf5_writer.close();
+#endif
 
 #ifdef STORE_RESULTS
     // Save all frames

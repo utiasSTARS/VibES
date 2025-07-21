@@ -32,8 +32,6 @@ namespace HARMEDA {
         std::string input_path;
         std::string calib_file; // Path to camera calibration file
         std::string output_folder = "output"; // Default output folder for frames
-        double tau = 100000.0; // Default time constant for EMA in microseconds
-        bool do_plot = false;  // Flag to enable 3D visualization
         int tracker_x = 0; // Tracker x position
         int tracker_y = 0; // Tracker y position
         int tracker_size = 10; // Tracker size
@@ -42,6 +40,18 @@ namespace HARMEDA {
 
     class ParamsLoader {
     public:
+
+        friend std::ostream &operator<<(std::ostream &os, const ParamsLoader &loader) {
+            os << "\033[1;34mParameters:\n";
+            os << "Input Path: " << loader.params->input_path << "\n"
+               << "Calibration File: " << loader.params->calib_file << "\n"
+               << "Output Folder: " << loader.params->output_folder << "\n"
+               << "Tracker Size: " << loader.params->tracker_size << "\n"
+               << "IEKF Iterations: " << loader.params->iekf_iterations;
+            os << "\033[0m" << std::endl;
+            return os;
+        }
+
         ParamsLoader(int argc, char *argv[]) {
             params = std::make_shared<Params>();
 

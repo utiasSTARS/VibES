@@ -49,47 +49,39 @@ public:
         tracker_thread_ = std::thread([this]() {
             while (run_.load()) {
                 event_stack_.consume_all([this](const Metavision::EventCD &event) {
-                    try {
-                        // Convert timestamp to seconds relative to first event
-                        double current_t_sec = static_cast<double>(event.t) / 1e6;
+                    // Convert timestamp to seconds relative to first event
+                    float current_t_sec = static_cast<float>(event.t) / 1e6f;
 
-                        // Feed events to the tracker
-                        auto update_type = tracker_->pushEvent(current_t_sec, event.x, event.y);
-                        if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
-                            std::lock_guard<std::mutex> lock(mtx_);
+                    // Feed events to the tracker
+                    auto update_type = tracker_->pushEvent(current_t_sec, event.x, event.y);
+                    if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
+                        std::lock_guard<std::mutex> lock(mtx_);
 
-                            // Update tracking state
-                            last_update_time_ = current_t_sec;
-                            last_x_ = tracker_->x();
-                            last_y_ = tracker_->y();
+                        // Update tracking state
+                        last_update_time_ = current_t_sec;
+                        last_x_ = tracker_->x();
+                        last_y_ = tracker_->y();
 
-                            centroid_ = Centroid(tracker_->t(), last_x_, last_y_);
+                        centroids_.emplace_back(
+                                tracker_->t(), last_x_, last_y_
+                        );
 
-                            // Update fitters if available
-                            if (x_fitter) {
-                                x_fitter->update(tracker_->t(), tracker_->x());
-                                // Calculate color based on amplitude
-                                double amplitude = x_fitter->getAmplitude();
-                                color_ = static_cast<int>(std::min(
-                                        255.0,
-                                        std::max(0.0, amplitude / static_cast<double>(MAX_AMPLITUDE) * 255.0)));
-                            }
-                            if (y_fitter) {
-                                y_fitter->update(tracker_->t(), tracker_->y());
-                            }
+                        // Update fitters if available
+                        if (x_fitter || y_fitter) {
+                            x_fitter->update(tracker_->t(), tracker_->x());
+                            // Calculate color based on amplitude
+                            double amplitude = x_fitter->getAmplitude();
+                            color_ = static_cast<int>(std::min(
+                                    255.0,
+                                    std::max(0.0, amplitude / static_cast<double>(MAX_AMPLITUDE) * 255.0)));
 
-                            // Notify that state was updated
-                            state_updated_ = true;
+                            y_fitter->update(tracker_->t(), tracker_->y());
                         }
-                    } catch (const std::exception &e) {
-                        // Log error or handle gracefully - avoid crashing the thread
-                        // You might want to add logging here
-                        error_count_++;
                     }
                 });
 
                 // Small sleep to prevent 100% CPU usage
-                std::this_thread::sleep_for(std::chrono::microseconds(100));
+                std::this_thread::sleep_for(std::chrono::microseconds(1));
             }
         });
     }
@@ -103,6 +95,7 @@ public:
         if (!event_stack_.push(event)) {
             // Stack is full - could log this or handle overflow
             // For now, just drop the event
+//            std::cerr << "Event stack is full, dropping event." << std::endl;
         }
     }
 
@@ -113,10 +106,18 @@ public:
         }
     }
 
-    std::pair<double, double> getEstimate(double t) {
+    std::optional<std::pair<double, double>> getEstimate(double t) {
         std::lock_guard<std::mutex> lock(mtx_);
         if (!x_fitter || !y_fitter) {
-            return {0.0, 0.0};
+            return std::nullopt;  // No fitters available
+        }
+        return std::make_pair(x_fitter->predict(t), y_fitter->predict(t));
+    }
+
+    std::optional<std::pair<double, double>> getRelEstimate(double t) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (!x_fitter || !y_fitter) {
+            return std::nullopt;  // No fitters available
         }
         return std::make_pair(x_fitter->predict_rel(t), y_fitter->predict_rel(t));
     }
@@ -162,19 +163,6 @@ public:
         return last_update_time_;
     }
 
-    // Check if state was updated since last check
-    bool wasStateUpdated() {
-        std::lock_guard<std::mutex> lock(mtx_);
-        bool updated = state_updated_;
-        state_updated_ = false;  // Reset flag
-        return updated;
-    }
-
-    // Get error count
-    int getErrorCount() const {
-        return error_count_.load();
-    }
-
     // Get initial position
     std::pair<int, int> getInitialPosition() const {
         return {initial_x_, initial_y_};
@@ -185,20 +173,23 @@ public:
         return tracker_;
     }
 
-    std::optional<Centroid> getCentroid() {
+    std::vector<Centroid> getCentroids() {
         std::lock_guard<std::mutex> lock(mtx_);
-        if (!centroid_.has_value()) {
-            return std::nullopt;  // No centroid available
+        // copy the centroids vector to return a snapshot
+        if (centroids_.empty()) {
+            return {};  // Return empty vector if no centroids
         }
-        Centroid c_copy = centroid_.value();
-        centroid_ = std::nullopt;  // Clear the centroid after copying
-        return c_copy;
+        // Return a copy of the centroids
+        std::vector<Centroid> centroids_copy = centroids_;
+        // Clear the centroids vector to avoid memory leaks
+        centroids_.clear();
+        return centroids_copy;
     }
 
 private:
     TrackerPtr tracker_;
     std::thread tracker_thread_;
-    boost::lockfree::spsc_queue<Metavision::EventCD, boost::lockfree::capacity<1000>> event_stack_;
+    boost::lockfree::spsc_queue<Metavision::EventCD, boost::lockfree::capacity<10000>> event_stack_;
     std::atomic<bool> run_{true};
     std::atomic<int> color_{0};
     std::atomic<int> error_count_{0};
@@ -215,7 +206,7 @@ private:
     const int initial_x_;
     const int initial_y_;
 
-    std::optional<Centroid> centroid_ = std::nullopt;
+    std::vector<Centroid> centroids_;
 
     static int counter_;
 

@@ -85,10 +85,6 @@ include_directories(thirdparty/haste/include)
 #add_executable(viewer demo_old/viewer.cpp)
 #target_link_libraries(viewer PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system PUBLIC OpenMP::OpenMP_CXX)
 #
-#add_executable(undistort_and_store demo_old/undistort_and_store.cpp)
-#target_link_libraries(undistort_and_store PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
-#
-#
 #add_executable(centroid_ema demo_old/centroid_ema.cpp)
 #target_link_libraries(centroid_ema PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
 #
@@ -107,5 +103,12 @@ include_directories(thirdparty/haste/include)
 add_executable(haste_comp demo/haste_comp.cpp)
 target_link_libraries(haste_comp PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
 
+add_executable(compensation demo/compensation.cpp)
+target_link_libraries(compensation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+
+
 add_executable(multi_tracker demo/multi_tracker.cpp)
 target_link_libraries(multi_tracker PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+
+add_executable(undistort_and_store demo/undistort_and_store.cpp)
+target_link_libraries(undistort_and_store PRIVATE MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options)
