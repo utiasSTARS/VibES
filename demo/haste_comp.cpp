@@ -36,14 +36,14 @@
 // Constants
 namespace {
     constexpr double DEFAULT_FPS = 100.0;
-    constexpr std::uint32_t DEFAULT_ACCUMULATION = 10000;
+    constexpr std::uint32_t DEFAULT_ACCUMULATION = 5000;
     constexpr double MIN_FREQUENCY = 5.0;   // Hz
     constexpr double MAX_FREQUENCY = 80.0;  // Hz
     constexpr int MAX_HARMONICS = 1;
     constexpr double TRACKER_RATE = 0.01;
     constexpr double DEFAULT_MEASUREMENT_NOISE = 0.5;
     constexpr int ESC_KEY = 27;
-    constexpr int POLL_TIMEOUT_MS = 20;
+    constexpr int POLL_TIMEOUT_MS = 10;
     constexpr int SLEEP_DURATION_MS = 2;
 }
 

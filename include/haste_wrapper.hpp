@@ -34,6 +34,7 @@ namespace {
 
 #define STORE
 
+template<typename T>
 class HasteWrapper {
 
 public:
@@ -41,7 +42,6 @@ public:
                  std::string output_folder = "output") : initial_x_(x),
                                                          initial_y_(y),
                                                          init_time_(init_time) {
-        counter_++;
         tracker_ = std::make_shared<haste::HasteDifferenceStarTracker>(
                 tracker_rate, static_cast<haste::HypothesisPatchTracker::Scalar>(x),
                 static_cast<haste::HypothesisPatchTracker::Scalar>(y), 0.0f);
@@ -53,54 +53,11 @@ public:
 #ifdef STORE
         file_centroid_ = std::ofstream(output_folder + "/centroids.txt");
 #endif
-
-        // Start the tracker thread
-        tracker_thread_ = std::thread([this]() {
-            while (run_.load()) {
-                event_stack_.consume_all([this](const Metavision::EventCD &event) {
-                    // Convert timestamp to seconds relative to first event
-                    double current_t_sec = static_cast<double>(event.t - init_time_) / 1e6;
-
-                    // Feed events to the tracker
-                    auto update_type = tracker_->pushEvent(current_t_sec, event.x, event.y);
-                    if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
-                        std::lock_guard<std::mutex> lock(mtx_);
-
-                        // Update tracking state
-                        last_update_time_ = current_t_sec;
-                        last_x_ = tracker_->x();
-                        last_y_ = tracker_->y();
-
-                        if (last_x_ == 0 && last_y_ == 0) { return; }
-
-#ifdef STORE
-                        file_centroid_ << std::fixed << std::setprecision(4)
-                                       << tracker_->t() << " " << last_x_ << " " << last_y_ << "\n";
-#endif
-
-                        centroids_.emplace_back(
-                                tracker_->t(), last_x_, last_y_
-                        );
-
-                        // Update fitters if available
-                        if (x_fitter) {
-                            x_fitter->update(tracker_->t(), tracker_->x());
-                            // Calculate color based on amplitude
-                            double amplitude = x_fitter->getAmplitude();
-                            color_ = static_cast<int>(std::min(
-                                    255.0,
-                                    std::max(0.0, amplitude / static_cast<double>(MAX_AMPLITUDE) * 255.0)));
-                        }
-                        if (y_fitter) {
-                            y_fitter->update(tracker_->t(), tracker_->y());
-                        }
-                    }
-                });
-
-                // Small sleep to prevent 100% CPU usage
-                std::this_thread::sleep_for(std::chrono::microseconds(1));
-            }
-        });
+        if constexpr (std::is_same_v<T, Centroid>) {
+            startCentroids();
+        } else {
+            startEvents();
+        }
     }
 
     ~HasteWrapper() {
@@ -113,6 +70,15 @@ public:
     void feed(const Metavision::EventCD &event) {
         // Push event to the lock-free stack
         if (!event_stack_.push(event)) {
+            // Stack is full - could log this or handle overflow
+            // For now, just drop the event
+//            std::cerr << "Event stack is full, dropping event." << std::endl;
+        }
+    }
+
+    void feed(const double t, const double x, const double y) {
+        // Push event to the lock-free stack
+        if (!event_stack_centroid_.push(Centroid(t, x, y))) {
             // Stack is full - could log this or handle overflow
             // For now, just drop the event
 //            std::cerr << "Event stack is full, dropping event." << std::endl;
@@ -174,12 +140,6 @@ public:
         return std::nullopt;  // No shift available
     }
 
-    // Get tracker time
-    double getTrackerTime() {
-        std::lock_guard<std::mutex> lock(mtx_);
-        return last_update_time_;
-    }
-
     // Get initial position
     std::pair<int, int> getInitialPosition() const {
         return {initial_x_, initial_y_};
@@ -201,7 +161,8 @@ public:
 private:
     TrackerPtr tracker_;
     std::thread tracker_thread_;
-    boost::lockfree::spsc_queue<Metavision::EventCD, boost::lockfree::capacity<10000>> event_stack_;
+    boost::lockfree::spsc_queue<Metavision::EventCD, boost::lockfree::capacity<1000>> event_stack_;
+    boost::lockfree::spsc_queue<Centroid, boost::lockfree::capacity<1000>> event_stack_centroid_;
     std::atomic<bool> run_{true};
     std::atomic<int> color_{0};
     mutable std::mutex mtx_;  // Made mutable for const methods
@@ -212,7 +173,6 @@ private:
     std::ofstream file_centroid_;
 
     // Tracking state
-    double last_update_time_{0.0};
     double last_x_{0.0};
     double last_y_{0.0};
 
@@ -222,12 +182,109 @@ private:
 
     std::vector<Centroid> centroids_;
 
-    static int counter_;
-
     static constexpr int MAX_AMPLITUDE = 5;  // Made const and static
-};
 
-int HasteWrapper::counter_ = 0;
+
+
+    void startEvents() {
+        // Start the tracker thread
+        tracker_thread_ = std::thread([this]() {
+            while (run_.load()) {
+                event_stack_.consume_all([this](const Metavision::EventCD &event) {
+                    // Convert timestamp to seconds relative to first event
+                    double current_t_sec = static_cast<double>(event.t - init_time_) / 1e6;
+
+                    // Feed events to the tracker
+                    auto update_type = tracker_->pushEvent(current_t_sec, event.x, event.y);
+                    if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
+                        std::lock_guard<std::mutex> lock(mtx_);
+
+                        // Update tracking state
+                        last_x_ = tracker_->x();
+                        last_y_ = tracker_->y();
+
+                        if (last_x_ == 0 && last_y_ == 0) { return; }
+
+#ifdef STORE
+                        file_centroid_ << std::fixed << std::setprecision(4)
+                                       << tracker_->t() << " " << last_x_ << " " << last_y_ << "\n";
+#endif
+
+                        centroids_.emplace_back(
+                                tracker_->t(), last_x_, last_y_
+                        );
+
+                        // Update fitters if available
+                        if (x_fitter) {
+                            x_fitter->update(tracker_->t(), tracker_->x());
+                            // Calculate color based on amplitude
+                            double amplitude = x_fitter->getAmplitude();
+                            color_ = static_cast<int>(std::min(
+                                    255.0,
+                                    std::max(0.0, amplitude / static_cast<double>(MAX_AMPLITUDE) * 255.0)));
+                        }
+                        if (y_fitter) {
+                            y_fitter->update(tracker_->t(), tracker_->y());
+                        }
+                    }
+                });
+
+                // Small sleep to prevent 100% CPU usage
+                std::this_thread::sleep_for(std::chrono::microseconds(1));
+            }
+        });
+    }
+
+
+    void startCentroids() {
+        // Start the tracker thread
+        tracker_thread_ = std::thread([this]() {
+            while (run_.load()) {
+                event_stack_centroid_.consume_all([this](const Centroid &event) {
+                    // Convert timestamp to seconds relative to first event
+
+                    // Feed events to the tracker
+                    auto update_type = tracker_->pushEvent(event.t, event.x, event.y);
+                    if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
+                        std::lock_guard<std::mutex> lock(mtx_);
+
+                        // Update tracking state
+                        last_x_ = tracker_->x();
+                        last_y_ = tracker_->y();
+
+                        if (last_x_ == 0 && last_y_ == 0) { return; }
+
+#ifdef STORE
+                        file_centroid_ << std::fixed << std::setprecision(4)
+                                       << tracker_->t() << " " << last_x_ << " " << last_y_ << "\n";
+#endif
+
+                        centroids_.emplace_back(
+                                tracker_->t(), last_x_, last_y_
+                        );
+
+                        // Update fitters if available
+                        if (x_fitter) {
+                            x_fitter->update(tracker_->t(), tracker_->x());
+                            // Calculate color based on amplitude
+                            double amplitude = x_fitter->getAmplitude();
+                            color_ = static_cast<int>(std::min(
+                                    255.0,
+                                    std::max(0.0, amplitude / static_cast<double>(MAX_AMPLITUDE) * 255.0)));
+                        }
+                        if (y_fitter) {
+                            y_fitter->update(tracker_->t(), tracker_->y());
+                        }
+                    }
+                });
+
+                // Small sleep to prevent 100% CPU usage
+                std::this_thread::sleep_for(std::chrono::microseconds(1));
+            }
+        });
+    }
+
+};
 
 
 #endif //PROJECT_HASTE_WRAPPER_H

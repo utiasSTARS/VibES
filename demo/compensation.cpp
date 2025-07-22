@@ -29,11 +29,11 @@
 
 // Constants
 namespace {
-    constexpr double DEFAULT_FPS = 30.0;
-    constexpr std::uint32_t DEFAULT_ACCUMULATION = 50000;
+    constexpr double DEFAULT_FPS = 100.0;
+    constexpr std::uint32_t DEFAULT_ACCUMULATION = 5000;
     constexpr double DEFAULT_MEASUREMENT_NOISE = 0.5;
     constexpr int ESC_KEY = 27;
-    constexpr int POLL_TIMEOUT_MS = 33;
+    constexpr int POLL_TIMEOUT_MS = 10;
     bool NUFFT_ESTIMATION_DONE = false;
     constexpr int TRACKER_MARGIN = 40;
 }
@@ -176,7 +176,7 @@ int main(int argc, char *argv[]) {
 
     // Initialize fitters and estimator
     NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
-    std::shared_ptr<HasteWrapper> tracker;
+    std::shared_ptr<HasteWrapper<Centroid>> tracker;
 
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
@@ -191,7 +191,7 @@ int main(int argc, char *argv[]) {
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
         if (tracker) { return; }
-        tracker = std::make_shared<HasteWrapper>(x, y, TRACKER_RATE, first_event_t);
+        tracker = std::make_shared<HasteWrapper<Centroid>>(x, y, TRACKER_RATE, first_event_t);
         std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
 
@@ -203,10 +203,11 @@ int main(int argc, char *argv[]) {
     double x_pred = 0, y_pred = 0;
     double tracker_x, tracker_y;
     Metavision::Stage::EventBuffer compensated_events;
+    float x_undistorted, y_undistorted;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         compensated_events.clear();
-//        if (NUFFT_ESTIMATION_DONE) { compensated_events.reserve(std::distance(begin, end)); }
+        if (NUFFT_ESTIMATION_DONE) { compensated_events.reserve(std::distance(begin, end)); }
         for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
             if (not_init) {
                 start_time = std::chrono::steady_clock::now();
@@ -216,21 +217,35 @@ int main(int argc, char *argv[]) {
             }
 
             last_event_t = ev->t;
-            auto undist_event = undistort(*ev);
 
-            if (undist_event.x < 0 || undist_event.x >= width ||
-                undist_event.y < 0 || undist_event.y >= height) {
-                continue;
+            std::tie(x_undistorted, y_undistorted) = undistort(ev->x, ev->y);
+//             make sure the undistorted coordinates are within the image bounds
+            if (x_undistorted < 0 || x_undistorted >= width || y_undistorted < 0 || y_undistorted >= height) {
+                continue; // Skip events that are out of bounds
             }
+            Metavision::EventCD undist_event(
+                    static_cast<unsigned short>(x_undistorted),
+                    static_cast<unsigned short>(y_undistorted),
+                    ev->p,
+                    ev->t
+            );
 
-            const double current_t_sec = static_cast<double>(ev->t - first_event_t) / 1e6;
+//            auto undist_event = undistort(*ev);
+//
+//            if (undist_event.x < 0 || undist_event.x >= width ||
+//                undist_event.y < 0 || undist_event.y >= height) {
+//                continue;
+//            }
+
+            const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6f;
 
             // Process with tracker
             if (tracker) {
                 if (NUFFT_ESTIMATION_DONE) {
+                    tracker->feed(current_t_sec, x_undistorted, y_undistorted);
 #ifdef FANCY_VISUALIZATION
                     // if the event is in the left half of the image skip
-                    if (undist_event.x < width / 2 - 100) {
+                    if (undist_event.x < width / 2) {
                         compensated_events.emplace_back(undist_event);
                         std::tie(tracker_x, tracker_y) = tracker->getCurrentPosition();
                         if (undist_event.x < tracker_x - TRACKER_MARGIN ||
@@ -240,14 +255,12 @@ int main(int argc, char *argv[]) {
                             compensated_events.emplace_back(undist_event);
                             continue;
                         }
-                        tracker->feed(undist_event);
-                        continue;
                     }
 #endif
                     if (auto value = tracker->getRelEstimate(current_t_sec); value.has_value()) {
                         std::tie(x_pred, y_pred) = value.value();
-                        auto x_new = static_cast<unsigned short>(undist_event.x - x_pred);
-                        auto y_new = static_cast<unsigned short>(undist_event.y - y_pred);
+                        auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
+                        auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
 
                         if (x_new < 0 || x_new >= width ||
                             y_new < 0 || y_new >= height) {
@@ -270,7 +283,7 @@ int main(int argc, char *argv[]) {
                         continue;
                     }
 
-                    tracker->feed(undist_event);
+                    tracker->feed(current_t_sec, x_undistorted, y_undistorted);
 
                     if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
