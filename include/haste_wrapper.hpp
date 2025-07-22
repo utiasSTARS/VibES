@@ -30,6 +30,7 @@ namespace {
     constexpr double MAX_FREQUENCY = 80.0;  // Hz
     constexpr int MAX_HARMONICS = 1;
     constexpr double TRACKER_RATE = 0.01;
+    constexpr int TRACKER_MARGIN = haste::HypothesisPatchTracker::kPatchSize / 2 + 15;
 }
 
 #define STORE
@@ -42,22 +43,21 @@ public:
                  std::string output_folder = "output") : initial_x_(x),
                                                          initial_y_(y),
                                                          init_time_(init_time) {
+        if constexpr (!(std::is_same_v<T, Metavision::EventCD> || std::is_same_v<T, Centroid>)) {
+            throw std::invalid_argument("HasteWrapper can only be used with Metavision::EventCD or Centroid types.");
+        }
+
         tracker_ = std::make_shared<haste::HasteDifferenceStarTracker>(
                 tracker_rate, static_cast<haste::HypothesisPatchTracker::Scalar>(x),
                 static_cast<haste::HypothesisPatchTracker::Scalar>(y), 0.0f);
 
-        if (!tracker_) {
-            throw std::runtime_error("Tracker initialization failed");
-        }
+        last_x_ = tracker_->x();
+        last_y_ = tracker_->y();
 
 #ifdef STORE
         file_centroid_ = std::ofstream(output_folder + "/centroids.txt");
 #endif
-        if constexpr (std::is_same_v<T, Centroid>) {
-            startCentroids();
-        } else {
-            startEvents();
-        }
+        startEvents();
     }
 
     ~HasteWrapper() {
@@ -67,23 +67,27 @@ public:
 #endif
     }
 
-    void feed(const Metavision::EventCD &event) {
-        // Push event to the lock-free stack
-        if (!event_stack_.push(event)) {
-            // Stack is full - could log this or handle overflow
-            // For now, just drop the event
-//            std::cerr << "Event stack is full, dropping event." << std::endl;
+    bool feed(const T &event) {
+//        std::lock_guard<std::mutex> lock(mtx_);
+//        event_stack_.push(event);
+        if (inTracker(event)) {
+            event_stack_.push(event);
+            return true;
         }
+        return false;
     }
 
-    void feed(const double t, const double x, const double y) {
-        // Push event to the lock-free stack
-        if (!event_stack_centroid_.push(Centroid(t, x, y))) {
-            // Stack is full - could log this or handle overflow
-            // For now, just drop the event
-//            std::cerr << "Event stack is full, dropping event." << std::endl;
-        }
+    bool inTracker(const T &event) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (last_x_ == 0 && last_y_ == 0)
+            return false;
+
+        return event.x >= last_x_ - TRACKER_MARGIN &&
+               event.x <= last_x_ + TRACKER_MARGIN &&
+               event.y >= last_y_ - TRACKER_MARGIN &&
+               event.y <= last_y_ + TRACKER_MARGIN;
     }
+
 
     void stop() {
         run_.store(false);
@@ -161,8 +165,7 @@ public:
 private:
     TrackerPtr tracker_;
     std::thread tracker_thread_;
-    boost::lockfree::spsc_queue<Metavision::EventCD, boost::lockfree::capacity<1000>> event_stack_;
-    boost::lockfree::spsc_queue<Centroid, boost::lockfree::capacity<1000>> event_stack_centroid_;
+    boost::lockfree::spsc_queue<T, boost::lockfree::capacity<1000>> event_stack_;
     std::atomic<bool> run_{true};
     std::atomic<int> color_{0};
     mutable std::mutex mtx_;  // Made mutable for const methods
@@ -190,10 +193,14 @@ private:
         // Start the tracker thread
         tracker_thread_ = std::thread([this]() {
             while (run_.load()) {
-                event_stack_.consume_all([this](const Metavision::EventCD &event) {
+                event_stack_.consume_all([this](const T &event) {
                     // Convert timestamp to seconds relative to first event
-                    double current_t_sec = static_cast<double>(event.t - init_time_) / 1e6;
-
+                    double current_t_sec = 0;
+                    if constexpr (std::is_same_v<T, Centroid>) {
+                        current_t_sec = event.t;
+                    } else {
+                        current_t_sec = static_cast<double>(event.t - init_time_) / 1e6;
+                    }
                     // Feed events to the tracker
                     auto update_type = tracker_->pushEvent(current_t_sec, event.x, event.y);
                     if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
@@ -235,54 +242,6 @@ private:
         });
     }
 
-
-    void startCentroids() {
-        // Start the tracker thread
-        tracker_thread_ = std::thread([this]() {
-            while (run_.load()) {
-                event_stack_centroid_.consume_all([this](const Centroid &event) {
-                    // Convert timestamp to seconds relative to first event
-
-                    // Feed events to the tracker
-                    auto update_type = tracker_->pushEvent(event.t, event.x, event.y);
-                    if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
-                        std::lock_guard<std::mutex> lock(mtx_);
-
-                        // Update tracking state
-                        last_x_ = tracker_->x();
-                        last_y_ = tracker_->y();
-
-                        if (last_x_ == 0 && last_y_ == 0) { return; }
-
-#ifdef STORE
-                        file_centroid_ << std::fixed << std::setprecision(4)
-                                       << tracker_->t() << " " << last_x_ << " " << last_y_ << "\n";
-#endif
-
-                        centroids_.emplace_back(
-                                tracker_->t(), last_x_, last_y_
-                        );
-
-                        // Update fitters if available
-                        if (x_fitter) {
-                            x_fitter->update(tracker_->t(), tracker_->x());
-                            // Calculate color based on amplitude
-                            double amplitude = x_fitter->getAmplitude();
-                            color_ = static_cast<int>(std::min(
-                                    255.0,
-                                    std::max(0.0, amplitude / static_cast<double>(MAX_AMPLITUDE) * 255.0)));
-                        }
-                        if (y_fitter) {
-                            y_fitter->update(tracker_->t(), tracker_->y());
-                        }
-                    }
-                });
-
-                // Small sleep to prevent 100% CPU usage
-                std::this_thread::sleep_for(std::chrono::microseconds(1));
-            }
-        });
-    }
 
 };
 

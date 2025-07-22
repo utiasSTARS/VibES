@@ -127,7 +127,7 @@ public:
         }
 
         // Check timestamp ordering
-        if (index_ > 0 && event.t <= t_data[index_ - 1]) {
+        if (index_ > 0 && event.t < t_data[index_ - 1]) {
             return false;
         }
 
@@ -319,6 +319,9 @@ private:
         // Must be called with mutex_ held
         if (!computing_.load()) {
             computing_ = true;
+            if (compute_thread_.joinable()) {
+                compute_thread_.join(); // Ensure previous thread is joined before starting a new one
+            }
             compute_thread_ = std::thread(&NUFFTHelixEstimator::compute_thr, this);
         }
     }
@@ -416,7 +419,7 @@ private:
                 std::lock_guard<std::mutex> lock(mutex_);
                 if (!shutdown_requested_.load()) {
                     refineEstimates(local_t_data, local_x_data, local_y_data,
-                                   local_mean_x, local_mean_y, local_harmonics);
+                                    local_mean_x, local_mean_y, local_harmonics);
                     mean_x_ = local_mean_x;
                     mean_y_ = local_mean_y;
                     harmonics_ = std::move(local_harmonics);

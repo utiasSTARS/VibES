@@ -35,7 +35,6 @@ namespace {
     constexpr int ESC_KEY = 27;
     constexpr int POLL_TIMEOUT_MS = 10;
     bool NUFFT_ESTIMATION_DONE = false;
-    constexpr int TRACKER_MARGIN = 40;
 }
 
 // UI processing function similar to original
@@ -186,12 +185,19 @@ int main(int argc, char *argv[]) {
     cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
     cv::resizeWindow(window_name, width, height);
     cv::moveWindow(window_name, 0, 0);
-
+#ifdef FANCY_VISUALIZATION
+    int visualization_cut_off = width / 2; // Cut-off for visualization
+#endif
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
-        if (tracker) { return; }
-        tracker = std::make_shared<HasteWrapper<Centroid>>(x, y, TRACKER_RATE, first_event_t);
+        if (tracker) {
+#ifdef FANCY_VISUALIZATION
+            visualization_cut_off = x; // Update cut-off for visualization
+#endif
+            return;
+        }
+        tracker = std::make_shared<HasteWrapper<Centroid>>(x, y, TRACKER_RATE);
         std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
 
@@ -201,9 +207,10 @@ int main(int argc, char *argv[]) {
     bool osd = true; // On-screen display toggle
 
     double x_pred = 0, y_pred = 0;
-    double tracker_x, tracker_y;
+
     Metavision::Stage::EventBuffer compensated_events;
     float x_undistorted, y_undistorted;
+
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         compensated_events.clear();
@@ -230,31 +237,18 @@ int main(int argc, char *argv[]) {
                     ev->t
             );
 
-//            auto undist_event = undistort(*ev);
-//
-//            if (undist_event.x < 0 || undist_event.x >= width ||
-//                undist_event.y < 0 || undist_event.y >= height) {
-//                continue;
-//            }
-
             const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6f;
 
             // Process with tracker
             if (tracker) {
+                const bool in_tracker = tracker->feed({current_t_sec, x_undistorted, y_undistorted});
                 if (NUFFT_ESTIMATION_DONE) {
-                    tracker->feed(current_t_sec, x_undistorted, y_undistorted);
+
 #ifdef FANCY_VISUALIZATION
                     // if the event is in the left half of the image skip
-                    if (undist_event.x < width / 2) {
+                    if (undist_event.x < visualization_cut_off) {
                         compensated_events.emplace_back(undist_event);
-                        std::tie(tracker_x, tracker_y) = tracker->getCurrentPosition();
-                        if (undist_event.x < tracker_x - TRACKER_MARGIN ||
-                            undist_event.x > tracker_x + TRACKER_MARGIN ||
-                            undist_event.y < tracker_y - TRACKER_MARGIN ||
-                            undist_event.y > tracker_y + TRACKER_MARGIN) {
-                            compensated_events.emplace_back(undist_event);
-                            continue;
-                        }
+                        continue;
                     }
 #endif
                     if (auto value = tracker->getRelEstimate(current_t_sec); value.has_value()) {
@@ -273,17 +267,16 @@ int main(int argc, char *argv[]) {
                         continue;
                     }
                 } else {
-
-                    // feed the tracker only if the event is within the bounds
-                    std::tie(tracker_x, tracker_y) = tracker->getCurrentPosition();
-                    if ((tracker_x != 0 || tracker_y != 0) &&
-                        (undist_event.x < tracker_x - TRACKER_MARGIN || undist_event.x > tracker_x + TRACKER_MARGIN ||
-                         undist_event.y < tracker_y - TRACKER_MARGIN || undist_event.y > tracker_y + TRACKER_MARGIN)) {
-//                    compensated_events.emplace_back(undist_event);
+                    if (!in_tracker) {
                         continue;
                     }
 
-                    tracker->feed(current_t_sec, x_undistorted, y_undistorted);
+//                    auto [tracker_x, tracker_y] = tracker->getCurrentPosition();
+//                    if (!(tracker_x == 0 && tracker_y == 0) &&
+//                        (undist_event.x < tracker_x - TRACKER_MARGIN || undist_event.x > tracker_x + TRACKER_MARGIN ||
+//                         undist_event.y < tracker_y - TRACKER_MARGIN || undist_event.y > tracker_y + TRACKER_MARGIN)) {
+//                        continue;
+//                    }
 
                     if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
@@ -340,7 +333,7 @@ int main(int argc, char *argv[]) {
 
                     // Add tracker info if available
                     if (tracker) {
-                        cv::putText(display_frame, "Tracker: Active", cv::Point(10, 40),
+                        cv::putText(display_frame, "Tracker: Initialized", cv::Point(10, 40),
                                     cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
 
                         if (NUFFT_ESTIMATION_DONE) {
