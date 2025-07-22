@@ -4,15 +4,11 @@
 //
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
-#include <metavision/sdk/ui/utils/window.h>
-#include <metavision/sdk/ui/utils/base_window.h>
+#include <metavision/sdk/core/utils/cd_frame_generator.h>
+#include <metavision/sdk/core/utils/rate_estimator.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
-#include <boost/lockfree/stack.hpp>
-#include <filesystem>
-#include <fstream>
 #include <mutex>
 #include <memory>
-#include <thread>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
@@ -102,8 +98,7 @@ void extractHarmonicParameters(const NUFFTHelixEstimator &estimator,
 
 
 static std::unique_ptr<IEKFSinusoidFitter> x_fitter, y_fitter;
-static std::chrono::steady_clock::time_point end_time;
-static std::chrono::steady_clock::time_point start_time;
+static std::chrono::steady_clock::time_point end_time, start_time;
 static Metavision::timestamp first_event_t = 0, last_event_t = 0;
 
 void print_on_exit() {
@@ -115,7 +110,7 @@ void print_on_exit() {
     }
 
     // Calculate elapsed time in ms
-    auto elapsed_time = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
+    auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
     // print orange
     std::cout << "\033[1;33mProcessing complete.\033[0m" << std::endl;
     std::cout << "\033[1;33mTotal processing time: " << elapsed_time << " ms\033[0m" << std::endl;
@@ -188,20 +183,38 @@ int main(int argc, char *argv[]) {
             if (NUFFT_ESTIMATION_DONE) {
                 for (auto t: trackers) {
                     if (auto shift = t->getShift(); shift.has_value()) {
-                        int x = std::get<0>(shift.value());
-                        int y = std::get<1>(shift.value());
+                        const int x = std::get<0>(shift.value());
+                        const int y = std::get<1>(shift.value());
 
                         // Draw predicted position
                         cv::circle(frame, cv::Point(x, y), 5, cv::Scalar(0, 255, 0), -1);
 
                         // Draw tracking rectangle
-                        int size = haste::HypothesisPatchTracker::kPatchSize;
-                        int half_size = size / 2;
-                        int c = t->color();
+                        const int size = haste::HypothesisPatchTracker::kPatchSize;
+                        const int half_size = size / 2;
+                        const int c = t->color();
                         cv::rectangle(frame,
                                       cv::Point(x - half_size, y - half_size + 1),
                                       cv::Point(x + half_size, y + half_size + 1),
                                       cv::Scalar(c, 255 - c, 255 - int(0.2 * c)), 2);
+
+                        // add text in the rectangle
+//                        double ampl_x = t->getAmplitude().first;
+                        std::ostringstream stream;
+//                        stream << std::fixed << std::setprecision(1) << ampl_x;
+//
+//                        cv::putText(frame, stream.str(), cv::Point(x - half_size + 5, y - half_size + 20),
+//                                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+
+                        // get fps
+                        auto fps = frame_gen_undist.get_fps();
+                        stream.clear();
+                        stream.str("");
+                        stream << std::fixed << std::setprecision(1) << fps;
+
+                        std::string fps_text = "FPS: " + stream.str();
+                        cv::putText(frame, fps_text, cv::Point(frame.rows - 20, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                                    cv::Scalar(255, 255, 255), 2);
                     }
                 }
             }
@@ -210,27 +223,25 @@ int main(int argc, char *argv[]) {
         visualizer.set_frame(frame);
     });
 
+    std::vector<Metavision::EventCD> events_undistorted, events_compensated;
+
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
-        std::vector<Metavision::EventCD> events_undistorted, events_compensated;
-        events_undistorted.reserve(std::distance(begin, end));
-        events_compensated.reserve(std::distance(begin, end));
+        events_undistorted.resize(std::distance(begin, end));
+        events_compensated.resize(std::distance(begin, end));
+
+        std::cout << "ERC:" << (params.camera.erc_module().get_cd_event_rate() / 1000000) << "Mev/s";
 
         for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
             last_event_t = ev->t;
             // Undistort event coordinates
-            auto [x_undist, y_undist] = undistort(ev->x, ev->y);
+            auto undist_event = undistort(*ev);
 
             // Skip out-of-bounds events
-            if (x_undist < 0 || x_undist >= width || y_undist < 0 || y_undist >= height) {
+            if (undist_event.x < 0 || undist_event.x >= width || undist_event.y < 0 || undist_event.y >= height) {
                 continue;
             }
 
-            Metavision::EventCD undist_event(
-                    static_cast<unsigned short>(x_undist),
-                    static_cast<unsigned short>(y_undist),
-                    0, ev->t
-            );
 
             {
                 std::lock_guard<std::mutex> lock(processing_mutex);
@@ -238,32 +249,30 @@ int main(int argc, char *argv[]) {
                     // Feed event to each tracker
                     tracker->feed(undist_event);
                     if (!NUFFT_ESTIMATION_DONE) {
-                        if (auto centroid = tracker->getCentroid(); centroid.has_value()) {
-                            if (nufft_estimator.feed(*centroid)) {
-                                if (nufft_estimator.compute()) {
-                                    nufft_estimator.printResults();
+                        if (auto centroid = tracker->getCentroids(); nufft_estimator.feed(std::move(centroid))) {
+//                                if (nufft_estimator.compute()) {
+                            nufft_estimator.printResults();
 
-                                    // Extract harmonic parameters
-                                    extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
+                            // Extract harmonic parameters
+                            extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
 
-                                    if (Ax.empty()) {
-                                        std::cout << "No harmonics found, skipping tracker initialization."
-                                                  << std::endl;
-                                        continue;
-                                    }
-
-                                    trackers.back()->addFitters(std::make_unique<IEKFSinusoidFitter>(
-                                                                        createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
-                                                                                         params.params->iekf_iterations)),
-                                                                std::make_unique<IEKFSinusoidFitter>(
-                                                                        createIEKFFitter(Ay[0], By[0], omegas[0],
-                                                                                         offsets[1],
-                                                                                         params.params->iekf_iterations)));
-
-                                    NUFFT_ESTIMATION_DONE = true;
-                                    visualizer.unblock();
-                                }
+                            if (Ax.empty()) {
+                                std::cout << "No harmonics found, skipping tracker initialization."
+                                          << std::endl;
+                                continue;
                             }
+
+                            trackers.back()->addFitters(std::make_unique<IEKFSinusoidFitter>(
+                                                                createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
+                                                                                 params.params->iekf_iterations)),
+                                                        std::make_unique<IEKFSinusoidFitter>(
+                                                                createIEKFFitter(Ay[0], By[0], omegas[0],
+                                                                                 offsets[1],
+                                                                                 params.params->iekf_iterations)));
+
+                            NUFFT_ESTIMATION_DONE = true;
+                            visualizer.unblock();
+
                         }
                     }
                 }
@@ -277,6 +286,8 @@ int main(int argc, char *argv[]) {
 
     // Start camera
     params.camera.start();
+
+    start_time = std::chrono::steady_clock::now();
 
     // Main processing loop
     while (params.camera.is_running()) {

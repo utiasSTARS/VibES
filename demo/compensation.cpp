@@ -25,6 +25,8 @@
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
 
+#define FANCY_VISUALIZATION
+
 // Constants
 namespace {
     constexpr double DEFAULT_FPS = 30.0;
@@ -33,6 +35,7 @@ namespace {
     constexpr int ESC_KEY = 27;
     constexpr int POLL_TIMEOUT_MS = 33;
     bool NUFFT_ESTIMATION_DONE = false;
+    constexpr int TRACKER_MARGIN = 40;
 }
 
 // UI processing function similar to original
@@ -80,8 +83,8 @@ IEKFSinusoidFitter createIEKFFitter(double A, double B, double omega, double C, 
     process_noise(2, 2) = 1e-3;
     process_noise(3, 3) = 1e0;
 
-    return IEKFSinusoidFitter(initial_state, initial_covariance, process_noise,
-                              DEFAULT_MEASUREMENT_NOISE, iterations);
+    return {initial_state, initial_covariance, process_noise,
+            DEFAULT_MEASUREMENT_NOISE, iterations};
 }
 
 /**
@@ -188,7 +191,7 @@ int main(int argc, char *argv[]) {
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
         if (tracker) { return; }
-        tracker = std::make_shared<HasteWrapper>(x, y, TRACKER_RATE);
+        tracker = std::make_shared<HasteWrapper>(x, y, TRACKER_RATE, first_event_t);
         std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
 
@@ -197,10 +200,13 @@ int main(int argc, char *argv[]) {
     bool not_init = true;
     bool osd = true; // On-screen display toggle
 
+    double x_pred = 0, y_pred = 0;
+    double tracker_x, tracker_y;
     Metavision::Stage::EventBuffer compensated_events;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         compensated_events.clear();
+//        if (NUFFT_ESTIMATION_DONE) { compensated_events.reserve(std::distance(begin, end)); }
         for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
             if (not_init) {
                 start_time = std::chrono::steady_clock::now();
@@ -217,25 +223,65 @@ int main(int argc, char *argv[]) {
                 continue;
             }
 
-            const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6f;
+            const double current_t_sec = static_cast<double>(ev->t - first_event_t) / 1e6;
 
             // Process with tracker
             if (tracker) {
                 if (NUFFT_ESTIMATION_DONE) {
-                    if (auto value = tracker->getRelEstimate(current_t_sec); value.has_value()) {
-                        std::tie(undist_event.x, undist_event.y) = value.value();
+#ifdef FANCY_VISUALIZATION
+                    // if the event is in the left half of the image skip
+                    if (undist_event.x < width / 2 - 100) {
+                        compensated_events.emplace_back(undist_event);
+                        std::tie(tracker_x, tracker_y) = tracker->getCurrentPosition();
+                        if (undist_event.x < tracker_x - TRACKER_MARGIN ||
+                            undist_event.x > tracker_x + TRACKER_MARGIN ||
+                            undist_event.y < tracker_y - TRACKER_MARGIN ||
+                            undist_event.y > tracker_y + TRACKER_MARGIN) {
+                            compensated_events.emplace_back(undist_event);
+                            continue;
+                        }
+                        tracker->feed(undist_event);
+                        continue;
                     }
-                }
-                tracker->feed(undist_event);
+#endif
+                    if (auto value = tracker->getRelEstimate(current_t_sec); value.has_value()) {
+                        std::tie(x_pred, y_pred) = value.value();
+                        auto x_new = static_cast<unsigned short>(undist_event.x - x_pred);
+                        auto y_new = static_cast<unsigned short>(undist_event.y - y_pred);
 
-                if (!nufft_estimator.done()) {
+                        if (x_new < 0 || x_new >= width ||
+                            y_new < 0 || y_new >= height) {
+                            continue; // Skip out-of-bounds events
+                        }
+                        compensated_events.emplace_back(
+                                x_new, y_new,
+                                0, ev->t
+                        );
+                        continue;
+                    }
+                } else {
+
+                    // feed the tracker only if the event is within the bounds
+                    std::tie(tracker_x, tracker_y) = tracker->getCurrentPosition();
+                    if ((tracker_x != 0 || tracker_y != 0) &&
+                        (undist_event.x < tracker_x - TRACKER_MARGIN || undist_event.x > tracker_x + TRACKER_MARGIN ||
+                         undist_event.y < tracker_y - TRACKER_MARGIN || undist_event.y > tracker_y + TRACKER_MARGIN)) {
+//                    compensated_events.emplace_back(undist_event);
+                        continue;
+                    }
+
+                    tracker->feed(undist_event);
+
                     if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
-                        nufft_estimator.compute();
-                        
                         nufft_estimator.printResults();
                         extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
 
                         if (!Ax.empty()) {
+                            std::cout << "\033[1;34mTracker initialized with parameters:\033[0m" << std::endl;
+                            std::cout << "Ax: " << Ax[0] << ", Ay: " << Ay[0]
+                                      << ", Bx: " << Bx[0] << ", By: " << By[0]
+                                      << ", omega: " << omegas[0] << ", offset_x: " << offsets[0]
+                                      << ", offset_y: " << offsets[1] << std::endl;
                             tracker->addFitters(
                                     std::make_unique<IEKFSinusoidFitter>(
                                             createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
@@ -247,7 +293,6 @@ int main(int argc, char *argv[]) {
                         NUFFT_ESTIMATION_DONE = nufft_estimator.done();
                     }
                 }
-
             }
             compensated_events.emplace_back(undist_event);
         }

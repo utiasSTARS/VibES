@@ -32,10 +32,15 @@ namespace {
     constexpr double TRACKER_RATE = 0.01;
 }
 
+#define STORE
+
 class HasteWrapper {
 
 public:
-    HasteWrapper(int x, int y, double tracker_rate) : initial_x_(x), initial_y_(y) {
+    HasteWrapper(int x, int y, double tracker_rate, Metavision::timestamp init_time = 0,
+                 std::string output_folder = "output") : initial_x_(x),
+                                                         initial_y_(y),
+                                                         init_time_(init_time) {
         counter_++;
         tracker_ = std::make_shared<haste::HasteDifferenceStarTracker>(
                 tracker_rate, static_cast<haste::HypothesisPatchTracker::Scalar>(x),
@@ -45,12 +50,16 @@ public:
             throw std::runtime_error("Tracker initialization failed");
         }
 
+#ifdef STORE
+        file_centroid_ = std::ofstream(output_folder + "/centroids.txt");
+#endif
+
         // Start the tracker thread
         tracker_thread_ = std::thread([this]() {
             while (run_.load()) {
                 event_stack_.consume_all([this](const Metavision::EventCD &event) {
                     // Convert timestamp to seconds relative to first event
-                    float current_t_sec = static_cast<float>(event.t) / 1e6f;
+                    double current_t_sec = static_cast<double>(event.t - init_time_) / 1e6;
 
                     // Feed events to the tracker
                     auto update_type = tracker_->pushEvent(current_t_sec, event.x, event.y);
@@ -62,19 +71,27 @@ public:
                         last_x_ = tracker_->x();
                         last_y_ = tracker_->y();
 
+                        if (last_x_ == 0 && last_y_ == 0) { return; }
+
+#ifdef STORE
+                        file_centroid_ << std::fixed << std::setprecision(4)
+                                       << tracker_->t() << " " << last_x_ << " " << last_y_ << "\n";
+#endif
+
                         centroids_.emplace_back(
                                 tracker_->t(), last_x_, last_y_
                         );
 
                         // Update fitters if available
-                        if (x_fitter || y_fitter) {
+                        if (x_fitter) {
                             x_fitter->update(tracker_->t(), tracker_->x());
                             // Calculate color based on amplitude
                             double amplitude = x_fitter->getAmplitude();
                             color_ = static_cast<int>(std::min(
                                     255.0,
                                     std::max(0.0, amplitude / static_cast<double>(MAX_AMPLITUDE) * 255.0)));
-
+                        }
+                        if (y_fitter) {
                             y_fitter->update(tracker_->t(), tracker_->y());
                         }
                     }
@@ -88,6 +105,9 @@ public:
 
     ~HasteWrapper() {
         stop();
+#ifdef STORE
+        file_centroid_.close();
+#endif
     }
 
     void feed(const Metavision::EventCD &event) {
@@ -142,9 +162,6 @@ public:
     // Get current tracker position (thread-safe)
     std::pair<double, double> getCurrentPosition() {
         std::lock_guard<std::mutex> lock(mtx_);
-        if (!tracker_) {
-            return {0.0, 0.0};
-        }
         return {last_x_, last_y_};
     }
 
@@ -168,11 +185,6 @@ public:
         return {initial_x_, initial_y_};
     }
 
-    // Get raw tracker pointer (use with caution)
-    std::shared_ptr<haste::HypothesisPatchTracker> getTracker() {
-        return tracker_;
-    }
-
     std::vector<Centroid> getCentroids() {
         std::lock_guard<std::mutex> lock(mtx_);
         // copy the centroids vector to return a snapshot
@@ -192,10 +204,12 @@ private:
     boost::lockfree::spsc_queue<Metavision::EventCD, boost::lockfree::capacity<10000>> event_stack_;
     std::atomic<bool> run_{true};
     std::atomic<int> color_{0};
-    std::atomic<int> error_count_{0};
-    std::atomic<bool> state_updated_{false};
     mutable std::mutex mtx_;  // Made mutable for const methods
     std::unique_ptr<IEKFSinusoidFitter> x_fitter, y_fitter;
+
+    Metavision::timestamp init_time_{0};
+
+    std::ofstream file_centroid_;
 
     // Tracking state
     double last_update_time_{0.0};

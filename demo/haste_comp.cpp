@@ -25,10 +25,11 @@
 #include "haste/app/command_parser.hpp"
 #include "haste/tracking.hpp"
 #include "event_frontend/undistort.hpp"
+#include "slice_visualizer.hpp"
 
 // Configuration flags
 #define VISUALIZE
-//#define VISUALIZE_SLICES
+#define VISUALIZE_SLICES
 //#define STORE_RESULTS
 //#define STORE_HDF5
 
@@ -123,22 +124,23 @@ void extractHarmonicParameters(const NUFFTHelixEstimator &estimator,
 }
 
 #ifdef VISUALIZE_SLICES
+
 /**
  * Updates slice visualizers with prediction circles
  */
-void updateSliceVisualizers(HARMEDA::SliceVisualizer& slice_x, HARMEDA::SliceVisualizer& slice_y,
-                            const std::unique_ptr<IEKFSinusoidFitter>& x_fitter,
-                            const std::unique_ptr<IEKFSinusoidFitter>& y_fitter,
+void updateSliceVisualizers(HARMEDA::SliceVisualizer &slice_x, HARMEDA::SliceVisualizer &slice_y,
+                            const std::unique_ptr<IEKFSinusoidFitter> &x_fitter,
+                            const std::unique_ptr<IEKFSinusoidFitter> &y_fitter,
                             double current_time) {
     if (y_fitter) {
-        slice_y.editFrame([&](cv::Mat& frame) {
+        slice_y.editFrame([&](cv::Mat &frame) {
             auto y_pred = y_fitter->predict(current_time);
             cv::circle(frame, cv::Point(slice_x.time_value, y_pred), 1, cv::Scalar(255, 255, 0), -1);
         });
     }
 
     if (x_fitter) {
-        slice_x.editFrame([&](cv::Mat& frame) {
+        slice_x.editFrame([&](cv::Mat &frame) {
             auto x_pred = x_fitter->predict(current_time);
             cv::circle(frame, cv::Point(slice_x.time_value, x_pred), 1, cv::Scalar(255, 255, 0), -1);
         });
@@ -152,16 +154,17 @@ void updateSliceVisualizers(HARMEDA::SliceVisualizer& slice_x, HARMEDA::SliceVis
 void updateTrackerVisualization(HARMEDA::SliceVisualizer &slice_x, HARMEDA::SliceVisualizer &slice_y,
                                 const std::shared_ptr<haste::HypothesisPatchTracker> &tracker) {
 
-    slice_y.editFrame([&](cv::Mat& frame) {
+    slice_y.editFrame([&](cv::Mat &frame) {
         cv::circle(frame, cv::Point(tracker->t() * slice_x.time_scale, int(tracker->y())),
                    1, cv::Scalar(0, 255, 0), -1);
     });
 
-    slice_x.editFrame([&](cv::Mat& frame) {
+    slice_x.editFrame([&](cv::Mat &frame) {
         cv::circle(frame, cv::Point(tracker->t() * slice_y.time_scale, int(tracker->x())),
                    1, cv::Scalar(0, 255, 255), -1);
     });
 }
+
 #endif
 
 
@@ -306,7 +309,9 @@ int main(int argc, char *argv[]) {
     });
 
     bool not_init = true;
+    bool nufft_done = false;
 
+    float x_undistorted, y_undistorted;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         std::vector<Metavision::EventCD> events_undistorted, events_compensated;
@@ -315,19 +320,28 @@ int main(int argc, char *argv[]) {
 
         for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
             last_event_t = ev->t;
-            // Undistort event coordinates
-            auto [x_undist, y_undist] = undistort(ev->x, ev->y);
 
-            // Skip out-of-bounds events
-            if (x_undist < 0 || x_undist >= width || y_undist < 0 || y_undist >= height) {
-                continue;
+            const Metavision::EventCD &event = *ev;
+
+            std::tie(x_undistorted, y_undistorted) = undistort(event.x, event.y);
+//             make sure the undistorted coordinates are within the image bounds
+            if (x_undistorted < 0 || x_undistorted >= width || y_undistorted < 0 || y_undistorted >= height) {
+                continue; // Skip events that are out of bounds
             }
-
             Metavision::EventCD undist_event(
-                    static_cast<unsigned short>(x_undist),
-                    static_cast<unsigned short>(y_undist),
-                    0, ev->t
+                    static_cast<unsigned short>(x_undistorted),
+                    static_cast<unsigned short>(y_undistorted),
+                    event.p,
+                    event.t
             );
+
+            // Undistort event coordinates
+//            auto undist_event = undistort(*ev);
+//
+//            // Skip out-of-bounds events
+//            if (undist_event.x < 0 || undist_event.x >= width || undist_event.y < 0 || undist_event.y >= height) {
+//                continue;
+//            }
 
 #ifdef STORE_RESULTS
             file_event << undist_event.t << " " << undist_event.x << " " << undist_event.y << "\n";
@@ -358,11 +372,10 @@ int main(int argc, char *argv[]) {
                 file_comp << current_t_sec << " " << x_pred << " " << y_pred << "\n";
 #endif
 
-                events_compensated.emplace_back(
-                        static_cast<unsigned short>(x_undist - x_pred),
-                        static_cast<unsigned short>(y_undist - y_pred),
-                        0, ev->t
-                );
+                events_compensated.emplace_back(static_cast<unsigned short>(x_undistorted - x_pred),
+                                                static_cast<unsigned short>(y_undistorted - y_pred),
+                                                0,
+                                                event.t);
             }
 
 #ifdef VISUALIZE_SLICES
@@ -373,33 +386,34 @@ int main(int argc, char *argv[]) {
 #endif
 
             // Update tracker
-            const auto update_type = tracker->pushEvent(current_t_sec, x_undist, y_undist);
+            const auto update_type = tracker->pushEvent(current_t_sec,
+                                                        x_undistorted,
+                                                        y_undistorted);
 
             if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
                 // Process NUFFT estimation
-                if (!nufft_estimator.done() &&
-                    nufft_estimator.feed(Centroid(tracker->t(), tracker->x(), tracker->y()))) {
+                if (!nufft_done && nufft_estimator.feed(Centroid(tracker->t(), tracker->x(), tracker->y()))) {
 
                     std::lock_guard<std::mutex> lock(processing_mutex);
 
-                    if (nufft_estimator.compute()) {
-                        nufft_estimator.printResults();
+//                    if (nufft_estimator.compute()) {
+                    nufft_estimator.printResults();
 
-                        // Extract harmonic parameters
-                        std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
-                        extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
+                    // Extract harmonic parameters
+                    std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
+                    extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
 
-                        if (!Ax.empty()) {
-                            // Create new fitters with estimated parameters
-                            x_fitter = std::make_unique<IEKFSinusoidFitter>(
-                                    createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
-                                                     params.params->iekf_iterations));
+                    if (!Ax.empty()) {
+                        // Create new fitters with estimated parameters
+                        x_fitter = std::make_unique<IEKFSinusoidFitter>(
+                                createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
+                                                 params.params->iekf_iterations));
 
-                            y_fitter = std::make_unique<IEKFSinusoidFitter>(
-                                    createIEKFFitter(Ay[0], By[0], omegas[0], offsets[1],
-                                                     params.params->iekf_iterations));
-                        }
+                        y_fitter = std::make_unique<IEKFSinusoidFitter>(
+                                createIEKFFitter(Ay[0], By[0], omegas[0], offsets[1],
+                                                 params.params->iekf_iterations));
                     }
+                    nufft_done = true;
                 }
 
 #ifdef VISUALIZE_SLICES
@@ -408,8 +422,8 @@ int main(int argc, char *argv[]) {
 
                 // Update fitters with new tracker state
                 if (x_fitter && y_fitter) {
-                    x_fitter->update(tracker->t() + tracker_latency, tracker->x());
-                    y_fitter->update(tracker->t() + tracker_latency, tracker->y());
+                    x_fitter->update(tracker->t(), tracker->x());
+                    y_fitter->update(tracker->t(), tracker->y());
                 }
             }
         }

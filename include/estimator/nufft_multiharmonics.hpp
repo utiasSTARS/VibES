@@ -36,8 +36,8 @@ struct HarmonicEstimate {
 class NUFFTHelixEstimator {
 public:
     // Constructor
-    NUFFTHelixEstimator(double f_min_hz, double f_max_hz, int max_harmonics = 3)
-            : N(500), f_min(Hz2rad(f_min_hz)), f_max(Hz2rad(f_max_hz)),
+    NUFFTHelixEstimator(double f_min_hz, double f_max_hz, int max_harmonics = 3, int num_samples = 500)
+            : N(num_samples), f_min(Hz2rad(f_min_hz)), f_max(Hz2rad(f_max_hz)),
               max_harmonics_(max_harmonics),
               t_data(N), x_data(N), y_data(N),
               n_modes(4 * static_cast<int>(Hz2rad(f_max_hz))), // Increased resolution
@@ -57,136 +57,161 @@ public:
     }
 
     ~NUFFTHelixEstimator() {
-        delete opts.release(); // Clean up finufft_opts
+        // Signal shutdown and wait for thread to complete
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            shutdown_requested_ = true;
+        }
+        cv_.notify_all();  // Wake up any waiting threads
 
-        if (!done_) {
-            std::cerr << "Warning: NUFFTHelixEstimator destroyed without calling compute()." << std::endl;
+        if (compute_thread_.joinable()) {
+            compute_thread_.join();
+        }
+
+        if (!done_.load()) {
+            std::cerr << "Warning: NUFFTHelixEstimator destroyed without completing computation." << std::endl;
         }
     }
 
 
     bool feed(std::vector<Centroid> &&events) {
-        std::ranges::for_each(events, [this](Centroid &event) {
-            if (feed(event)) {
-                return true;
+
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // If computation is already done, return true immediately
+        if (done_.load()) {
+            return true;
+        }
+
+        // If currently computing, return false (not done yet)
+        if (computing_.load()) {
+            return false;
+        }
+
+        for (const auto event: events) {
+            if (!(index_ > 0 && event.t < t_data[index_ - 1])) {
+
+                // Add new data point
+                t_data[index_] = event.t;
+                x_data[index_] = event.x;
+                y_data[index_] = event.y;
+
+                sum_x_ += event.x;
+                sum_y_ += event.y;
+
+                ++index_;
+
+                // Start computation if we have enough samples
+                if (index_ >= N) {
+                    std::cout << "Collected enough samples, starting computation..." << std::endl;
+                    startComputation();
+                    break;
+                }
             }
-        });
+        }
         return false;
     }
 
     // Feed new event data
     bool feed(const Centroid &event) {
-        if (index > 0 && event.t <= t_data[index - 1]) {
-//            std::cerr << "Current event time: " << event.t
-//                      << ", Previous event time: " << t_data[index - 1] << std::endl;
-//            std::cerr << "Warning: Non-increasing time samples detected." << std::endl;
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // If computation is already done, return true immediately
+        if (done_.load()) {
+            return true;
+        }
+
+        // If currently computing, return false (not done yet)
+        if (computing_.load()) {
             return false;
         }
 
-        t_data[index] = event.t;
-        x_data[index] = event.x;
-        y_data[index] = event.y;
-
-        sum_x += event.x;
-        sum_y += event.y;
-
-        ++index;
-        if (index >= N) {
-//            std::cout << "Collected enough samples, starting computation..." << std::endl;
-            return true; // compute();
+        // Check timestamp ordering
+        if (index_ > 0 && event.t <= t_data[index_ - 1]) {
+            return false;
         }
-        return false;
+
+        // Add new data point
+        t_data[index_] = event.t;
+        x_data[index_] = event.x;
+        y_data[index_] = event.y;
+
+        sum_x_ += event.x;
+        sum_y_ += event.y;
+
+        ++index_;
+
+        // Start computation if we have enough samples
+        if (index_ >= N) {
+            std::cout << "Collected enough samples, starting computation..." << std::endl;
+            startComputation();
+        }
+
+        return done_.load();
     }
 
-    // Main computation function
     bool compute() {
-        if (index < N) {
-            std::cerr << "Error: Not enough samples collected." << std::endl;
-            return false;
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (done_.load()) {
+            return true;
         }
 
-        double t_max = *std::max_element(t_data.begin(), t_data.end());
-        double t_min = *std::min_element(t_data.begin(), t_data.end());
-
-        if (std::abs(t_max - t_min) < 1e-10) {
-            std::cerr << "Error: Time range too small." << std::endl;
-            return false;
+        if (index_ < N) {
+            return false; // Not enough samples yet
         }
 
-        const double dt = t_max - t_min;
-        const double scaling = 2 * M_PI / dt;
-
-        // Rescale time points to [-pi, pi]
-        std::vector<double> t_scaled(N);
-        for (int i = 0; i < N; ++i) {
-            t_scaled[i] = scaling * (t_data[i] - t_min) - M_PI;
+        if (!computing_.load()) {
+            startComputation();
         }
 
-        // Compute means
-        mean_x = sum_x / N;
-        mean_y = sum_y / N;
-
-        // Prepare complex data (remove DC component)
-        std::vector<std::complex<double>> x_complex(N), y_complex(N);
-        for (int i = 0; i < N; ++i) {
-            x_complex[i] = x_data[i] - mean_x;
-            y_complex[i] = y_data[i] - mean_y;
-        }
-
-        // Perform NUFFT for all three dimensions
-        const int iflag = 1;
-        const double eps = 1e-9;
-
-        int ier_x = finufft1d1(N, t_scaled.data(), x_complex.data(), iflag, eps, n_modes, F_out_x.data(), opts.get());
-        int ier_y = finufft1d1(N, t_scaled.data(), y_complex.data(), iflag, eps, n_modes, F_out_y.data(), opts.get());
-
-        if (ier_x != 0 || ier_y != 0) {
-            std::cerr << "FINUFFT error - X: " << ier_x << ", Y: " << ier_y << std::endl;
-            return false;
-        }
-
-        // Find dominant harmonics
-        if (!findDominantHarmonics(scaling)) {
-            return false;
-        }
-
-        // Refine estimates using least squares
-//        refineEstimates();
-
-//        reset();
-        done_ = true;
-        return done_;
+        return done_.load();
     }
 
-    // Get the estimated harmonics
-    const std::vector<HarmonicEstimate> &getHarmonics() const {
+    // Wait for computation to complete with timeout
+    bool waitForCompletion(std::chrono::milliseconds timeout = std::chrono::milliseconds(5000)) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return cv_.wait_for(lock, timeout, [this] { return done_.load() || shutdown_requested_; });
+    }
+
+    // Get the estimated harmonics (thread-safe)
+    std::vector<HarmonicEstimate> getHarmonics() const {
+        std::lock_guard<std::mutex> lock(mutex_);
         return harmonics_;
     }
 
     // Get fundamental frequency
     double getFundamentalFreqHz() const {
+        std::lock_guard<std::mutex> lock(mutex_);
         if (harmonics_.empty()) return 0.0;
         return rad2Hz(harmonics_[0].frequency);
     }
 
     double getFundamentalFreqRad() const {
+        std::lock_guard<std::mutex> lock(mutex_);
         if (harmonics_.empty()) return 0.0;
         return harmonics_[0].frequency;
     }
 
     double getWindowEMA() const {
+        std::lock_guard<std::mutex> lock(mutex_);
         return _window_ema;
     }
 
-    bool done() { return done_; }
+    bool done() const {
+        return done_.load();
+    }
 
     // Get offsets
     std::tuple<double, double> getOffsets() const {
-        return std::make_tuple(mean_x, mean_y);
+        std::lock_guard<std::mutex> lock(mutex_);
+        return std::make_tuple(mean_x_, mean_y_);
     }
 
     // Initialize IEKF with estimated harmonics
     Eigen::VectorXd getIEKFInitialState(int num_harmonics_requested) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         if (harmonics_.empty()) {
             throw std::runtime_error("No harmonics estimated yet.");
         }
@@ -224,16 +249,18 @@ public:
         initial_state(state_size - 4) = harmonics_[0].frequency / (actual_harmonics > 0 ? 1.0 : 1.0);
 
         // Set offsets
-        initial_state(state_size - 2) = mean_x;  // Cx
-        initial_state(state_size - 1) = mean_y;  // Cy
+        initial_state(state_size - 2) = mean_x_;  // Cx
+        initial_state(state_size - 1) = mean_y_;  // Cy
 
         return initial_state;
     }
 
     // Print results
     void printResults() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         std::cout << "\033[1;34m=== NUFFT Helix Harmonic Analysis ===" << std::endl;
-        std::cout << "Offsets: X=" << mean_x << ", Y=" << mean_y << std::endl;
+        std::cout << "Offsets: X=" << mean_x_ << ", Y=" << mean_y_ << std::endl;
         std::cout << "Found " << harmonics_.size() << " dominant harmonics:" << std::endl;
 
         for (size_t i = 0; i < harmonics_.size(); ++i) {
@@ -254,7 +281,15 @@ private:
     const int max_harmonics_;
     double _window_ema;
 
-    // Data storage
+    // Thread synchronization - ADDED condition variable
+    mutable std::mutex mutex_;
+    mutable std::condition_variable cv_;
+    std::atomic<bool> computing_{false};
+    std::atomic<bool> done_{false};
+    std::atomic<bool> shutdown_requested_{false};
+    std::thread compute_thread_;
+
+    // Data storage (protected by mutex_)
     std::vector<double> x_data, y_data, t_data;
     std::vector<double> freqs_grid;
 
@@ -262,29 +297,152 @@ private:
     std::vector<std::complex<double>> F_out_x, F_out_y;
     std::unique_ptr<finufft_opts, FinufftOptsDeleter> opts;
 
-    // State variables
-    int index = 0;
-    double sum_x = 0.0, sum_y = 0.0;
-    double mean_x = 0.0, mean_y = 0.0;
+    // State variables (protected by mutex_)
+    int index_ = 0;
+    double sum_x_ = 0.0, sum_y_ = 0.0;
+    double mean_x_ = 0.0, mean_y_ = 0.0;
 
-    bool done_ = false;
-
-    // Results
+    // Results (protected by mutex_)
     std::vector<HarmonicEstimate> harmonics_;
 
     void reset() {
-        index = 0;
-        sum_x = sum_y = 0.0;
-        mean_x = mean_y = 0.0;
+        std::lock_guard<std::mutex> lock(mutex_);
+        index_ = 0;
+        sum_x_ = sum_y_ = 0.0;
+        mean_x_ = mean_y_ = 0.0;
         harmonics_.clear();
+        computing_ = false;
+        done_ = false;
     }
 
-    bool findDominantHarmonics(double scaling) {
+    void startComputation() {
+        // Must be called with mutex_ held
+        if (!computing_.load()) {
+            computing_ = true;
+            compute_thread_ = std::thread(&NUFFTHelixEstimator::compute_thr, this);
+        }
+    }
+
+    void compute_thr() {
+        try {
+            // Create local copies of data to avoid holding mutex during computation
+            std::vector<double> local_x_data, local_y_data, local_t_data;
+            int local_index;
+            double local_sum_x, local_sum_y;
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (shutdown_requested_.load()) {
+                    computing_ = false;
+                    return;
+                }
+
+                if (index_ < N) {
+                    std::cerr << "Error: Not enough samples collected." << std::endl;
+                    computing_ = false;
+                    cv_.notify_all();
+                    return;
+                }
+
+                local_x_data = x_data;
+                local_y_data = y_data;
+                local_t_data = t_data;
+                local_sum_x = sum_x_;
+                local_sum_y = sum_y_;
+            }
+
+            double t_max = *std::max_element(local_t_data.begin(), local_t_data.end());
+            double t_min = *std::min_element(local_t_data.begin(), local_t_data.end());
+
+            if (std::abs(t_max - t_min) < 1e-10) {
+                std::cerr << "Error: Time range too small." << std::endl;
+                std::lock_guard<std::mutex> lock(mutex_);
+                computing_ = false;
+                cv_.notify_all();
+                return;
+            }
+
+            const double dt = t_max - t_min;
+            const double scaling = 2 * M_PI / dt;
+
+            // Rescale time points to [-pi, pi]
+            std::vector<double> t_scaled(N);
+            for (int i = 0; i < N; ++i) {
+                t_scaled[i] = scaling * (local_t_data[i] - t_min) - M_PI;
+            }
+
+            // Compute means
+            double local_mean_x = local_sum_x / N;
+            double local_mean_y = local_sum_y / N;
+
+            // Prepare complex data (remove DC component)
+            std::vector<std::complex<double>> x_complex(N), y_complex(N);
+            for (int i = 0; i < N; ++i) {
+                x_complex[i] = local_x_data[i] - local_mean_x;
+                y_complex[i] = local_y_data[i] - local_mean_y;
+            }
+
+            // Create local NUFFT output vectors
+            std::vector<std::complex<double>> local_F_out_x(n_modes), local_F_out_y(n_modes);
+
+            // Perform NUFFT for all dimensions
+            const int iflag = 1;
+            const double eps = 1e-9;
+
+            int ier_x = finufft1d1(N, t_scaled.data(), x_complex.data(), iflag, eps, n_modes, local_F_out_x.data(),
+                                   opts.get());
+            int ier_y = finufft1d1(N, t_scaled.data(), y_complex.data(), iflag, eps, n_modes, local_F_out_y.data(),
+                                   opts.get());
+
+            if (ier_x != 0 || ier_y != 0) {
+                std::cerr << "FINUFFT error - X: " << ier_x << ", Y: " << ier_y << std::endl;
+                std::lock_guard<std::mutex> lock(mutex_);
+                computing_ = false;
+                cv_.notify_all();
+                return;
+            }
+
+            // Find dominant harmonics
+            std::vector<HarmonicEstimate> local_harmonics;
+            if (!findDominantHarmonics(scaling, local_F_out_x, local_F_out_y, local_harmonics)) {
+                std::lock_guard<std::mutex> lock(mutex_);
+                computing_ = false;
+                cv_.notify_all();
+                return;
+            }
+
+            // FIXED: Update shared state with results and proper notification
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (!shutdown_requested_.load()) {
+                    refineEstimates(local_t_data, local_x_data, local_y_data,
+                                   local_mean_x, local_mean_y, local_harmonics);
+                    mean_x_ = local_mean_x;
+                    mean_y_ = local_mean_y;
+                    harmonics_ = std::move(local_harmonics);
+                    done_ = true;  // Set done BEFORE computing = false
+                }
+                computing_ = false;
+                cv_.notify_all();  // Notify waiting threads
+            }
+
+        } catch (const std::exception &e) {
+            std::cerr << "Exception in compute thread: " << e.what() << std::endl;
+            std::lock_guard<std::mutex> lock(mutex_);
+            computing_ = false;
+            cv_.notify_all();
+        }
+    }
+
+    bool findDominantHarmonics(double scaling,
+                               const std::vector<std::complex<double>> &F_out_x,
+                               const std::vector<std::complex<double>> &F_out_y,
+                               std::vector<HarmonicEstimate> &harmonics) {
         // Find peaks in the combined spectrum
         std::vector<std::pair<int, double>> peak_candidates;
 
         for (int k = 1; k < n_modes - 1; ++k) {
-            double freq = freqs_grid[k] * scaling; // * scaling;
+            double freq = freqs_grid[k] * scaling;
             if (freq < f_min || freq > f_max) continue;
 
             // Combined magnitude across all dimensions
@@ -312,7 +470,7 @@ private:
 
         // Extract top harmonics
         int num_harmonics = std::min(max_harmonics_, static_cast<int>(peak_candidates.size()));
-        harmonics_.reserve(num_harmonics);
+        harmonics.reserve(num_harmonics);
 
         for (int i = 0; i < num_harmonics; ++i) {
             int k = peak_candidates[i].first;
@@ -329,29 +487,33 @@ private:
             harmonic.phase_x = std::arg(F_out_x[k]);
             harmonic.phase_y = std::arg(F_out_y[k]);
 
-            harmonics_.push_back(harmonic);
+            harmonics.push_back(harmonic);
         }
 
         // Sort harmonics by frequency
-        std::sort(harmonics_.begin(), harmonics_.end(),
+        std::sort(harmonics.begin(), harmonics.end(),
                   [](const auto &a, const auto &b) { return a.magnitude > b.magnitude; });
 
-        return !harmonics_.empty();
+        return !harmonics.empty();
     }
 
-    void refineEstimates() {
+    void refineEstimates(const std::vector<double> &t_data,
+                         const std::vector<double> &x_data,
+                         const std::vector<double> &y_data,
+                         double mean_x, double mean_y,
+                         std::vector<HarmonicEstimate> &harmonics) {
         // Refine each harmonic estimate using least squares
-        for (auto &harmonic: harmonics_) {
+        for (auto &harmonic: harmonics) {
             double omega = harmonic.frequency;
 
             // Refine X dimension
-            auto [A_x, B_x, offset_x] = leastSquaresHarmonic(omega, x_data, mean_x);
+            auto [A_x, B_x, offset_x] = leastSquaresHarmonic(omega, x_data, mean_x, t_data);
             harmonic.amplitude_x = std::sqrt(A_x * A_x + B_x * B_x);
             harmonic.phase_x = std::atan2(B_x, A_x);
             harmonic.offset_x = offset_x;
 
             // Refine Y dimension
-            auto [A_y, B_y, offset_y] = leastSquaresHarmonic(omega, y_data, mean_y);
+            auto [A_y, B_y, offset_y] = leastSquaresHarmonic(omega, y_data, mean_y, t_data);
             harmonic.amplitude_y = std::sqrt(A_y * A_y + B_y * B_y);
             harmonic.phase_y = std::atan2(B_y, A_y);
             harmonic.offset_y = offset_y;
@@ -360,7 +522,8 @@ private:
 
     std::tuple<double, double, double> leastSquaresHarmonic(double omega,
                                                             const std::vector<double> &data,
-                                                            double mean_val) {
+                                                            double mean_val,
+                                                            const std::vector<double> &t_data) {
         // Fit: y = A*sin(ωt) + B*cos(ωt) + C
         double S11 = 0.0, S12 = 0.0, S13 = 0.0;  // sin-sin, sin-cos, sin-1
         double S22 = 0.0, S23 = 0.0;              // cos-cos, cos-1
