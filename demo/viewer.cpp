@@ -1,28 +1,14 @@
 #include <iostream>
 #include <vector>
-#include <map>
 #include <opencv2/imgproc.hpp>
-#include <opencv2/highgui.hpp>
 
 #include <metavision/sdk/driver/camera.h>
 #include <metavision/sdk/base/events/event_cd.h>
-#include <csignal>
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/ui/utils/window.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
 
-#include <metavision/sdk/cv/utils/camera_geometry.h>
-#include <metavision/sdk/cv/utils/camera_geometry_factory.h>
-
-
-#include "utils.hpp"
 #include "sim/ini_sim.hpp"
-#include "visualizer/open3d_visualizer.hpp"
-#include "visualizer/ev2image.hpp"
-
-#include "logger/loading.hpp"
-#include "harmeda.h"
-#include "filter/freq_filter.hpp"
 #include "event_frontend/undistort.hpp"
 
 // Main example function

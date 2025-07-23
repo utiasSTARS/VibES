@@ -74,6 +74,46 @@ public:
     }
 
 
+    bool feed(std::queue<Centroid> &&events) {
+
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // If computation is already done, return true immediately
+        if (done_.load()) {
+            return true;
+        }
+
+        // If currently computing, return false (not done yet)
+        if (computing_.load()) {
+            return false;
+        }
+
+        while (!events.empty()) {
+            auto event = events.front();
+            events.pop();
+            if (!(index_ > 0 && event.t < t_data[index_ - 1])) {
+
+                // Add new data point
+                t_data[index_] = event.t;
+                x_data[index_] = event.x;
+                y_data[index_] = event.y;
+
+                sum_x_ += event.x;
+                sum_y_ += event.y;
+
+                ++index_;
+
+                // Start computation if we have enough samples
+                if (index_ >= N) {
+                    std::cout << "Collected enough samples, starting computation..." << std::endl;
+                    startComputation();
+                    break;
+                }
+            }
+        }
+        return false;
+    }
+
     bool feed(std::vector<Centroid> &&events) {
 
         std::lock_guard<std::mutex> lock(mutex_);

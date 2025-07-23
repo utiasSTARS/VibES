@@ -1,5 +1,6 @@
 //
 // Created by viciopoli on 13/07/25.
+// Optimized version with performance improvements
 //
 
 #ifndef PROJECT_HASTE_WRAPPER_H
@@ -14,10 +15,14 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 #include <stdexcept>
+#include <sstream>
+#include <queue>
 #include <boost/lockfree/spsc_queue.hpp>
 #include <algorithm>
 #include <optional>
+#include <iomanip>
 
 #include "haste/app/command_parser.hpp"
 #include "haste/tracking.hpp"
@@ -31,219 +36,251 @@ namespace {
     constexpr int MAX_HARMONICS = 1;
     constexpr double TRACKER_RATE = 0.01;
     constexpr int TRACKER_MARGIN = haste::HypothesisPatchTracker::kPatchSize / 2 + 15;
+    constexpr double TRACKER_MARGIN_SQ = TRACKER_MARGIN * TRACKER_MARGIN;
+    constexpr size_t MAX_CENTROIDS_QUEUE = 1000;
+    constexpr int MAX_AMPLITUDE = 5;
 }
 
-#define STORE
+//#define STORE
 
-template<typename T>
-class HasteWrapper {
+// Base class for template-independent code
+class HasteWrapperBase {
+protected:
+    // Hot data - frequently accessed together for cache efficiency
+    std::atomic<double> last_x_{0.0};
+    std::atomic<double> last_y_{0.0};
+    std::atomic<bool> run_{true};
+    std::atomic<int> color_{0};
 
-public:
-    HasteWrapper(int x, int y, double tracker_rate, Metavision::timestamp init_time = 0,
-                 std::string output_folder = "output") : initial_x_(x),
-                                                         initial_y_(y),
-                                                         init_time_(init_time) {
-        if constexpr (!(std::is_same_v<T, Metavision::EventCD> || std::is_same_v<T, Centroid>)) {
-            throw std::invalid_argument("HasteWrapper can only be used with Metavision::EventCD or Centroid types.");
-        }
+    // Threading synchronization
+    std::thread tracker_thread_;
+    std::condition_variable cv_;
+    std::mutex cv_mutex_;
 
-        tracker_ = std::make_shared<haste::HasteDifferenceStarTracker>(
-                tracker_rate, static_cast<haste::HypothesisPatchTracker::Scalar>(x),
-                static_cast<haste::HypothesisPatchTracker::Scalar>(y), 0.0f);
+    // Tracker and fitters
+    TrackerPtr tracker_;
+    std::unique_ptr<IEKFSinusoidFitter> x_fitter_;
+    std::unique_ptr<IEKFSinusoidFitter> y_fitter_;
 
-        last_x_ = tracker_->x();
-        last_y_ = tracker_->y();
+    // Centroid queue with mutex (accessed less frequently)
+    mutable std::mutex centroids_mutex_;
+    std::queue<Centroid> centroids_queue_;
+
+    // Cold data - less frequently accessed
+    const int initial_x_;
+    const int initial_y_;
+    Metavision::timestamp init_time_;
 
 #ifdef STORE
-        file_centroid_ = std::ofstream(output_folder + "/centroids.txt");
+    std::ofstream file_centroid_;
 #endif
-        startEvents();
+
+public:
+    HasteWrapperBase(int x, int y, double tracker_rate, Metavision::timestamp init_time,
+                     const std::string &output_folder)
+            : initial_x_(x), initial_y_(y), init_time_(init_time) {
+
+        tracker_ = std::make_shared<haste::HasteDifferenceStarTracker>(
+                tracker_rate,
+                static_cast<haste::HypothesisPatchTracker::Scalar>(x),
+                static_cast<haste::HypothesisPatchTracker::Scalar>(y),
+                0.0f);
+
+        last_x_.store(tracker_->x(), std::memory_order_relaxed);
+        last_y_.store(tracker_->y(), std::memory_order_relaxed);
+
+#ifdef STORE
+        file_centroid_.open(output_folder + "/centroids.txt");
+#endif
     }
 
-    ~HasteWrapper() {
+    virtual ~HasteWrapperBase() {
         stop();
 #ifdef STORE
         file_centroid_.close();
 #endif
     }
 
-    bool feed(const T &event) {
-//        std::lock_guard<std::mutex> lock(mtx_);
-//        event_stack_.push(event);
-        if (inTracker(event)) {
-            event_stack_.push(event);
-            return true;
-        }
-        return false;
-    }
-
-    bool inTracker(const T &event) {
-        std::lock_guard<std::mutex> lock(mtx_);
-        if (last_x_ == 0 && last_y_ == 0)
-            return false;
-
-        return event.x >= last_x_ - TRACKER_MARGIN &&
-               event.x <= last_x_ + TRACKER_MARGIN &&
-               event.y >= last_y_ - TRACKER_MARGIN &&
-               event.y <= last_y_ + TRACKER_MARGIN;
-    }
-
-
     void stop() {
-        run_.store(false);
+        run_.store(false, std::memory_order_release);
+        cv_.notify_one();
         if (tracker_thread_.joinable()) {
             tracker_thread_.join();
         }
     }
 
     std::optional<std::pair<double, double>> getEstimate(double t) {
-        std::lock_guard<std::mutex> lock(mtx_);
-        if (!x_fitter || !y_fitter) {
-            return std::nullopt;  // No fitters available
+        // Only lock when both fitters exist
+        if (!x_fitter_ || !y_fitter_) {
+            return std::nullopt;
         }
-        return std::make_pair(x_fitter->predict(t), y_fitter->predict(t));
+
+        std::lock_guard<std::mutex> lock(centroids_mutex_);
+        return std::make_pair(x_fitter_->predict(t), y_fitter_->predict(t));
     }
 
     std::optional<std::pair<double, double>> getRelEstimate(double t) {
-        std::lock_guard<std::mutex> lock(mtx_);
-        if (!x_fitter || !y_fitter) {
-            return std::nullopt;  // No fitters available
+        if (!x_fitter_ || !y_fitter_) {
+            return std::nullopt;
         }
-        return std::make_pair(x_fitter->predict_rel(t), y_fitter->predict_rel(t));
+
+        std::lock_guard<std::mutex> lock(centroids_mutex_);
+        return std::make_pair(x_fitter_->predict_rel(t), y_fitter_->predict_rel(t));
     }
 
     int color() const {
-        return color_.load();
+        return color_.load(std::memory_order_relaxed);
     }
 
     void addFitters(std::unique_ptr<IEKFSinusoidFitter> x_fitter_ptr,
                     std::unique_ptr<IEKFSinusoidFitter> y_fitter_ptr) {
-        std::lock_guard<std::mutex> lock(mtx_);
-        x_fitter = std::move(x_fitter_ptr);
-        y_fitter = std::move(y_fitter_ptr);
+        std::lock_guard<std::mutex> lock(centroids_mutex_);
+        x_fitter_ = std::move(x_fitter_ptr);
+        y_fitter_ = std::move(y_fitter_ptr);
     }
 
-
-    // Check if tracker is running
     bool isRunning() const {
-        return run_.load();
+        return run_.load(std::memory_order_acquire);
     }
 
-    // Get current tracker position (thread-safe)
     std::pair<double, double> getCurrentPosition() {
-        std::lock_guard<std::mutex> lock(mtx_);
-        return {last_x_, last_y_};
+        return {last_x_.load(std::memory_order_relaxed),
+                last_y_.load(std::memory_order_relaxed)};
     }
 
     std::optional<std::pair<double, double>> getShift() {
-        std::lock_guard<std::mutex> lock(mtx_);
-        if (x_fitter && y_fitter) {
-            std::pair<double, double> pair(x_fitter->getShift(), y_fitter->getShift());
-            return pair;
+        std::lock_guard<std::mutex> lock(centroids_mutex_);
+        if (x_fitter_ && y_fitter_) {
+            return std::make_pair(x_fitter_->getShift(), y_fitter_->getShift());
         }
-        return std::nullopt;  // No shift available
+        return std::nullopt;
     }
 
-    // Get initial position
     std::pair<int, int> getInitialPosition() const {
         return {initial_x_, initial_y_};
     }
 
-    std::vector<Centroid> getCentroids() {
-        std::lock_guard<std::mutex> lock(mtx_);
-        // copy the centroids vector to return a snapshot
-        if (centroids_.empty()) {
-            return {};  // Return empty vector if no centroids
+    std::queue<Centroid> getCentroids() {
+        std::lock_guard<std::mutex> lock(centroids_mutex_);
+        std::queue<Centroid> result;
+        result.swap(centroids_queue_);  // Efficient swap instead of copy
+        return result;
+    }
+
+protected:
+    void updateTrackingState(double t, double x, double y) {
+        // Update atomic positions
+        last_x_.store(x, std::memory_order_relaxed);
+        last_y_.store(y, std::memory_order_relaxed);
+
+        if (x == 0 && y == 0) return;
+
+#ifdef STORE
+        file_centroid_ << std::fixed << std::setprecision(6)
+                       << t << " " << x << " " << y << "\n";
+        file_centroid_.flush();
+#endif
+
+        // Add to centroid queue with size limit
+        {
+            std::lock_guard<std::mutex> lock(centroids_mutex_);
+            centroids_queue_.emplace(t, x, y);
+
+            // Maintain queue size limit
+            while (centroids_queue_.size() > MAX_CENTROIDS_QUEUE) {
+                centroids_queue_.pop();
+            }
+
+            // Update fitters
+            if (x_fitter_) {
+                x_fitter_->update(t, x);
+                double amplitude = x_fitter_->getAmplitude();
+                color_.store(static_cast<int>(std::min(255.0,
+                                                       std::max(0.0, amplitude / static_cast<double>(MAX_AMPLITUDE) *
+                                                                     255.0))),
+                             std::memory_order_relaxed);
+            }
+            if (y_fitter_) {
+                y_fitter_->update(t, y);
+            }
         }
-        // Return a copy of the centroids
-        std::vector<Centroid> centroids_copy = centroids_;
-        // Clear the centroids vector to avoid memory leaks
-        centroids_.clear();
-        return centroids_copy;
     }
 
 private:
-    TrackerPtr tracker_;
-    std::thread tracker_thread_;
+
+};
+
+template<typename T>
+class HasteWrapper : public HasteWrapperBase {
+private:
     boost::lockfree::spsc_queue<T, boost::lockfree::capacity<1000>> event_stack_;
-    std::atomic<bool> run_{true};
-    std::atomic<int> color_{0};
-    mutable std::mutex mtx_;  // Made mutable for const methods
-    std::unique_ptr<IEKFSinusoidFitter> x_fitter, y_fitter;
 
-    Metavision::timestamp init_time_{0};
+public:
+    HasteWrapper(int x, int y, double tracker_rate, Metavision::timestamp init_time = 0,
+                 std::string output_folder = "output")
+            : HasteWrapperBase(x, y, tracker_rate, init_time, output_folder) {
 
-    std::ofstream file_centroid_;
+        if constexpr (!(std::is_same_v<T, Metavision::EventCD> || std::is_same_v<T, Centroid>)) {
+            throw std::invalid_argument("HasteWrapper can only be used with Metavision::EventCD or Centroid types.");
+        }
 
-    // Tracking state
-    double last_x_{0.0};
-    double last_y_{0.0};
+        startEvents();
+    }
 
-    // Initial position
-    const int initial_x_;
-    const int initial_y_;
+    bool feed(const T &event) {
+        if (inTracker(event)) {
+            return event_stack_.push(event);
+        }
+        return false;
+    }
 
-    std::vector<Centroid> centroids_;
+    bool inTracker(const T &event) {
+        double x = last_x_.load(std::memory_order_relaxed);
+        double y = last_y_.load(std::memory_order_relaxed);
 
-    static constexpr int MAX_AMPLITUDE = 5;  // Made const and static
+        if (x == 0 && y == 0) {
+            return false;
+        }
 
+        // Use circular distance check for better performance
+        double dx = event.x - x;
+        double dy = event.y - y;
+        return (dx * dx + dy * dy) <= TRACKER_MARGIN_SQ;
+    }
 
-
+private:
     void startEvents() {
-        // Start the tracker thread
         tracker_thread_ = std::thread([this]() {
-            while (run_.load()) {
-                event_stack_.consume_all([this](const T &event) {
-                    // Convert timestamp to seconds relative to first event
-                    double current_t_sec = 0;
+            while (run_.load(std::memory_order_acquire)) {
+                bool processed_events = false;
+
+                event_stack_.consume_all([&](const T &event) {
+                    processed_events = true;
+
+                    // Convert timestamp to seconds
+                    double current_t_sec;
                     if constexpr (std::is_same_v<T, Centroid>) {
                         current_t_sec = event.t;
                     } else {
                         current_t_sec = static_cast<double>(event.t - init_time_) / 1e6;
                     }
+
                     // Feed events to the tracker
                     auto update_type = tracker_->pushEvent(current_t_sec, event.x, event.y);
                     if (update_type == haste::HypothesisPatchTracker::EventUpdate::kStateEvent) {
-                        std::lock_guard<std::mutex> lock(mtx_);
-
-                        // Update tracking state
-                        last_x_ = tracker_->x();
-                        last_y_ = tracker_->y();
-
-                        if (last_x_ == 0 && last_y_ == 0) { return; }
-
-#ifdef STORE
-                        file_centroid_ << std::fixed << std::setprecision(4)
-                                       << tracker_->t() << " " << last_x_ << " " << last_y_ << "\n";
-#endif
-
-                        centroids_.emplace_back(
-                                tracker_->t(), last_x_, last_y_
-                        );
-
-                        // Update fitters if available
-                        if (x_fitter) {
-                            x_fitter->update(tracker_->t(), tracker_->x());
-                            // Calculate color based on amplitude
-                            double amplitude = x_fitter->getAmplitude();
-                            color_ = static_cast<int>(std::min(
-                                    255.0,
-                                    std::max(0.0, amplitude / static_cast<double>(MAX_AMPLITUDE) * 255.0)));
-                        }
-                        if (y_fitter) {
-                            y_fitter->update(tracker_->t(), tracker_->y());
-                        }
+                        updateTrackingState(tracker_->t(), tracker_->x(), tracker_->y());
                     }
                 });
 
-                // Small sleep to prevent 100% CPU usage
-                std::this_thread::sleep_for(std::chrono::microseconds(1));
+                // If no events were processed, wait efficiently
+                if (!processed_events) {
+                    std::unique_lock<std::mutex> lock(cv_mutex_);
+                    cv_.wait_for(lock, std::chrono::microseconds(100),
+                                 [this] { return !run_.load(std::memory_order_acquire) || !event_stack_.empty(); });
+                }
             }
         });
     }
-
-
 };
-
 
 #endif //PROJECT_HASTE_WRAPPER_H

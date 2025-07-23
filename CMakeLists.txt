@@ -112,3 +112,6 @@ target_link_libraries(multi_tracker PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS
 
 add_executable(undistort_and_store demo/undistort_and_store.cpp)
 target_link_libraries(undistort_and_store PRIVATE MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options)
+
+add_executable(recorder demo/recorder.cpp)
+target_link_libraries(recorder PRIVATE MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options)

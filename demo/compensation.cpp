@@ -271,13 +271,6 @@ int main(int argc, char *argv[]) {
                         continue;
                     }
 
-//                    auto [tracker_x, tracker_y] = tracker->getCurrentPosition();
-//                    if (!(tracker_x == 0 && tracker_y == 0) &&
-//                        (undist_event.x < tracker_x - TRACKER_MARGIN || undist_event.x > tracker_x + TRACKER_MARGIN ||
-//                         undist_event.y < tracker_y - TRACKER_MARGIN || undist_event.y > tracker_y + TRACKER_MARGIN)) {
-//                        continue;
-//                    }
-
                     if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
                         extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
