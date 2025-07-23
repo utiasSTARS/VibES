@@ -9,9 +9,9 @@
 #include <metavision/sdk/base/events/event_cd.h>
 
 struct Centroid {
-    double t;
-    double x;
-    double y;
+    float t;
+    unsigned short x;
+    unsigned short y;
 };
 
 

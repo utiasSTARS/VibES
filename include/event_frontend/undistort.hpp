@@ -74,11 +74,23 @@ public:
     }
 
     // override operator() to get the undistorted coordinates
-    std::pair<double, double> operator()(int x, int y) const {
+    std::pair<unsigned short, unsigned short> operator()(int x, int y) const {
         if (!_is_calibrated) { return {static_cast<double>(x), static_cast<double>(y)}; }
 
         const auto idx = y * _width + x;
         return {_undistort_x[idx], _undistort_y[idx]};
+    }
+
+    void operator()(unsigned short x, unsigned short y, unsigned short &new_x, unsigned short &new_y) {
+        if (!_is_calibrated) {
+            new_x = x;
+            new_y = y;
+            return;
+        }
+
+        const auto idx = y * _width + x;
+        new_x = _undistort_x[idx];
+        new_y = _undistort_y[idx];
     }
 
     // override operator() to get the undistorted coordinates

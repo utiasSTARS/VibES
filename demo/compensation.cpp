@@ -24,6 +24,7 @@
 #include "estimator/iekf_sinusoid_fitter.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
+#include "profiler.hpp"
 
 #define FANCY_VISUALIZATION
 
@@ -175,7 +176,7 @@ int main(int argc, char *argv[]) {
 
     // Initialize fitters and estimator
     NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
-    std::shared_ptr<HasteWrapper<Centroid>> tracker;
+    std::shared_ptr<HasteWrapper<Metavision::EventCD>> tracker;
 
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
@@ -197,75 +198,64 @@ int main(int argc, char *argv[]) {
 #endif
             return;
         }
-        tracker = std::make_shared<HasteWrapper<Centroid>>(x, y, TRACKER_RATE);
+        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
         std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
 
     cv::setMouseCallback(window_name, receiveMouseEvent, &mouse_callback);
 
-    bool not_init = true;
-    bool osd = true; // On-screen display toggle
+    bool osd = false; // On-screen display toggle
 
     double x_pred = 0, y_pred = 0;
 
     Metavision::Stage::EventBuffer compensated_events;
-    float x_undistorted, y_undistorted;
+    unsigned short x_undistorted, y_undistorted;
 
+    std::once_flag init_flag;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
-        compensated_events.clear();
-        if (NUFFT_ESTIMATION_DONE) { compensated_events.reserve(std::distance(begin, end)); }
-        for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
-            if (not_init) {
-                start_time = std::chrono::steady_clock::now();
-                first_event_t = ev->t;
-                not_init = false;
-                continue;
-            }
+        std::call_once(init_flag, [&]() {
+            start_time = std::chrono::steady_clock::now();
+            first_event_t = begin->t;
+        });
 
+        compensated_events.clear();
+        compensated_events.reserve(std::distance(begin, end));
+        for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
             last_event_t = ev->t;
 
-            std::tie(x_undistorted, y_undistorted) = undistort(ev->x, ev->y);
+            undistort(ev->x, ev->y, x_undistorted, y_undistorted);
 //             make sure the undistorted coordinates are within the image bounds
             if (x_undistorted < 0 || x_undistorted >= width || y_undistorted < 0 || y_undistorted >= height) {
                 continue; // Skip events that are out of bounds
             }
-            Metavision::EventCD undist_event(
-                    static_cast<unsigned short>(x_undistorted),
-                    static_cast<unsigned short>(y_undistorted),
-                    ev->p,
-                    ev->t
-            );
+            auto &event_to_build = compensated_events.emplace_back();
+            event_to_build.x = x_undistorted;
+            event_to_build.y = y_undistorted;
+            event_to_build.t = ev->t;
+            event_to_build.p = ev->p;
 
             const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6f;
 
             // Process with tracker
             if (tracker) {
-                const bool in_tracker = tracker->feed({current_t_sec, x_undistorted, y_undistorted});
-                if (NUFFT_ESTIMATION_DONE) {
-
+                const bool in_tracker = tracker->feed(event_to_build);
+                if (NUFFT_ESTIMATION_DONE) [[likely]] {
 #ifdef FANCY_VISUALIZATION
                     // if the event is in the left half of the image skip
-                    if (undist_event.x < visualization_cut_off) {
-                        compensated_events.emplace_back(undist_event);
+                    if (event_to_build.x < visualization_cut_off) {
+//                        compensated_events.emplace_back(undist_event);
+//                        event_to_build = undist_event;
                         continue;
                     }
 #endif
-                    if (auto value = tracker->getRelEstimate(current_t_sec); value.has_value()) {
-                        std::tie(x_pred, y_pred) = value.value();
-                        auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
-                        auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
 
-                        if (x_new < 0 || x_new >= width ||
-                            y_new < 0 || y_new >= height) {
-                            continue; // Skip out-of-bounds events
-                        }
-                        compensated_events.emplace_back(
-                                x_new, y_new,
-                                0, ev->t
-                        );
+                    if (tracker->getRelEstimate(current_t_sec, x_pred, y_pred)) {
+                        event_to_build.x = static_cast<unsigned short>(x_undistorted - x_pred);
+                        event_to_build.y = static_cast<unsigned short>(y_undistorted - y_pred);
                         continue;
                     }
+
                 } else {
                     if (!in_tracker) {
                         continue;
@@ -293,7 +283,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
-            compensated_events.emplace_back(undist_event);
+//            compensated_events.emplace_back(undist_event);
         }
         // Feed events to frame generator and rate estimator
         const auto *begin_comp = compensated_events.data();

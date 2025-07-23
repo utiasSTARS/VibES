@@ -128,6 +128,17 @@ public:
         return std::make_pair(x_fitter_->predict_rel(t), y_fitter_->predict_rel(t));
     }
 
+    bool getRelEstimate(float t, double &x, double &y) {
+        if (!x_fitter_ || !y_fitter_) {
+            return false;
+        }
+
+        std::lock_guard<std::mutex> lock(centroids_mutex_);
+        x = x_fitter_->predict_rel(t);
+        y = y_fitter_->predict_rel(t);
+        return true;
+    }
+
     int color() const {
         return color_.load(std::memory_order_relaxed);
     }
