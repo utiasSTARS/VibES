@@ -26,7 +26,8 @@
 #include "haste_wrapper.hpp"
 #include "profiler.hpp"
 
-#define FANCY_VISUALIZATION
+//#define FANCY_VISUALIZATION
+//#define STORE
 
 // Constants
 namespace {
@@ -205,6 +206,7 @@ int main(int argc, char *argv[]) {
     cv::setMouseCallback(window_name, receiveMouseEvent, &mouse_callback);
 
     bool osd = false; // On-screen display toggle
+    bool in_tracker = true, tracker_enable = true;
 
     double x_pred = 0, y_pred = 0;
 
@@ -239,20 +241,28 @@ int main(int argc, char *argv[]) {
 
             // Process with tracker
             if (tracker) {
-                const bool in_tracker = tracker->feed(event_to_build);
+                if (tracker_enable) {
+                    in_tracker = tracker->feed(event_to_build);
+                }
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
 #ifdef FANCY_VISUALIZATION
                     // if the event is in the left half of the image skip
                     if (event_to_build.x < visualization_cut_off) {
-//                        compensated_events.emplace_back(undist_event);
-//                        event_to_build = undist_event;
                         continue;
                     }
 #endif
 
-                    if (tracker->getRelEstimate(current_t_sec, x_pred, y_pred)) {
-                        event_to_build.x = static_cast<unsigned short>(x_undistorted - x_pred);
-                        event_to_build.y = static_cast<unsigned short>(y_undistorted - y_pred);
+                    if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
+                        auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
+                        if (x_new < 0 || x_new >= width) {
+                            continue; // Skip if out of bounds
+                        }
+                        auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
+                        if (y_new < 0 || y_new >= height) {
+                            continue; // Skip if out of bounds
+                        }
+                        event_to_build.x = x_new;
+                        event_to_build.y = y_new;
                         continue;
                     }
 
@@ -283,7 +293,6 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
-//            compensated_events.emplace_back(undist_event);
         }
         // Feed events to frame generator and rate estimator
         const auto *begin_comp = compensated_events.data();
@@ -349,6 +358,11 @@ int main(int argc, char *argv[]) {
                 tracker.reset();
                 NUFFT_ESTIMATION_DONE = false;
                 std::cout << "Reset tracker" << std::endl;
+            }
+            case 't': {
+                std::lock_guard<std::mutex> lock(processing_mutex);
+                tracker_enable = !tracker_enable;
+                std::cout << "Tracker " << (tracker_enable ? "enabled" : "disabled") << std::endl;
             }
                 break;
             case 'h':

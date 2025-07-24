@@ -34,7 +34,7 @@ namespace {
     constexpr double MIN_FREQUENCY = 5.0;   // Hz
     constexpr double MAX_FREQUENCY = 80.0;  // Hz
     constexpr int MAX_HARMONICS = 1;
-    constexpr double TRACKER_RATE = 0.01;
+    constexpr double TRACKER_RATE = 0.001;
     constexpr int TRACKER_MARGIN = haste::HypothesisPatchTracker::kPatchSize / 2 + 15;
     constexpr double TRACKER_MARGIN_SQ = TRACKER_MARGIN * TRACKER_MARGIN;
     constexpr size_t MAX_CENTROIDS_QUEUE = 1000;
@@ -139,6 +139,35 @@ public:
         return true;
     }
 
+    bool getRelEstimate(Metavision::timestamp t_query, double t, double &x, double &y) {
+        if (!x_fitter_ || !y_fitter_) {
+            return false;
+        }
+
+        static Metavision::timestamp last_t_query = std::numeric_limits<Metavision::timestamp>::max();
+        static double last_t = std::numeric_limits<double>::quiet_NaN();
+        static double last_x = 0.0;
+        static double last_y = 0.0;
+
+        if (last_t_query == t_query && last_t == t) {
+            x = last_x;
+            y = last_y;
+            return true;
+        }
+
+        std::lock_guard<std::mutex> lock(centroids_mutex_);
+        x = x_fitter_->predict_rel(t);
+        y = y_fitter_->predict_rel(t);
+
+        last_t_query = t_query;
+        last_t = t;
+        last_x = x;
+        last_y = y;
+
+        return true;
+    }
+
+
     int color() const {
         return color_.load(std::memory_order_relaxed);
     }
@@ -216,9 +245,6 @@ protected:
             }
         }
     }
-
-private:
-
 };
 
 template<typename T>
@@ -260,6 +286,7 @@ public:
     }
 
 private:
+
     void startEvents() {
         tracker_thread_ = std::thread([this]() {
             while (run_.load(std::memory_order_acquire)) {
