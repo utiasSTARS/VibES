@@ -38,7 +38,7 @@ namespace {
     constexpr int TRACKER_MARGIN = haste::HypothesisPatchTracker::kPatchSize / 2 + 15;
     constexpr double TRACKER_MARGIN_SQ = TRACKER_MARGIN * TRACKER_MARGIN;
     constexpr size_t MAX_CENTROIDS_QUEUE = 1000;
-    constexpr int MAX_AMPLITUDE = 5;
+    constexpr int MAX_AMPLITUDE = 5000;
 }
 
 //#define STORE
@@ -77,8 +77,10 @@ protected:
 
 public:
     HasteWrapperBase(int x, int y, double tracker_rate, Metavision::timestamp init_time,
-                     const std::string &output_folder)
-            : initial_x_(x), initial_y_(y), init_time_(init_time) {
+                     const std::string &output_folder, std::unique_ptr<IEKFSinusoidFitter> x_fitter_ptr = nullptr,
+                     std::unique_ptr<IEKFSinusoidFitter> y_fitter_ptr = nullptr)
+            : initial_x_(x), initial_y_(y), init_time_(init_time),
+              x_fitter_(std::move(x_fitter_ptr)), y_fitter_(std::move(y_fitter_ptr)) {
 
         tracker_ = std::make_shared<haste::HasteDifferenceStarTracker>(
                 tracker_rate,
@@ -184,8 +186,15 @@ public:
     }
 
     std::pair<double, double> getCurrentPosition() {
+        std::lock_guard<std::mutex> lock(centroids_mutex_);
         return {last_x_.load(std::memory_order_relaxed),
                 last_y_.load(std::memory_order_relaxed)};
+    }
+
+    void getCurrentPosition(unsigned short &x, unsigned short &y) {
+        std::lock_guard<std::mutex> lock(centroids_mutex_);
+        x = last_x_.load(std::memory_order_relaxed);
+        y = last_y_.load(std::memory_order_relaxed);
     }
 
     std::optional<std::pair<double, double>> getShift() {
@@ -210,8 +219,6 @@ public:
 protected:
     void updateTrackingState(double t, double x, double y) {
         // Update atomic positions
-        last_x_.store(x, std::memory_order_relaxed);
-        last_y_.store(y, std::memory_order_relaxed);
 
         if (x == 0 && y == 0) return;
 
@@ -236,12 +243,16 @@ protected:
                 x_fitter_->update(t, x);
                 double amplitude = x_fitter_->getAmplitude();
                 color_.store(static_cast<int>(std::min(255.0,
-                                                       std::max(0.0, amplitude / static_cast<double>(MAX_AMPLITUDE) *
+                                                       std::max(0.0, amplitude*1000 / static_cast<double>(MAX_AMPLITUDE) *
                                                                      255.0))),
                              std::memory_order_relaxed);
+//                color_.store(static_cast<int>(amplitude*1000),
+//                             std::memory_order_relaxed);
+                last_x_.store(x_fitter_->getShift(), std::memory_order_relaxed);
             }
             if (y_fitter_) {
                 y_fitter_->update(t, y);
+                last_y_.store(y_fitter_->getShift(), std::memory_order_relaxed);
             }
         }
     }
@@ -254,8 +265,10 @@ private:
 
 public:
     HasteWrapper(int x, int y, double tracker_rate, Metavision::timestamp init_time = 0,
-                 std::string output_folder = "output")
-            : HasteWrapperBase(x, y, tracker_rate, init_time, output_folder) {
+                 std::string output_folder = "output", std::unique_ptr<IEKFSinusoidFitter> x_fitter_ptr = nullptr,
+                 std::unique_ptr<IEKFSinusoidFitter> y_fitter_ptr = nullptr)
+            : HasteWrapperBase(x, y, tracker_rate, init_time, output_folder, std::move(x_fitter_ptr),
+                               std::move(y_fitter_ptr)) {
 
         if constexpr (!(std::is_same_v<T, Metavision::EventCD> || std::is_same_v<T, Centroid>)) {
             throw std::invalid_argument("HasteWrapper can only be used with Metavision::EventCD or Centroid types.");
@@ -271,9 +284,30 @@ public:
         return false;
     }
 
+    bool feed(const T &event, unsigned short &x, unsigned short &y) {
+        if (inTracker(event, x, y)) {
+            return event_stack_.push(event);
+        }
+        return false;
+    }
+
     bool inTracker(const T &event) {
-        double x = last_x_.load(std::memory_order_relaxed);
-        double y = last_y_.load(std::memory_order_relaxed);
+        double x = last_x_.load(std::memory_order_acquire);
+        double y = last_y_.load(std::memory_order_acquire);
+
+        if (x == 0 && y == 0) {
+            return false;
+        }
+
+        // Use circular distance check for better performance
+        double dx = event.x - x;
+        double dy = event.y - y;
+        return (dx * dx + dy * dy) <= TRACKER_MARGIN_SQ;
+    }
+
+    bool inTracker(const T &event, unsigned short &x, unsigned short &y) {
+        x = last_x_.load(std::memory_order_relaxed);
+        y = last_y_.load(std::memory_order_relaxed);
 
         if (x == 0 && y == 0) {
             return false;

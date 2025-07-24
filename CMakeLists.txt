@@ -106,6 +106,8 @@ target_link_libraries(haste_comp PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} M
 add_executable(compensation demo/compensation.cpp)
 target_link_libraries(compensation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
 
+add_executable(depth_estimation demo/depth_estimation.cpp)
+target_link_libraries(depth_estimation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
 
 add_executable(multi_tracker demo/multi_tracker.cpp)
 target_link_libraries(multi_tracker PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)

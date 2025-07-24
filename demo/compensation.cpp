@@ -27,7 +27,7 @@
 #include "profiler.hpp"
 
 //#define FANCY_VISUALIZATION
-//#define STORE
+#define STORE
 
 // Constants
 namespace {
