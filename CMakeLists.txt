@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 project(project)
 
+option(BUILD_TESTS "Build test programs" OFF)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CUDA_STANDARD 17)
 
@@ -25,7 +27,7 @@ set(CMAKE_INSTALL_RPATH "/usr/local/lib")
 find_package(OpenMP REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(Open3D REQUIRED)
+#find_package(Open3D REQUIRED)
 find_package(Boost 1.74 REQUIRED COMPONENTS filesystem system program_options)
 find_package(MetavisionSDK COMPONENTS base cv driver ui REQUIRED)
 
@@ -35,7 +37,9 @@ include_directories(${EIGEN3_INCLUDE_DIR} ${TORCH_INCLUDE_DIRS} ${Boost_INCLUDE_
 include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(${PROJECT_SOURCE_DIR}/thirdparty/VecKM_flow_cpp)
 
-include(tests/CMakeLists.txt)
+if (BUILD_TESTS)
+    include(tests/CMakeLists.txt)
+endif (BUILD_TESTS)
 
 # Build HASTE AND INTEGRATE IT INTO THE PROJECT
 #add_subdirectory(thirdparty/haste)
@@ -101,19 +105,19 @@ include_directories(thirdparty/haste/include)
 #target_link_libraries(motion_estimation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX)
 
 add_executable(haste_comp demo/haste_comp.cpp)
-target_link_libraries(haste_comp PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(haste_comp PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
 
 add_executable(compensation demo/compensation.cpp)
-target_link_libraries(compensation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(compensation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
 
 add_executable(depth_estimation demo/depth_estimation.cpp)
-target_link_libraries(depth_estimation PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(depth_estimation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
 
 add_executable(multi_tracker demo/multi_tracker.cpp)
-target_link_libraries(multi_tracker PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(multi_tracker PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
 
 add_executable(undistort_and_store demo/undistort_and_store.cpp)
-target_link_libraries(undistort_and_store PRIVATE MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options)
+target_link_libraries(undistort_and_store PRIVATE ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options)
 
 add_executable(recorder demo/recorder.cpp)
 target_link_libraries(recorder PRIVATE MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options)

@@ -3,6 +3,9 @@
 // Based on Metavision SDK patterns
 //
 
+//#define FANCY_VISUALIZATION
+#define STORE
+
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>
@@ -19,6 +22,12 @@
 #include <csignal>
 #include <thread>
 
+#ifdef STORE
+
+#include <metavision/sdk/driver/hdf5_event_file_writer.h>
+
+#endif
+
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
 #include "estimator/iekf_sinusoid_fitter.hpp"
@@ -26,8 +35,6 @@
 #include "haste_wrapper.hpp"
 #include "profiler.hpp"
 
-//#define FANCY_VISUALIZATION
-#define STORE
 
 // Constants
 namespace {
@@ -182,6 +189,15 @@ int main(int argc, char *argv[]) {
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
 
+#ifdef STORE
+    std::filesystem::path out_hdf5_file_path = params.params->output_folder + "/events.hdf5";
+    if (!out_hdf5_file_path.parent_path().empty() && !std::filesystem::exists(out_hdf5_file_path.parent_path())) {
+        std::filesystem::create_directories(out_hdf5_file_path.parent_path());
+    }
+    Metavision::HDF5EventFileWriter hdf5_writer(out_hdf5_file_path);
+    hdf5_writer.add_metadata_map_from_camera(params.camera);
+#endif
+
     // Setup display window (similar to original)
     std::string window_name("HARMEDA Event Tracking");
     cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
@@ -297,6 +313,9 @@ int main(int argc, char *argv[]) {
         // Feed events to frame generator and rate estimator
         const auto *begin_comp = compensated_events.data();
         const auto *end_comp = begin_comp + compensated_events.size();
+#ifdef STORE
+        hdf5_writer.add_events(begin_comp, end_comp);
+#endif
         cd_frame_generator.add_events(begin_comp, end_comp);
         cd_rate_estimator.add_data(std::prev(end_comp)->t, std::distance(begin_comp, end_comp));
     });
@@ -382,6 +401,10 @@ int main(int argc, char *argv[]) {
     }
 
     end_time = std::chrono::steady_clock::now();
+
+#ifdef STORE
+    hdf5_writer.close();
+#endif
 
     // Cleanup
     cd_frame_generator.stop();
