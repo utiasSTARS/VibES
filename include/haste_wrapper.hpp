@@ -27,6 +27,7 @@
 #include "haste/app/command_parser.hpp"
 #include "haste/tracking.hpp"
 #include "estimator/iekf_sinusoid_fitter.hpp"
+#include "event_frontend/centroid.hpp"
 
 using TrackerPtr = std::shared_ptr<haste::HypothesisPatchTracker>;
 

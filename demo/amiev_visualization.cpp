@@ -13,7 +13,6 @@
 #include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
 
-
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -24,6 +23,8 @@
 #include <sstream>
 #include <csignal>
 #include <thread>
+
+#include "visualizer/ev2image.hpp"
 
 #ifdef STORE
 
@@ -233,6 +234,11 @@ int main(int argc, char *argv[]) {
     unsigned short x_undistorted, y_undistorted;
 
     std::once_flag init_flag;
+
+    Metavision::Stage::EventBuffer amiev_events;
+    Metavision::timestamp duration_for_amiev = 0;
+    std::vector<ImageResults> compensated_images_amiev_vis;
+    int counter = 0;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         std::call_once(init_flag, [&]() {
@@ -316,6 +322,24 @@ int main(int argc, char *argv[]) {
         // Feed events to frame generator and rate estimator
         const auto *begin_comp = compensated_events.data();
         const auto *end_comp = begin_comp + compensated_events.size();
+
+        // check the time chunk in the event
+        if (!NUFFT_ESTIMATION_DONE) {
+
+            unsigned short delta = end->t - begin->t;
+            duration_for_amiev += delta;
+            amiev_events.insert(amiev_events.end(), begin_comp, end_comp);
+            if (duration_for_amiev > 100000){// 29997) {
+                // do every 100
+                auto res = ev2img_metavision(amiev_events, height, width);
+                compensated_images_amiev_vis.emplace_back(res);
+                amiev_events.clear();
+                duration_for_amiev = 0; // reset the duration for next chunk
+                std::cout << "Processed " << compensated_images_amiev_vis.size() << " chunks of events." << std::endl;
+            }
+        }
+        counter++;
+
 #ifdef STORE
         hdf5_writer.add_events(begin_comp, end_comp);
 #endif
@@ -413,6 +437,38 @@ int main(int argc, char *argv[]) {
     cd_frame_generator.stop();
     if (params.camera.is_running()) {
         params.camera.stop();
+    }
+
+    // create a folder for each of the images
+    std::vector<std::string> folder_names = {
+        "img_bin", "img_cnt_gray", "img_ts", "img_avgts", "img_cnt_color", "img_ts_color", "img_avgts_color"
+    };
+    for (const auto &folder_name : folder_names) {
+        std::filesystem::path folder_path = params.params->output_folder + "/imgs/" + folder_name;
+        if (!std::filesystem::exists(folder_path)) {
+            std::filesystem::create_directories(folder_path);
+        }
+    }
+
+    for (int i = 0; i < compensated_images_amiev_vis.size(); ++i) {
+        const auto &img = compensated_images_amiev_vis[i];
+        auto counter_str = std::to_string(i);
+        cv::imshow("Binary Image", img.img_bin);
+        cv::imshow("Count Gray Image", img.img_cnt_gray);
+        cv::imshow("Timestamp Image", img.img_ts);
+        cv::imshow("Average Timestamp Image", img.img_avgts);
+        cv::imshow("Count Color Image", img.img_cnt_color);
+        cv::imshow("Timestamp Color Image", img.img_ts_color);
+        cv::imshow("Average Timestamp Color Image", img.img_avgts_color);
+        cv::waitKey(1); // Wait for key press to show each image
+
+        cv::imwrite(params.params->output_folder + "/imgs/img_bin/img_" + counter_str + ".png", img.img_bin);
+        cv::imwrite(params.params->output_folder + "/imgs/img_cnt_gray/img_" + counter_str + ".png", img.img_cnt_gray);
+        cv::imwrite(params.params->output_folder + "/imgs/img_ts/img_" + counter_str + ".png", img.img_ts);
+        cv::imwrite(params.params->output_folder + "/imgs/img_avgts/img_" + counter_str + ".png", img.img_avgts);
+        cv::imwrite(params.params->output_folder + "/imgs/img_cnt_color/img_" + counter_str + ".png", img.img_cnt_color);
+        cv::imwrite(params.params->output_folder + "/imgs/img_ts_color/img_" + counter_str + ".png", img.img_ts_color);
+        cv::imwrite(params.params->output_folder + "/imgs/img_avgts_color/img_" + counter_str + ".png", img.img_avgts_color);
     }
 
     return 0;
