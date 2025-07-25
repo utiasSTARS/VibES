@@ -9,3 +9,4 @@ samples/
 # performance recordings
 *.perf
 perf.data
+perf/
