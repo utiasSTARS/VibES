@@ -29,7 +29,7 @@ find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 #find_package(Open3D REQUIRED)
 find_package(Boost 1.74 REQUIRED COMPONENTS filesystem system program_options)
-find_package(MetavisionSDK COMPONENTS base cv driver ui REQUIRED)
+find_package(MetavisionSDK COMPONENTS base cv driver ui REQUIRED analytics)
 
 #find_package(dv-processing REQUIRED)
 
