@@ -49,10 +49,10 @@ def read_events_from_hdf5(file_path, time_window_us):
 
 
 class Metrics:
-    def __init__(self, cam_w, cam_h, events):
+    def __init__(self, cam_w, cam_h, event_iter):
         self.cam_w = cam_w
         self.cam_h = cam_h
-        self.events = events
+        self.event_iter = event_iter
 
     def point_distribution(self):
         # Compute point distribution metric
@@ -86,6 +86,8 @@ if __name__ == "__main__":
 
     print(f"Processing file: {args.file_path}")
     print(f"Camera Geometry: {height}x{width}")
+
+    m = Metrics(cam_w=width, cam_h=height, event_iter=mv_iterator)
 
     # Read events from the HDF5 file
     # events = read_events_from_hdf5(file_path, time_window_us)
