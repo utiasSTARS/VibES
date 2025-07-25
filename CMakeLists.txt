@@ -121,7 +121,3 @@ target_link_libraries(undistort_and_store PRIVATE ${OpenCV_LIBS} MetavisionSDK::
 
 add_executable(recorder demo/recorder.cpp)
 target_link_libraries(recorder PRIVATE MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options)
-
-add_executable(feature_initializer demo/feature_initializer.cpp)
-target_link_libraries(feature_initializer ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui MetavisionSDK::analytics
-)

@@ -73,7 +73,6 @@ int convert_file_to_hdf5(const std::filesystem::path &in_file_path, const std::f
     // Gets the wrapped camera from the stage to extract sensor's resolution
     Metavision::Camera &cam = cam_stage.camera();
 
-
     // Build an HDF5 file writer
     Metavision::HDF5EventFileWriter hdf5_writer(out_hdf5_file_path.string());
     hdf5_writer.add_metadata_map_from_camera(cam);
