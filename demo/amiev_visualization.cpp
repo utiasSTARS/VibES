@@ -329,7 +329,7 @@ int main(int argc, char *argv[]) {
             unsigned short delta = end->t - begin->t;
             duration_for_amiev += delta;
             amiev_events.insert(amiev_events.end(), begin_comp, end_comp);
-            if (duration_for_amiev > 100000){// 29997) {
+            if (duration_for_amiev > 29997) {
                 // do every 100
                 auto res = ev2img_metavision(amiev_events, height, width);
                 compensated_images_amiev_vis.emplace_back(res);
