@@ -13,56 +13,7 @@ from scipy.stats import gaussian_kde
 from niqe.niqe import niqe
 
 
-def h5_tree(val, pre="", out=""):
-    length = len(val)
-    for key, val in val.items():
-        length -= 1
-        if length == 0:  # the last item
-            if type(val) == h5py._hl.group.Group:
-                out += pre + "└── " + key + "\n"
-                out = h5_tree(val, pre + "    ", out)
-            else:
-                out += pre + "└── " + key + f" {val.shape}\n"
-        else:
-            if type(val) == h5py._hl.group.Group:
-                out += pre + "├── " + key + "\n"
-                out = h5_tree(val, pre + "│   ", out)
-            else:
-                out += pre + "├── " + key + f" {val.shape}\n"
-    return out
-
-
-def read_events_from_hdf5(file_path, time_window_us):
-    import h5py
-
-    initial_time = -1
-    events = []
-    with h5py.File(file_path, "r") as f:
-        dataset = f["CD/events"]
-        initial_time = dataset[0][3]  # First timestamp in dataset
-        for e in dataset:
-            x, y, p, ts = e
-            if x < 0 or y < 0 or x >= 1280 or y >= 720:
-                continue
-            delta = ts - initial_time
-            events.append((ts, x, y, p))
-
-            if time_window_us != -1.0 and delta > time_window_us:
-                break  # Stop when reaching the time window or max events
-
-    # print info
-    print(f"Read {len(events)} events from {file_path}")
-    return events
-
-
-def get_camera_geometry(file_path, delta_t=1000):
-
-    # Initialize RawReader
-
-    return height, width
-
-
-class Metrics:
+class KDEMetrics:
     def __init__(self, cam_w, cam_h, events_iterator):
         self.cam_w = cam_w
         self.cam_h = cam_h
@@ -144,9 +95,6 @@ if __name__ == "__main__":
         help="Time window in microseconds",
     )
     parser.add_argument(
-        "--pd", action="store_true", default=True, help="Metric: Point Distribution"
-    )
-    parser.add_argument(
         "--delta_t",
         type=int,
         default=10000,
@@ -160,10 +108,6 @@ if __name__ == "__main__":
     print(f"Processing file: {args.file_path}")
     print(f"Camera Geometry: {height}x{width}")
 
-    m = Metrics(cam_w=width, cam_h=height, events_iterator=ev_iterator)
+    m = KDEMetrics(cam_w=width, cam_h=height, events_iterator=ev_iterator)
 
-    if args.pd:
-        m.point_distribution()
-
-    # Read events from the HDF5 file
-    # events = read_events_from_hdf5(file_path, time_window_us)
+    m.point_distribution()
