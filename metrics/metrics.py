@@ -1,9 +1,11 @@
 import numpy as np
-import h5py
-
-from metavision_core.event_io import EventsIterator
 
 import argparse
+import h5py
+
+import matplotlib.pyplot as plt
+
+from sklearn.neighbors import KernelDensity
 
 
 def h5_tree(val, pre="", out=""):
@@ -48,14 +50,48 @@ def read_events_from_hdf5(file_path, time_window_us):
     return events
 
 
+def get_camera_geometry(file_path, delta_t=1000):
+    from metavision_core.event_io import EventsIterator
+
+    # Initialize RawReader
+    my_iterator = EventsIterator(input_path=file_path, delta_t=delta_t)
+    width, height = my_iterator.get_size()  # Camera Geometry
+
+    return height, width
+
+
 class Metrics:
-    def __init__(self, cam_w, cam_h, event_iter):
+    def __init__(self, cam_w, cam_h, events):
         self.cam_w = cam_w
         self.cam_h = cam_h
-        self.event_iter = event_iter
+        self.events = np.array(events)
 
     def point_distribution(self):
         # Compute point distribution metric
+
+        kde = KernelDensity(kernel="gaussian", bandwidth=0.2)
+        pts = self.events[:, 1:3].astype(float)  # Extract x, y coordinates
+        pts[:, 0] /= self.cam_w  # Normalize x coordinates by camera width
+        pts[:, 1] /= self.cam_h  # Normalize y coordinates by camera height
+
+        print(pts)
+
+        kde.fit(pts)
+
+        log_density = kde.score_samples(pts)
+
+        print(np.exp(log_density))
+
+        data_range = np.linspace(0, 1, log_density.shape[0])
+
+        fig = plt.figure()
+        # plt.plot(x_range, np.exp(log_density), color="gray", linewidth=2)
+        plt.fill_between(pts[:, 0], np.exp(log_density), alpha=0.5)
+        plt.plot(pts[:, 0], np.full_like(pts[:, 0], -0.01), "|k", markeredgewidth=1)
+        # plt.ylim(-0.02, 0.22)
+
+        plt.title("Point Distribution")
+        plt.show()
 
         pass
 
@@ -72,22 +108,22 @@ if __name__ == "__main__":
         help="Time window in microseconds",
     )
     parser.add_argument(
-        "--delta_t",
-        type=int,
-        default=1000,
-        help="Delta time in microseconds for event iterator",
+        "--pd", action="store_true", default=True, help="Metric: Point Distribution"
     )
-    parser.add_argument("--pd", action="store_true", help="Metric: Point Distribution")
     args = parser.parse_args()
 
-    # Initialize RawReader
-    mv_iterator = EventsIterator(input_path=args.file_path, delta_t=args.delta_t)
-    height, width = mv_iterator.get_size()  # Camera Geometry
+    width, height = get_camera_geometry(args.file_path, delta_t=1000)
 
     print(f"Processing file: {args.file_path}")
     print(f"Camera Geometry: {height}x{width}")
+    print("Reading events...")
+    events = read_events_from_hdf5(args.file_path, args.time_window_us)
+    print("Done.")
 
-    m = Metrics(cam_w=width, cam_h=height, event_iter=mv_iterator)
+    m = Metrics(cam_w=width, cam_h=height, events=events)
+
+    if args.pd:
+        m.point_distribution()
 
     # Read events from the HDF5 file
     # events = read_events_from_hdf5(file_path, time_window_us)
