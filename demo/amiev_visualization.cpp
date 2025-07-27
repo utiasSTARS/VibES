@@ -177,6 +177,10 @@ int main(int argc, char *argv[]) {
                                  frame.copyTo(cd_frame);
                              });
 
+
+    Metavision::Event
+
+
     // Setup event rate estimator
     double avg_rate = 0, peak_rate = 0;
     Metavision::RateEstimator cd_rate_estimator(
@@ -319,17 +323,18 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+
         // Feed events to frame generator and rate estimator
         const auto *begin_comp = compensated_events.data();
         const auto *end_comp = begin_comp + compensated_events.size();
 
         // check the time chunk in the event
-        if (!NUFFT_ESTIMATION_DONE) {
+        if (NUFFT_ESTIMATION_DONE) {
 
             unsigned short delta = end->t - begin->t;
             duration_for_amiev += delta;
             amiev_events.insert(amiev_events.end(), begin_comp, end_comp);
-            if (duration_for_amiev > 29997) {
+            if (duration_for_amiev > 2000){ //29997) {
                 // do every 100
                 auto res = ev2img_metavision(amiev_events, height, width);
                 compensated_images_amiev_vis.emplace_back(res);

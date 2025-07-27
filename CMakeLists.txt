@@ -27,7 +27,7 @@ set(CMAKE_INSTALL_RPATH "/usr/local/lib")
 find_package(OpenMP REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
-#find_package(Open3D REQUIRED)
+find_package(Open3D REQUIRED)
 find_package(Boost 1.74 REQUIRED COMPONENTS filesystem system program_options)
 find_package(MetavisionSDK COMPONENTS base cv driver ui REQUIRED analytics)
 
@@ -42,7 +42,6 @@ if (BUILD_TESTS)
 endif (BUILD_TESTS)
 
 # Build HASTE AND INTEGRATE IT INTO THE PROJECT
-#add_subdirectory(thirdparty/haste)
 
 find_package(gflags REQUIRED)
 find_package(glog REQUIRED)
@@ -121,3 +120,9 @@ target_link_libraries(undistort_and_store PRIVATE ${OpenCV_LIBS} MetavisionSDK::
 
 add_executable(recorder demo/recorder.cpp)
 target_link_libraries(recorder PRIVATE MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options)
+
+add_executable(compensation_open3d demo/compensation_open3d.cpp)
+target_link_libraries(compensation_open3d PRIVATE Open3D::Open3D finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+
+add_executable(feature_tracker demo/feature_tracker.cpp)
+target_link_libraries(feature_tracker PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)

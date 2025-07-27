@@ -4,7 +4,7 @@
 //
 
 //#define FANCY_VISUALIZATION
-#define STORE
+
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
@@ -12,7 +12,6 @@
 #include <metavision/sdk/ui/utils/event_loop.h>
 #include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
-
 
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -37,7 +36,7 @@
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
 #include "profiler.hpp"
-
+#include "visualizer/open3d_visualizer.hpp"
 
 // Constants
 namespace {
@@ -156,6 +155,8 @@ int main(int argc, char *argv[]) {
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
 
+    Open3DVisualizer visualizer(width, height);
+
     // Initialize undistortion
     Undistort undistort(params.params->calib_file);
 
@@ -231,6 +232,8 @@ int main(int argc, char *argv[]) {
 
     Metavision::Stage::EventBuffer compensated_events;
     unsigned short x_undistorted, y_undistorted;
+    unsigned short x_pose, y_pose;
+    double start_time_vis = 0;
 
     std::once_flag init_flag;
     // Main event processing callback
@@ -270,7 +273,14 @@ int main(int argc, char *argv[]) {
                         continue;
                     }
 #endif
-
+                    tracker->getCurrentPosition(x_pose, y_pose);
+                    visualizer.addLine(x_pose, y_pose, (current_t_sec - start_time_vis) * 100, 0, 0, 1);
+                    auto q = tracker->getCentroids();
+                    while (!q.empty()) {
+                        auto c = q.front();
+                        visualizer.addLine2(c.x, c.y, (c.t - start_time_vis) * 100, 0, 1, 0);
+                        q.pop();
+                    }
                     if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
                         auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
                         if (x_new < 0 || x_new >= width) {
@@ -308,6 +318,7 @@ int main(int argc, char *argv[]) {
                                             createIEKFFitter(Ay[0], By[0], omegas[0], offsets[1],
                                                              params.params->iekf_iterations)));
                         }
+                        start_time_vis = current_t_sec;
                         NUFFT_ESTIMATION_DONE = nufft_estimator.done();
                     }
                 }
@@ -399,6 +410,7 @@ int main(int argc, char *argv[]) {
                 break;
         }
 
+        visualizer.update();
         // Poll Metavision events
         Metavision::EventLoop::poll_and_dispatch(1);
     }
@@ -406,12 +418,6 @@ int main(int argc, char *argv[]) {
     end_time = std::chrono::steady_clock::now();
 
 #ifdef STORE
-    // print blue text
-    std::cout << "\033[1;34mWriting events to HDF5 file...\033[0m" << std::endl;
-    if (hdf5_writer.is_open()) {
-        std::cout << "\033[1;34mEvents written to: " << out_hdf5_file_path << "\033[0m" << std::endl;
-    }
-    // Close HDF5 writer
     hdf5_writer.close();
 #endif
 
@@ -420,6 +426,8 @@ int main(int argc, char *argv[]) {
     if (params.camera.is_running()) {
         params.camera.stop();
     }
+
+    visualizer.loop();
 
     return 0;
 }

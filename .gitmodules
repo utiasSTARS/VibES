@@ -10,3 +10,6 @@
 [submodule "thirdparty/rpg_e2vid"]
 	path = thirdparty/rpg_e2vid
 	url = git@github.com:uzh-rpg/rpg_e2vid.git
+[submodule "thirdparty/rpg_corner_events"]
+	path = thirdparty/rpg_corner_events
+	url = https://github.com/uzh-rpg/rpg_corner_events

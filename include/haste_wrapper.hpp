@@ -170,7 +170,6 @@ public:
         return true;
     }
 
-
     int color() const {
         return color_.load(std::memory_order_relaxed);
     }
@@ -232,6 +231,7 @@ protected:
         // Add to centroid queue with size limit
         {
             std::lock_guard<std::mutex> lock(centroids_mutex_);
+            // TODO we do not need this after the NUFFT has been estimated
             centroids_queue_.emplace(t, x, y);
 
             // Maintain queue size limit
@@ -244,8 +244,9 @@ protected:
                 x_fitter_->update(t, x);
                 double amplitude = x_fitter_->getAmplitude();
                 color_.store(static_cast<int>(std::min(255.0,
-                                                       std::max(0.0, amplitude*1000 / static_cast<double>(MAX_AMPLITUDE) *
-                                                                     255.0))),
+                                                       std::max(0.0,
+                                                                amplitude * 1000 / static_cast<double>(MAX_AMPLITUDE) *
+                                                                255.0))),
                              std::memory_order_relaxed);
 //                color_.store(static_cast<int>(amplitude*1000),
 //                             std::memory_order_relaxed);

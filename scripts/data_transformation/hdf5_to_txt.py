@@ -98,7 +98,7 @@ def convert_hdf5_to_txt(input_file, output_dir):
     print(f"Saved {len(xy)} events to {txt_file}")
 
 
-def batch_convert(input_dir, output_dir, pattern="*.h5"):
+def batch_convert(input_dir, output_dir, pattern="*.hdf5"):
     """
     Batch convert multiple HDF5 files to TXT format.
 
