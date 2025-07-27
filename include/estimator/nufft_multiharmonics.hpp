@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <Eigen/Dense>
 #include "utils.hpp"  // Assumes definition of rad2Hz<T>(...) and similar utilities
-#include "event_frontend/centroid_base.h"
 
 // Custom deleter for finufft_opts
 struct FinufftOptsDeleter {
@@ -35,6 +34,33 @@ struct HarmonicEstimate {
 
 class NUFFTHelixEstimator {
 public:
+    /**
+    * Extracts harmonic parameters from NUFFT estimator results
+    */
+    static void extractHarmonicParameters(const std::vector<HarmonicEstimate> &harmonics,
+                                          std::vector<double> &Ax, std::vector<double> &Ay,
+                                          std::vector<double> &Bx, std::vector<double> &By,
+                                          std::vector<double> &omegas, std::vector<double> &offsets) {
+
+        for (const auto &harmonic: harmonics) {
+            double phase_x = std::atan2(harmonic.amplitude_x, harmonic.amplitude_y);
+            double phase_y = std::atan2(harmonic.amplitude_y, harmonic.amplitude_x);
+
+            double ax = harmonic.amplitude_x * std::cos(phase_x);
+            double ay = harmonic.amplitude_y * std::sin(phase_y);
+            double bx = harmonic.amplitude_x * std::sin(phase_x);
+            double by = harmonic.amplitude_y * std::cos(phase_y);
+
+            Ax.push_back(ax);
+            Ay.push_back(ay);
+            Bx.push_back(bx);
+            By.push_back(by);
+            omegas.push_back(harmonic.frequency);
+            offsets.push_back(harmonic.offset_x);
+            offsets.push_back(harmonic.offset_y);
+        }
+    }
+
     // Constructor
     NUFFTHelixEstimator(double f_min_hz, double f_max_hz, int max_harmonics = 3, int num_samples = 500)
             : N(num_samples), f_min(Hz2rad(f_min_hz)), f_max(Hz2rad(f_max_hz)),

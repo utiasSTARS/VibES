@@ -26,16 +26,16 @@
 
 #include "haste/app/command_parser.hpp"
 #include "haste/tracking.hpp"
-#include "estimator/iekf_sinusoid_fitter.hpp"
-#include "event_frontend/centroid.hpp"
+//#include "estimator/iekf_sinusoid_fitter.hpp"
+#include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 
 using TrackerPtr = std::shared_ptr<haste::HypothesisPatchTracker>;
 
 namespace {
     constexpr double MIN_FREQUENCY = 5.0;   // Hz
     constexpr double MAX_FREQUENCY = 80.0;  // Hz
-    constexpr int MAX_HARMONICS = 1;
-    constexpr double TRACKER_RATE = 0.001;
+    constexpr int MAX_HARMONICS = 2;
+    constexpr double TRACKER_RATE = 0.01;
     constexpr int TRACKER_MARGIN = haste::HypothesisPatchTracker::kPatchSize / 2 + 15;
     constexpr double TRACKER_MARGIN_SQ = TRACKER_MARGIN * TRACKER_MARGIN;
     constexpr size_t MAX_CENTROIDS_QUEUE = 1000;

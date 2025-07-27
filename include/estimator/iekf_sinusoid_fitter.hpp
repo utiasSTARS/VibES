@@ -8,12 +8,38 @@
 #include <sstream>
 #include <cmath>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
+// Constants
+namespace {
+    constexpr double DEFAULT_MEASUREMENT_NOISE = 0.5;
+}
 
 class IEKFSinusoidFitter {
 public:
+    /**
+ * Creates and configures an IEKF sinusoid fitter with given parameters
+ */
+    static IEKFSinusoidFitter createIEKFFitter(double A, double B, double omega, double C, int iterations = 1) {
+        IEKFSinusoidFitter::StateVector initial_state;
+        initial_state << A, B, omega, C;
+
+        IEKFSinusoidFitter::StateCovariance initial_covariance;
+        initial_covariance.setIdentity();
+        initial_covariance(0, 0) = 1e2;  // A amplitude
+        initial_covariance(1, 1) = 1e2;  // B amplitude
+        initial_covariance(2, 2) = 1e1;  // omega frequency
+        initial_covariance(3, 3) = 1e3;  // C DC offset
+
+        IEKFSinusoidFitter::StateCovariance process_noise;
+        process_noise.setIdentity();
+        process_noise(0, 0) = 1e0;
+        process_noise(1, 1) = 1e0;
+        process_noise(2, 2) = 1e-3;
+        process_noise(3, 3) = 1e0;
+
+        return {initial_state, initial_covariance, process_noise,
+                DEFAULT_MEASUREMENT_NOISE, iterations};
+    }
+
     // State: [A, B, omega, C]
     // A, B: amplitudes for sin(wt), cos(wt)
     // omega: angular frequency
@@ -109,7 +135,8 @@ public:
 
             // Calculate innovation covariance more efficiently
             // S = H * P * H^T + R
-            double innovation_covariance = (H_temp_ * predicted_covariance * H_temp_.transpose())(0, 0) + measurement_noise_r_;
+            double innovation_covariance =
+                    (H_temp_ * predicted_covariance * H_temp_.transpose())(0, 0) + measurement_noise_r_;
 
             // Check for numerical stability
             if (std::abs(innovation_covariance) < 1e-12) {
@@ -150,7 +177,8 @@ public:
         H_temp_(0, 2) = t * (A_final * cos_wt_final - B_final * sin_wt_final);
         H_temp_(0, 3) = 1.0;
 
-        double innovation_cov_final = (H_temp_ * predicted_covariance * H_temp_.transpose())(0, 0) + measurement_noise_r_;
+        double innovation_cov_final =
+                (H_temp_ * predicted_covariance * H_temp_.transpose())(0, 0) + measurement_noise_r_;
 
         if (std::abs(innovation_cov_final) > 1e-12) {
             double innovation_cov_inv_final = 1.0 / innovation_cov_final;

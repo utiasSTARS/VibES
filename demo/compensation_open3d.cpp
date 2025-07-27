@@ -32,7 +32,8 @@
 
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
-#include "estimator/iekf_sinusoid_fitter.hpp"
+//#include "estimator/iekf_sinusoid_fitter.hpp"
+#include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
 #include "profiler.hpp"
@@ -42,7 +43,6 @@
 namespace {
     constexpr double DEFAULT_FPS = 100.0;
     constexpr std::uint32_t DEFAULT_ACCUMULATION = 5000;
-    constexpr double DEFAULT_MEASUREMENT_NOISE = 0.5;
     constexpr int ESC_KEY = 27;
     constexpr int POLL_TIMEOUT_MS = 10;
     bool NUFFT_ESTIMATION_DONE = false;
@@ -69,58 +69,6 @@ void receiveMouseEvent(int event, int x, int y, int flags, void *userdata) {
 
     if (event == cv::EVENT_LBUTTONDOWN && callback) {
         (*callback)(x, y);
-    }
-}
-
-/**
- * Creates and configures an IEKF sinusoid fitter with given parameters
- */
-IEKFSinusoidFitter createIEKFFitter(double A, double B, double omega, double C, int iterations = 1) {
-    IEKFSinusoidFitter::StateVector initial_state;
-    initial_state << A, B, omega, C;
-
-    IEKFSinusoidFitter::StateCovariance initial_covariance;
-    initial_covariance.setIdentity();
-    initial_covariance(0, 0) = 1e2;  // A amplitude
-    initial_covariance(1, 1) = 1e2;  // B amplitude
-    initial_covariance(2, 2) = 1e1;  // omega frequency
-    initial_covariance(3, 3) = 1e3;  // C DC offset
-
-    IEKFSinusoidFitter::StateCovariance process_noise;
-    process_noise.setIdentity();
-    process_noise(0, 0) = 1e0;
-    process_noise(1, 1) = 1e0;
-    process_noise(2, 2) = 1e-3;
-    process_noise(3, 3) = 1e0;
-
-    return {initial_state, initial_covariance, process_noise,
-            DEFAULT_MEASUREMENT_NOISE, iterations};
-}
-
-/**
- * Extracts harmonic parameters from NUFFT estimator results
- */
-void extractHarmonicParameters(const NUFFTHelixEstimator &estimator,
-                               std::vector<double> &Ax, std::vector<double> &Ay,
-                               std::vector<double> &Bx, std::vector<double> &By,
-                               std::vector<double> &omegas, std::vector<double> &offsets) {
-
-    for (const auto &harmonic: estimator.getHarmonics()) {
-        double phase_x = std::atan2(harmonic.amplitude_x, harmonic.amplitude_y);
-        double phase_y = std::atan2(harmonic.amplitude_y, harmonic.amplitude_x);
-
-        double ax = harmonic.amplitude_x * std::cos(phase_x);
-        double ay = harmonic.amplitude_y * std::sin(phase_y);
-        double bx = harmonic.amplitude_x * std::sin(phase_x);
-        double by = harmonic.amplitude_y * std::cos(phase_y);
-
-        Ax.push_back(ax);
-        Ay.push_back(ay);
-        Bx.push_back(bx);
-        By.push_back(by);
-        omegas.push_back(harmonic.frequency);
-        offsets.push_back(harmonic.offset_x);
-        offsets.push_back(harmonic.offset_y);
     }
 }
 
@@ -292,6 +240,7 @@ int main(int argc, char *argv[]) {
                         }
                         event_to_build.x = x_new;
                         event_to_build.y = y_new;
+                        event_to_build.p = 0;
                         continue;
                     }
 
@@ -302,7 +251,8 @@ int main(int argc, char *argv[]) {
 
                     if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
-                        extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
+                        NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator.getHarmonics(), Ax, Ay, Bx, By,
+                                                                       omegas, offsets);
 
                         if (!Ax.empty()) {
                             std::cout << "\033[1;34mTracker initialized with parameters:\033[0m" << std::endl;
@@ -312,11 +262,9 @@ int main(int argc, char *argv[]) {
                                       << ", offset_y: " << offsets[1] << std::endl;
                             tracker->addFitters(
                                     std::make_unique<IEKFSinusoidFitter>(
-                                            createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
-                                                             params.params->iekf_iterations)),
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ax, Bx, omegas, offsets)),
                                     std::make_unique<IEKFSinusoidFitter>(
-                                            createIEKFFitter(Ay[0], By[0], omegas[0], offsets[1],
-                                                             params.params->iekf_iterations)));
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ay, By, omegas, offsets)));
                         }
                         start_time_vis = current_t_sec;
                         NUFFT_ESTIMATION_DONE = nufft_estimator.done();
@@ -418,6 +366,12 @@ int main(int argc, char *argv[]) {
     end_time = std::chrono::steady_clock::now();
 
 #ifdef STORE
+    // print blue text
+    std::cout << "\033[1;34mWriting events to HDF5 file...\033[0m" << std::endl;
+    if (hdf5_writer.is_open()) {
+        std::cout << "\033[1;34mEvents written to: " << out_hdf5_file_path << "\033[0m" << std::endl;
+    }
+    // Close HDF5 writer
     hdf5_writer.close();
 #endif
 

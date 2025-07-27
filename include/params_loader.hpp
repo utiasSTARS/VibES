@@ -23,9 +23,6 @@
 #include <open3d/Open3D.h>
 #include <opencv2/opencv.hpp>
 
-#include "event_frontend/ema.hpp"
-#include "estimator/iekf_sinusoid_fitter.hpp"
-
 namespace po = boost::program_options;
 namespace HARMEDA {
     struct Params {

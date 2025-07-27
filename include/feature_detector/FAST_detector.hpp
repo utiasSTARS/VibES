@@ -26,11 +26,12 @@ public:
 
         detector_name_ = "FAST_OPTIMIZED";
 
+
         // Initialize parameters optimized for 1280x720
-        min_streak_size_circle3_ = 3;
-        max_streak_size_circle3_ = 6;
-        min_streak_size_circle4_ = 4;
-        max_streak_size_circle4_ = 8;
+        min_streak_size_circle3_ = 7; // 3;
+        max_streak_size_circle3_ = 11; // 6;
+        min_streak_size_circle4_ = 9; // 4;
+        max_streak_size_circle4_ = 15; // 8;
 
         // Use row-major layout for better cache performance
         const size_t total_pixels = sensor_width_ * sensor_height_;
