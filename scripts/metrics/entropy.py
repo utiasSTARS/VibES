@@ -1,135 +1,117 @@
 import numpy as np
-from scipy.stats import entropy
-from collections import Counter
-import math
+import argparse
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+from scipy import ndimage
 
-def calculate_image_entropy_scipy(binary_image):
-    """
-    Calculate entropy of a binarized image using SciPy's entropy function.
+import skimage.measure
 
-    Parameters:
-    binary_image (numpy.ndarray): Binary image as NumPy array (0s and 1s)
+from loader import FrameLoader
 
-    Returns:
-    float: Entropy value in bits
-    """
-    # Flatten the image to 1D array
-    flat_image = binary_image.flatten()
-
-    # Count occurrences of each pixel value
-    value_counts = np.bincount(flat_image)
-
-    # Remove zero counts to avoid issues with probability calculation
-    probabilities = value_counts[value_counts > 0] / len(flat_image)
-
-    # Calculate entropy using SciPy (returns in nats by default)
-    entropy_nats = entropy(probabilities)
-
-    # Convert from nats to bits (divide by ln(2))
-    entropy_bits = entropy_nats / np.log(2)
-
-    return entropy_bits
-
-def calculate_image_entropy_manual(binary_image):
-    """
-    Calculate entropy of a binarized image using manual implementation.
-
-    Parameters:
-    binary_image (numpy.ndarray): Binary image as NumPy array (0s and 1s)
-
-    Returns:
-    float: Entropy value in bits
-    """
-    # Flatten the image to 1D array
-    flat_image = binary_image.flatten()
-
-    # Count occurrences of each unique pixel value
-    unique_values, counts = np.unique(flat_image, return_counts=True)
-
-    # Calculate probabilities
-    total_pixels = len(flat_image)
-    probabilities = counts / total_pixels
-
-    # Calculate entropy manually using Shannon's formula: H = -Σ(p * log2(p))
-    entropy_value = 0.0
-    for prob in probabilities:
-        if prob > 0:  # Avoid log(0)
-            entropy_value -= prob * math.log2(prob)
-
-    return entropy_value
-
-def calculate_image_entropy_optimized(binary_image):
-    """
-    Optimized entropy calculation specifically for binary images.
-
-    Parameters:
-    binary_image (numpy.ndarray): Binary image as NumPy array (0s and 1s)
-
-    Returns:
-    float: Entropy value in bits
-    """
-    # For binary images, we only need to count 1s (or 0s)
-    total_pixels = binary_image.size
-    ones_count = np.sum(binary_image)
-    zeros_count = total_pixels - ones_count
-
-    # Handle edge cases where all pixels are the same
-    if ones_count == 0 or zeros_count == 0:
-        return 0.0
-
-    # Calculate probabilities
-    p1 = ones_count / total_pixels
-    p0 = zeros_count / total_pixels
-
-    # Calculate binary entropy: H = -p0*log2(p0) - p1*log2(p1)
-    entropy_value = -(p0 * math.log2(p0) + p1 * math.log2(p1))
-
-    return entropy_value
-
-# Example usage and testing
 if __name__ == "__main__":
-    # Create test binary images
+    parser = argparse.ArgumentParser(description="Run entropy metric on event data.")
+    parser.add_argument(
+        "file_path", type=str, help="Path to the accumulated event frames"
+    )
+    args = parser.parse_args()
 
-    # Test 1: Random binary image
-    np.random.seed(42)
-    random_binary = np.random.randint(0, 2, size=(100, 100))
+    # Load events from the file
+    frame_loader = FrameLoader(args.file_path)
+    frames = frame_loader.load()
 
-    # Test 2: All zeros (minimum entropy)
-    all_zeros = np.zeros((50, 50), dtype=int)
+    print(f"Loaded {len(frames)} frames")
+    print(f"Frame shape: {frames[0].shape}")
 
-    # Test 3: All ones (minimum entropy)
-    all_ones = np.ones((50, 50), dtype=int)
+    entropy = []
 
-    # Test 4: Checkerboard pattern (maximum entropy for binary)
-    checkerboard = np.zeros((50, 50), dtype=int)
-    checkerboard[::2, ::2] = 1
-    checkerboard[1::2, 1::2] = 1
+    # Iterate over all frames and compute NIQE scores
+    for i, frame in enumerate(tqdm(frames, desc="Computing entropy")):
+        # Frame is already grayscale from FrameLoader
 
-    test_images = {
-        "Random binary": random_binary,
-        "All zeros": all_zeros,
-        "All ones": all_ones,
-        "Checkerboard": checkerboard
-    }
+        # Ensure the image is in float format (0-255 range is fine for NIQE)
+        if frame.dtype != np.float64:
+            frame = frame.astype(np.float64)
 
-    print("Image Entropy Calculations:")
-    print("=" * 50)
+        try:
+            entropy_value = skimage.measure.shannon_entropy(frame)
+            entropy.append(entropy_value)
+        except Exception as e:
+            print(f"Error computing entropy for frame {i}: {e}")
+            continue
 
-    for name, image in test_images.items():
-        entropy_scipy = calculate_image_entropy_scipy(image)
-        entropy_manual = calculate_image_entropy_manual(image)
-        entropy_optimized = calculate_image_entropy_optimized(image)
+    if entropy:
+        entropy = np.array(entropy)
 
-        print(f"\n{name}:")
-        print(f"  SciPy method:     {entropy_scipy:.6f} bits")
-        print(f"  Manual method:    {entropy_manual:.6f} bits")
-        print(f"  Optimized method: {entropy_optimized:.6f} bits")
+        print(f"\nEntropy Results:")
+        print(f"Processed {len(entropy)} frames")
+        print(f"Mean Entropy: {np.mean(entropy):.4f}")
+        print(f"Std Entropy: {np.std(entropy):.4f}")
+        print(f"Min Entropy: {np.min(entropy):.4f}")
+        print(f"Max Entropy: {np.max(entropy):.4f}")
 
-        # Verify all methods give same result
-        assert abs(entropy_scipy - entropy_manual) < 1e-10
-        assert abs(entropy_scipy - entropy_optimized) < 1e-10
+        # Create windowed version using median filter over 10 frames
+        window_size = 10
+        if len(entropy) >= window_size:
+            # Use scipy's median filter for windowed median
+            entropy_windowed = ndimage.median_filter(
+                entropy, size=window_size, mode="reflect"
+            )
 
-    print(f"\n{'='*50}")
-    print("All methods produce identical results!")
-    print("\nNote: Maximum entropy for binary images is 1.0 bit")
-    print("      (achieved when p(0) = p(1) = 0.5)")
+            print(f"\nWindowed Entropy (median over {window_size} frames):")
+            print(f"Mean Windowed Entropy: {np.mean(entropy_windowed):.4f}")
+            print(f"Std Windowed Entropy: {np.std(entropy_windowed):.4f}")
+            print(f"Min Windowed Entropy: {np.min(entropy_windowed):.4f}")
+            print(f"Max Windowed Entropy: {np.max(entropy_windowed):.4f}")
+        else:
+            print(
+                f"Warning: Not enough frames ({len(entropy)}) for windowing (need >= {window_size})"
+            )
+            entropy_windowed = entropy
+
+        frame_numbers = np.arange(len(entropy))
+
+        # Plot 1: Original entropy only (as before)
+        plt.figure(figsize=(12, 6))
+        plt.plot(
+            frame_numbers,
+            entropy,
+            linewidth=1.5,
+            marker="o",
+            markersize=3,
+            alpha=0.7,
+        )
+        plt.xlabel("Frame Number")
+        plt.ylabel("Entropy")
+        plt.title("Entropy vs Frame Number")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+        plt.savefig("entropy_vs_frame_number.png")
+        plt.close()
+
+        # Plot 2: Comparison of original and windowed entropy
+        plt.figure(figsize=(15, 8))
+        plt.plot(
+            frame_numbers,
+            entropy_windowed,
+            linewidth=2,
+            marker="o",
+            markersize=2,
+            alpha=0.8,
+            color="red",
+            label=f"Windowed Entropy (median, window={window_size})",
+        )
+        plt.xlabel("Frame Number")
+        plt.ylabel("Entropy")
+        plt.title(
+            f"Windowed Entropy vs Frame Number (Median over {window_size} frames)"
+        )
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+        plt.savefig("windowed_entropy_vs_frame_number.png")
+        plt.close()
+
+    else:
+        print("No valid entropy computed!")
