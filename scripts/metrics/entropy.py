@@ -8,6 +8,26 @@ import skimage.measure
 
 from loader import FrameLoader
 
+
+def rolling_min_max(data, window):
+    """Calculate rolling min and max values over a sliding window."""
+    rolling_min = []
+    rolling_max = []
+    half_window = window // 2
+
+    for i in range(len(data)):
+        # Define window boundaries
+        start = max(0, i - half_window)
+        end = min(len(data), i + half_window + 1)
+
+        # Get min and max for this window
+        window_data = data[start:end]
+        rolling_min.append(np.min(window_data))
+        rolling_max.append(np.max(window_data))
+
+    return np.array(rolling_min), np.array(rolling_max)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run entropy metric on event data.")
     parser.add_argument(
@@ -89,6 +109,8 @@ if __name__ == "__main__":
         plt.savefig("entropy_vs_frame_number.png")
         plt.close()
 
+        min_entropy, max_entropy = rolling_min_max(entropy, window_size)
+
         # Plot 2: Comparison of original and windowed entropy
         plt.figure(figsize=(15, 8))
         plt.plot(
@@ -100,6 +122,14 @@ if __name__ == "__main__":
             alpha=0.8,
             color="red",
             label=f"Windowed Entropy (median, window={window_size})",
+        )
+        plt.fill_between(
+            frame_numbers,
+            min_entropy,
+            max_entropy,
+            color="lightgray",
+            alpha=0.5,
+            label="Entropy Range",
         )
         plt.xlabel("Frame Number")
         plt.ylabel("Entropy")
