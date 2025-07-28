@@ -26,14 +26,12 @@
 #include "haste_wrapper.hpp"
 #include "profiler.hpp"
 
-//#define FANCY_VISUALIZATION
 //#define STORE
 
 // Constants
 namespace {
     constexpr double DEFAULT_FPS = 100.0;
     constexpr std::uint32_t DEFAULT_ACCUMULATION = 5000;
-    constexpr double DEFAULT_MEASUREMENT_NOISE = 0.5;
     constexpr int ESC_KEY = 27;
     constexpr int POLL_TIMEOUT_MS = 10;
     bool NUFFT_ESTIMATION_DONE = false;
@@ -79,10 +77,10 @@ IEKFSinusoidFitter createIEKFFitter(double A, double B, double omega, double C, 
 
     IEKFSinusoidFitter::StateCovariance process_noise;
     process_noise.setIdentity();
-    process_noise(0, 0) = 1e0;
-    process_noise(1, 1) = 1e0;
-    process_noise(2, 2) = 1e-3;
-    process_noise(3, 3) = 1e0;
+    process_noise(0, 0) = 1e1;
+    process_noise(1, 1) = 1e1;
+    process_noise(2, 2) = 1e-2;
+    process_noise(3, 3) = 1e1;
 
     return {initial_state, initial_covariance, process_noise,
             DEFAULT_MEASUREMENT_NOISE, iterations};
@@ -146,6 +144,9 @@ int main(int argc, char *argv[]) {
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
 
+    const int size = haste::HypothesisPatchTracker::kPatchSize;
+    const int half_size = size / 2;
+
     // Initialize undistortion
     Undistort undistort(params.params->calib_file);
 
@@ -177,7 +178,7 @@ int main(int argc, char *argv[]) {
 
     // Initialize fitters and estimator
     NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
-    std::shared_ptr<HasteWrapper<Metavision::EventCD>> tracker;
+    std::vector<std::shared_ptr<HasteWrapper<Metavision::EventCD>>> trackers;
 
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
@@ -187,20 +188,31 @@ int main(int argc, char *argv[]) {
     cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
     cv::resizeWindow(window_name, width, height);
     cv::moveWindow(window_name, 0, 0);
-#ifdef FANCY_VISUALIZATION
-    int visualization_cut_off = width / 2; // Cut-off for visualization
-#endif
+
+    std::vector<std::pair<unsigned short, unsigned short>> tracker_centers;
+
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
-        if (tracker) {
-#ifdef FANCY_VISUALIZATION
-            visualization_cut_off = x; // Update cut-off for visualization
-#endif
+        if (trackers.size() > 0 && !NUFFT_ESTIMATION_DONE) {
+            std::cout << "Working on the first tracker, please wait..." << std::endl;
             return;
         }
-        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
-        std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
+        tracker_centers.emplace_back(x, y);
+        if (NUFFT_ESTIMATION_DONE) [[likely]] {
+            trackers.push_back(
+                    std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t, "output",
+                                                                        std::make_unique<IEKFSinusoidFitter>(
+                                                                                createIEKFFitter(Ax[0], Bx[0],
+                                                                                                 omegas[0], offsets[0],
+                                                                                                 params.params->iekf_iterations)),
+                                                                        std::make_unique<IEKFSinusoidFitter>(
+                                                                                createIEKFFitter(Ay[0], By[0],
+                                                                                                 omegas[0], offsets[1],
+                                                                                                 params.params->iekf_iterations))));
+        } else {
+            trackers.push_back(std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t));
+        }
     };
 
     cv::setMouseCallback(window_name, receiveMouseEvent, &mouse_callback);
@@ -211,7 +223,8 @@ int main(int argc, char *argv[]) {
     double x_pred = 0, y_pred = 0;
 
     Metavision::Stage::EventBuffer compensated_events;
-    unsigned short x_undistorted, y_undistorted;
+    unsigned short x_undistorted, y_undistorted, t_centre_x, t_centre_y;
+
 
     std::once_flag init_flag;
     // Main event processing callback
@@ -220,7 +233,7 @@ int main(int argc, char *argv[]) {
             start_time = std::chrono::steady_clock::now();
             first_event_t = begin->t;
         });
-
+        std::lock_guard<std::mutex> lock(processing_mutex); // TODO: find a way to remove this one
         compensated_events.clear();
         compensated_events.reserve(std::distance(begin, end));
         for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
@@ -240,37 +253,28 @@ int main(int argc, char *argv[]) {
             const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6f;
 
             // Process with tracker
-            if (tracker) {
-                if (tracker_enable) {
-                    in_tracker = tracker->feed(event_to_build);
+            for (auto &tracker: trackers) {
+                if (!tracker->feed(event_to_build)) {
+                    continue;
                 }
+
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
-#ifdef FANCY_VISUALIZATION
-                    // if the event is in the left half of the image skip
-                    if (event_to_build.x < visualization_cut_off) {
-                        continue;
-                    }
-#endif
 
                     if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
                         auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
                         if (x_new < 0 || x_new >= width) {
-                            continue; // Skip if out of bounds
+                            break; // Skip if out of bounds
                         }
                         auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
                         if (y_new < 0 || y_new >= height) {
-                            continue; // Skip if out of bounds
+                            break; // Skip if out of bounds
                         }
                         event_to_build.x = x_new;
                         event_to_build.y = y_new;
-                        continue;
+                        break; // if already modified by a tracker skip, (no overlapping trackers)
                     }
 
                 } else {
-                    if (!in_tracker) {
-                        continue;
-                    }
-
                     if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
                         extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
@@ -315,6 +319,7 @@ int main(int argc, char *argv[]) {
                 cd_frame.copyTo(display_frame);
 
                 if (osd) {
+//                    std::lock_guard<std::mutex> lock(processing_mutex);
                     // Add on-screen display info
                     std::string text = Metavision::getHumanReadableTime(cd_frame_ts);
                     text += "     ";
@@ -324,7 +329,26 @@ int main(int argc, char *argv[]) {
                                 cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(108, 143, 255), 1, cv::LINE_AA);
 
                     // Add tracker info if available
-                    if (tracker) {
+                    if (!trackers.empty()) {
+                        // draw the tracker as a square
+//                        for (const auto &centre: tracker_centers) {
+//                            cv::rectangle(display_frame,
+//                                          cv::Point(centre.first - half_size, centre.second - half_size + 1),
+//                                          cv::Point(centre.first + half_size, centre.second + half_size + 1),
+//                                          cv::Scalar(0, 255, 0), 1);
+//                        }
+                        int i = 0;
+                        for (const auto &tracker: trackers) {
+                            i++;
+                            tracker->getCurrentPosition(t_centre_x, t_centre_y);
+//                            std::cout << i << " " << tracker->color() << std::endl;
+                            const int c = tracker->color();
+                            cv::rectangle(display_frame,
+                                          cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
+                                          cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
+                                          cv::Scalar(c, 255 - c, 255 - int(0.2 * c)), 2);
+                        }
+
                         cv::putText(display_frame, "Tracker: Initialized", cv::Point(10, 40),
                                     cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
 
@@ -353,12 +377,6 @@ int main(int argc, char *argv[]) {
                 osd = !osd;
                 std::cout << "OSD: " << (osd ? "ON" : "OFF") << std::endl;
                 break;
-            case 'r': {
-                std::lock_guard<std::mutex> lock(processing_mutex);
-                tracker.reset();
-                NUFFT_ESTIMATION_DONE = false;
-                std::cout << "Reset tracker" << std::endl;
-            }
             case 't': {
                 std::lock_guard<std::mutex> lock(processing_mutex);
                 tracker_enable = !tracker_enable;
