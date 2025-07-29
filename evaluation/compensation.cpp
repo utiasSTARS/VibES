@@ -13,6 +13,7 @@
 #include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
 
+
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -24,8 +25,6 @@
 #include <csignal>
 #include <thread>
 
-#include "visualizer/ev2image.hpp"
-
 #ifdef STORE
 
 #include <metavision/sdk/driver/hdf5_event_file_writer.h>
@@ -34,7 +33,8 @@
 
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
-#include "estimator/iekf_sinusoid_fitter.hpp"
+//#include "estimator/iekf_sinusoid_fitter.hpp"
+#include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
 #include "profiler.hpp"
@@ -42,11 +42,10 @@
 
 // Constants
 namespace {
-    constexpr double DEFAULT_FPS = 100.0;
+    constexpr double DEFAULT_FPS = 1000.0;
     constexpr std::uint32_t DEFAULT_ACCUMULATION = 5000;
-    constexpr double DEFAULT_MEASUREMENT_NOISE = 0.5;
     constexpr int ESC_KEY = 27;
-    constexpr int POLL_TIMEOUT_MS = 10;
+    constexpr int POLL_TIMEOUT_MS = 1;
     bool NUFFT_ESTIMATION_DONE = false;
 }
 
@@ -71,58 +70,6 @@ void receiveMouseEvent(int event, int x, int y, int flags, void *userdata) {
 
     if (event == cv::EVENT_LBUTTONDOWN && callback) {
         (*callback)(x, y);
-    }
-}
-
-/**
- * Creates and configures an IEKF sinusoid fitter with given parameters
- */
-IEKFSinusoidFitter createIEKFFitter(double A, double B, double omega, double C, int iterations = 1) {
-    IEKFSinusoidFitter::StateVector initial_state;
-    initial_state << A, B, omega, C;
-
-    IEKFSinusoidFitter::StateCovariance initial_covariance;
-    initial_covariance.setIdentity();
-    initial_covariance(0, 0) = 1e2;  // A amplitude
-    initial_covariance(1, 1) = 1e2;  // B amplitude
-    initial_covariance(2, 2) = 1e1;  // omega frequency
-    initial_covariance(3, 3) = 1e3;  // C DC offset
-
-    IEKFSinusoidFitter::StateCovariance process_noise;
-    process_noise.setIdentity();
-    process_noise(0, 0) = 1e0;
-    process_noise(1, 1) = 1e0;
-    process_noise(2, 2) = 1e-3;
-    process_noise(3, 3) = 1e0;
-
-    return {initial_state, initial_covariance, process_noise,
-            DEFAULT_MEASUREMENT_NOISE, iterations};
-}
-
-/**
- * Extracts harmonic parameters from NUFFT estimator results
- */
-void extractHarmonicParameters(const NUFFTHelixEstimator &estimator,
-                               std::vector<double> &Ax, std::vector<double> &Ay,
-                               std::vector<double> &Bx, std::vector<double> &By,
-                               std::vector<double> &omegas, std::vector<double> &offsets) {
-
-    for (const auto &harmonic: estimator.getHarmonics()) {
-        double phase_x = std::atan2(harmonic.amplitude_x, harmonic.amplitude_y);
-        double phase_y = std::atan2(harmonic.amplitude_y, harmonic.amplitude_x);
-
-        double ax = harmonic.amplitude_x * std::cos(phase_x);
-        double ay = harmonic.amplitude_y * std::sin(phase_y);
-        double bx = harmonic.amplitude_x * std::sin(phase_x);
-        double by = harmonic.amplitude_y * std::cos(phase_y);
-
-        Ax.push_back(ax);
-        Ay.push_back(ay);
-        Bx.push_back(bx);
-        By.push_back(by);
-        omegas.push_back(harmonic.frequency);
-        offsets.push_back(harmonic.offset_x);
-        offsets.push_back(harmonic.offset_y);
     }
 }
 
@@ -157,6 +104,12 @@ int main(int argc, char *argv[]) {
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
 
+    const int size = haste::HypothesisPatchTracker::kPatchSize;
+    const int half_size = size / 2;
+
+    const cv::Scalar color_tracker(0, 255, 0); // Green color for tracker visualization
+    unsigned short t_centre_x=0, t_centre_y=0;
+
     // Initialize undistortion
     Undistort undistort(params.params->calib_file);
 
@@ -176,10 +129,6 @@ int main(int argc, char *argv[]) {
                                  cd_frame_ts = ts;
                                  frame.copyTo(cd_frame);
                              });
-
-
-    Metavision::Event
-
 
     // Setup event rate estimator
     double avg_rate = 0, peak_rate = 0;
@@ -224,6 +173,8 @@ int main(int argc, char *argv[]) {
             return;
         }
         tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
+        t_centre_x = x;
+        t_centre_y = y;
         std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
 
@@ -238,11 +189,6 @@ int main(int argc, char *argv[]) {
     unsigned short x_undistorted, y_undistorted;
 
     std::once_flag init_flag;
-
-    Metavision::Stage::EventBuffer amiev_events;
-    Metavision::timestamp duration_for_amiev = 0;
-    std::vector<ImageResults> compensated_images_amiev_vis;
-    int counter = 0;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         std::call_once(init_flag, [&]() {
@@ -292,6 +238,7 @@ int main(int argc, char *argv[]) {
                         }
                         event_to_build.x = x_new;
                         event_to_build.y = y_new;
+                        event_to_build.p = 0;
                         continue;
                     }
 
@@ -302,7 +249,8 @@ int main(int argc, char *argv[]) {
 
                     if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
-                        extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
+                        NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator.getHarmonics(), Ax, Ay, Bx, By,
+                                                                       omegas, offsets);
 
                         if (!Ax.empty()) {
                             std::cout << "\033[1;34mTracker initialized with parameters:\033[0m" << std::endl;
@@ -312,39 +260,18 @@ int main(int argc, char *argv[]) {
                                       << ", offset_y: " << offsets[1] << std::endl;
                             tracker->addFitters(
                                     std::make_unique<IEKFSinusoidFitter>(
-                                            createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
-                                                             params.params->iekf_iterations)),
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ax, Bx, omegas, offsets)),
                                     std::make_unique<IEKFSinusoidFitter>(
-                                            createIEKFFitter(Ay[0], By[0], omegas[0], offsets[1],
-                                                             params.params->iekf_iterations)));
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ay, By, omegas, offsets)));
                         }
                         NUFFT_ESTIMATION_DONE = nufft_estimator.done();
                     }
                 }
             }
         }
-
         // Feed events to frame generator and rate estimator
         const auto *begin_comp = compensated_events.data();
         const auto *end_comp = begin_comp + compensated_events.size();
-
-        // check the time chunk in the event
-        if (NUFFT_ESTIMATION_DONE) {
-
-            unsigned short delta = end->t - begin->t;
-            duration_for_amiev += delta;
-            amiev_events.insert(amiev_events.end(), begin_comp, end_comp);
-            if (duration_for_amiev > 2000){ //29997) {
-                // do every 100
-                auto res = ev2img_metavision(amiev_events, height, width);
-                compensated_images_amiev_vis.emplace_back(res);
-                amiev_events.clear();
-                duration_for_amiev = 0; // reset the duration for next chunk
-                std::cout << "Processed " << compensated_images_amiev_vis.size() << " chunks of events." << std::endl;
-            }
-        }
-        counter++;
-
 #ifdef STORE
         hdf5_writer.add_events(begin_comp, end_comp);
 #endif
@@ -366,6 +293,14 @@ int main(int argc, char *argv[]) {
                 cd_frame.copyTo(display_frame);
 
                 if (osd) {
+                    if (tracker) {
+                        tracker->getCurrentPosition(t_centre_x, t_centre_y);
+                        cv::rectangle(display_frame,
+                                      cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
+                                      cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
+                                      color_tracker, 2);
+                    }
+
                     // Add on-screen display info
                     std::string text = Metavision::getHumanReadableTime(cd_frame_ts);
                     text += "     ";
@@ -435,6 +370,12 @@ int main(int argc, char *argv[]) {
     end_time = std::chrono::steady_clock::now();
 
 #ifdef STORE
+    // print blue text
+    std::cout << "\033[1;34mWriting events to HDF5 file...\033[0m" << std::endl;
+    if (hdf5_writer.is_open()) {
+        std::cout << "\033[1;34mEvents written to: " << out_hdf5_file_path << "\033[0m" << std::endl;
+    }
+    // Close HDF5 writer
     hdf5_writer.close();
 #endif
 
@@ -442,38 +383,6 @@ int main(int argc, char *argv[]) {
     cd_frame_generator.stop();
     if (params.camera.is_running()) {
         params.camera.stop();
-    }
-
-    // create a folder for each of the images
-    std::vector<std::string> folder_names = {
-        "img_bin", "img_cnt_gray", "img_ts", "img_avgts", "img_cnt_color", "img_ts_color", "img_avgts_color"
-    };
-    for (const auto &folder_name : folder_names) {
-        std::filesystem::path folder_path = params.params->output_folder + "/imgs/" + folder_name;
-        if (!std::filesystem::exists(folder_path)) {
-            std::filesystem::create_directories(folder_path);
-        }
-    }
-
-    for (int i = 0; i < compensated_images_amiev_vis.size(); ++i) {
-        const auto &img = compensated_images_amiev_vis[i];
-        auto counter_str = std::to_string(i);
-        cv::imshow("Binary Image", img.img_bin);
-        cv::imshow("Count Gray Image", img.img_cnt_gray);
-        cv::imshow("Timestamp Image", img.img_ts);
-        cv::imshow("Average Timestamp Image", img.img_avgts);
-        cv::imshow("Count Color Image", img.img_cnt_color);
-        cv::imshow("Timestamp Color Image", img.img_ts_color);
-        cv::imshow("Average Timestamp Color Image", img.img_avgts_color);
-        cv::waitKey(1); // Wait for key press to show each image
-
-        cv::imwrite(params.params->output_folder + "/imgs/img_bin/img_" + counter_str + ".png", img.img_bin);
-        cv::imwrite(params.params->output_folder + "/imgs/img_cnt_gray/img_" + counter_str + ".png", img.img_cnt_gray);
-        cv::imwrite(params.params->output_folder + "/imgs/img_ts/img_" + counter_str + ".png", img.img_ts);
-        cv::imwrite(params.params->output_folder + "/imgs/img_avgts/img_" + counter_str + ".png", img.img_avgts);
-        cv::imwrite(params.params->output_folder + "/imgs/img_cnt_color/img_" + counter_str + ".png", img.img_cnt_color);
-        cv::imwrite(params.params->output_folder + "/imgs/img_ts_color/img_" + counter_str + ".png", img.img_ts_color);
-        cv::imwrite(params.params->output_folder + "/imgs/img_avgts_color/img_" + counter_str + ".png", img.img_avgts_color);
     }
 
     return 0;

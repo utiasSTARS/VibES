@@ -34,8 +34,8 @@ using TrackerPtr = std::shared_ptr<haste::HypothesisPatchTracker>;
 namespace {
     constexpr double MIN_FREQUENCY = 5.0;   // Hz
     constexpr double MAX_FREQUENCY = 80.0;  // Hz
-    constexpr int MAX_HARMONICS = 2;
-    constexpr double TRACKER_RATE = 0.01;
+    constexpr int MAX_HARMONICS = 1;
+    constexpr double TRACKER_RATE = 0.1;
     constexpr int TRACKER_MARGIN = haste::HypothesisPatchTracker::kPatchSize / 2 + 15;
     constexpr double TRACKER_MARGIN_SQ = TRACKER_MARGIN * TRACKER_MARGIN;
     constexpr size_t MAX_CENTROIDS_QUEUE = 1000;
@@ -243,13 +243,13 @@ protected:
             if (x_fitter_) {
                 x_fitter_->update(t, x);
                 double amplitude = x_fitter_->getAmplitude();
-                color_.store(static_cast<int>(std::min(255.0,
-                                                       std::max(0.0,
-                                                                amplitude * 1000 / static_cast<double>(MAX_AMPLITUDE) *
-                                                                255.0))),
-                             std::memory_order_relaxed);
-//                color_.store(static_cast<int>(amplitude*1000),
+//                color_.store(static_cast<int>(std::min(255.0,
+//                                                       std::max(0.0,
+//                                                                amplitude * 1000 / static_cast<double>(MAX_AMPLITUDE) *
+//                                                                255.0))),
 //                             std::memory_order_relaxed);
+                color_.store(static_cast<int>(amplitude*1000),
+                             std::memory_order_relaxed);
                 last_x_.store(x_fitter_->getShift(), std::memory_order_relaxed);
             }
             if (y_fitter_) {
@@ -280,10 +280,10 @@ public:
     }
 
     bool feed(const T &event) {
-        if (inTracker(event)) {
+//        if (inTracker(event)) {
             return event_stack_.push(event);
-        }
-        return false;
+//        }
+//        return false;
     }
 
     bool feed(const T &event, unsigned short &x, unsigned short &y) {

@@ -47,7 +47,7 @@ public:
             process_noise(0, 0) = 1e0;
             process_noise(1, 1) = 1e0;
             process_noise(2, 2) = 1e-3;
-            process_noise(3, 3) = 1e0;
+            process_noise(3, 3) = 1e1;
 
             return IEKFSinusoidFitter(initial_state, initial_covariance, process_noise,
                                       measurement_noise_variance, max_iterations, convergence_threshold);
@@ -77,7 +77,7 @@ public:
             process_noise(3, 3) = 1e0;
             process_noise(4, 4) = 1e-3;
             process_noise(5, 5) = 1e-3;
-            process_noise(6, 6) = 1e3;
+            process_noise(6, 6) = 1e1;
 
             return IEKFSinusoidFitter(initial_state, initial_covariance, process_noise,
                                       measurement_noise_variance, max_iterations, convergence_threshold);

@@ -3,14 +3,20 @@
 // Based on Metavision SDK patterns
 //
 
+#define FANCY_VISUALIZATION
+//#define STORE
+
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
 #include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
+
+
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+
 #include <mutex>
 #include <memory>
 #include <chrono>
@@ -19,14 +25,20 @@
 #include <csignal>
 #include <thread>
 
+#ifdef STORE
+
+#include <metavision/sdk/driver/hdf5_event_file_writer.h>
+
+#endif
+
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
-#include "estimator/iekf_sinusoid_fitter.hpp"
+//#include "estimator/iekf_sinusoid_fitter.hpp"
+#include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
 #include "profiler.hpp"
 
-//#define STORE
 
 // Constants
 namespace {
@@ -58,58 +70,6 @@ void receiveMouseEvent(int event, int x, int y, int flags, void *userdata) {
 
     if (event == cv::EVENT_LBUTTONDOWN && callback) {
         (*callback)(x, y);
-    }
-}
-
-/**
- * Creates and configures an IEKF sinusoid fitter with given parameters
- */
-IEKFSinusoidFitter createIEKFFitter(double A, double B, double omega, double C, int iterations = 1) {
-    IEKFSinusoidFitter::StateVector initial_state;
-    initial_state << A, B, omega, C;
-
-    IEKFSinusoidFitter::StateCovariance initial_covariance;
-    initial_covariance.setIdentity();
-    initial_covariance(0, 0) = 1e2;  // A amplitude
-    initial_covariance(1, 1) = 1e2;  // B amplitude
-    initial_covariance(2, 2) = 1e1;  // omega frequency
-    initial_covariance(3, 3) = 1e3;  // C DC offset
-
-    IEKFSinusoidFitter::StateCovariance process_noise;
-    process_noise.setIdentity();
-    process_noise(0, 0) = 1e1;
-    process_noise(1, 1) = 1e1;
-    process_noise(2, 2) = 1e-2;
-    process_noise(3, 3) = 1e1;
-
-    return {initial_state, initial_covariance, process_noise,
-            DEFAULT_MEASUREMENT_NOISE, iterations};
-}
-
-/**
- * Extracts harmonic parameters from NUFFT estimator results
- */
-void extractHarmonicParameters(const NUFFTHelixEstimator &estimator,
-                               std::vector<double> &Ax, std::vector<double> &Ay,
-                               std::vector<double> &Bx, std::vector<double> &By,
-                               std::vector<double> &omegas, std::vector<double> &offsets) {
-
-    for (const auto &harmonic: estimator.getHarmonics()) {
-        double phase_x = std::atan2(harmonic.amplitude_x, harmonic.amplitude_y);
-        double phase_y = std::atan2(harmonic.amplitude_y, harmonic.amplitude_x);
-
-        double ax = harmonic.amplitude_x * std::cos(phase_x);
-        double ay = harmonic.amplitude_y * std::sin(phase_y);
-        double bx = harmonic.amplitude_x * std::sin(phase_x);
-        double by = harmonic.amplitude_y * std::cos(phase_y);
-
-        Ax.push_back(ax);
-        Ay.push_back(ay);
-        Bx.push_back(bx);
-        By.push_back(by);
-        omegas.push_back(harmonic.frequency);
-        offsets.push_back(harmonic.offset_x);
-        offsets.push_back(harmonic.offset_y);
     }
 }
 
@@ -183,6 +143,15 @@ int main(int argc, char *argv[]) {
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
 
+#ifdef STORE
+    std::filesystem::path out_hdf5_file_path = params.params->output_folder + "/events.hdf5";
+    if (!out_hdf5_file_path.parent_path().empty() && !std::filesystem::exists(out_hdf5_file_path.parent_path())) {
+        std::filesystem::create_directories(out_hdf5_file_path.parent_path());
+    }
+    Metavision::HDF5EventFileWriter hdf5_writer(out_hdf5_file_path);
+    hdf5_writer.add_metadata_map_from_camera(params.camera);
+#endif
+
     // Setup display window (similar to original)
     std::string window_name("HARMEDA Event Tracking");
     cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
@@ -203,13 +172,11 @@ int main(int argc, char *argv[]) {
             trackers.push_back(
                     std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t, "output",
                                                                         std::make_unique<IEKFSinusoidFitter>(
-                                                                                createIEKFFitter(Ax[0], Bx[0],
-                                                                                                 omegas[0], offsets[0],
-                                                                                                 params.params->iekf_iterations)),
+                                                                                IEKFSinusoidFitter::createFromHarmonicEstimates(
+                                                                                        Ax, Bx, omegas, offsets)),
                                                                         std::make_unique<IEKFSinusoidFitter>(
-                                                                                createIEKFFitter(Ay[0], By[0],
-                                                                                                 omegas[0], offsets[1],
-                                                                                                 params.params->iekf_iterations))));
+                                                                                IEKFSinusoidFitter::createFromHarmonicEstimates(
+                                                                                        Ay, By, omegas, offsets))));
         } else {
             trackers.push_back(std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t));
         }
@@ -233,7 +200,7 @@ int main(int argc, char *argv[]) {
             start_time = std::chrono::steady_clock::now();
             first_event_t = begin->t;
         });
-        std::lock_guard<std::mutex> lock(processing_mutex); // TODO: find a way to remove this one
+
         compensated_events.clear();
         compensated_events.reserve(std::distance(begin, end));
         for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
@@ -254,6 +221,7 @@ int main(int argc, char *argv[]) {
 
             // Process with tracker
             for (auto &tracker: trackers) {
+                std::lock_guard<std::mutex> lock(processing_mutex);
                 if (!tracker->feed(event_to_build)) {
                     continue;
                 }
@@ -271,13 +239,15 @@ int main(int argc, char *argv[]) {
                         }
                         event_to_build.x = x_new;
                         event_to_build.y = y_new;
-                        break; // if already modified by a tracker skip, (no overlapping trackers)
+                        event_to_build.p = 0;
+                        break;
                     }
 
                 } else {
                     if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
-                        extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
+                        NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator.getHarmonics(), Ax, Ay, Bx, By,
+                                                                       omegas, offsets);
 
                         if (!Ax.empty()) {
                             std::cout << "\033[1;34mTracker initialized with parameters:\033[0m" << std::endl;
@@ -287,11 +257,9 @@ int main(int argc, char *argv[]) {
                                       << ", offset_y: " << offsets[1] << std::endl;
                             tracker->addFitters(
                                     std::make_unique<IEKFSinusoidFitter>(
-                                            createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
-                                                             params.params->iekf_iterations)),
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ax, Bx, omegas, offsets)),
                                     std::make_unique<IEKFSinusoidFitter>(
-                                            createIEKFFitter(Ay[0], By[0], omegas[0], offsets[1],
-                                                             params.params->iekf_iterations)));
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ay, By, omegas, offsets)));
                         }
                         NUFFT_ESTIMATION_DONE = nufft_estimator.done();
                     }
@@ -319,7 +287,7 @@ int main(int argc, char *argv[]) {
                 cd_frame.copyTo(display_frame);
 
                 if (osd) {
-//                    std::lock_guard<std::mutex> lock(processing_mutex);
+                    std::lock_guard<std::mutex> lock(processing_mutex);
                     // Add on-screen display info
                     std::string text = Metavision::getHumanReadableTime(cd_frame_ts);
                     text += "     ";
@@ -330,23 +298,23 @@ int main(int argc, char *argv[]) {
 
                     // Add tracker info if available
                     if (!trackers.empty()) {
-                        // draw the tracker as a square
-//                        for (const auto &centre: tracker_centers) {
-//                            cv::rectangle(display_frame,
-//                                          cv::Point(centre.first - half_size, centre.second - half_size + 1),
-//                                          cv::Point(centre.first + half_size, centre.second + half_size + 1),
-//                                          cv::Scalar(0, 255, 0), 1);
-//                        }
                         int i = 0;
+                        int color_main = trackers.back()->color();
+                        const cv::Scalar main_color(128, 200, 128);
                         for (const auto &tracker: trackers) {
                             i++;
                             tracker->getCurrentPosition(t_centre_x, t_centre_y);
 //                            std::cout << i << " " << tracker->color() << std::endl;
-                            const int c = tracker->color();
+                            const auto rel_color = tracker->color() / double(color_main);
+
                             cv::rectangle(display_frame,
                                           cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
                                           cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
-                                          cv::Scalar(c, 255 - c, 255 - int(0.2 * c)), 2);
+                                          cv::Scalar(
+                                                  std::clamp(main_color[0] * rel_color, 0.0, 255.0),
+                                                  std::clamp(main_color[1] * rel_color, 0.0, 255.0),
+                                                  std::clamp(main_color[2] * rel_color, 0.0, 255.0)
+                                          ), 2);
                         }
 
                         cv::putText(display_frame, "Tracker: Initialized", cv::Point(10, 40),

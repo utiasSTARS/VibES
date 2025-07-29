@@ -3,7 +3,7 @@
 // Based on Metavision SDK patterns
 //
 
-#define FANCY_VISUALIZATION
+//#define FANCY_VISUALIZATION
 //#define STORE
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
@@ -39,6 +39,7 @@
 #include "haste_wrapper.hpp"
 #include "profiler.hpp"
 
+#include "filter/freq_filter.hpp"
 
 // Constants
 namespace {
@@ -177,6 +178,8 @@ int main(int argc, char *argv[]) {
 
     double x_pred = 0, y_pred = 0;
 
+    std::unique_ptr<FreqFilter> freq_filter;
+
     Metavision::Stage::EventBuffer compensated_events;
     unsigned short x_undistorted, y_undistorted;
 
@@ -198,6 +201,10 @@ int main(int argc, char *argv[]) {
             if (x_undistorted < 0 || x_undistorted >= width || y_undistorted < 0 || y_undistorted >= height) {
                 continue; // Skip events that are out of bounds
             }
+            if(freq_filter && !freq_filter->check(x_undistorted, y_undistorted, ev->t)) {
+                continue; // Skip events that do not pass the frequency filter
+            }
+
             auto &event_to_build = compensated_events.emplace_back();
             event_to_build.x = x_undistorted;
             event_to_build.y = y_undistorted;
@@ -250,6 +257,7 @@ int main(int argc, char *argv[]) {
                                       << ", Bx: " << Bx[0] << ", By: " << By[0]
                                       << ", omega: " << omegas[0] << ", offset_x: " << offsets[0]
                                       << ", offset_y: " << offsets[1] << std::endl;
+                            freq_filter = std::make_unique<FreqFilter>(width, height, omegas[0] - 15, omegas[0] + 15);
                             tracker->addFitters(
                                     std::make_unique<IEKFSinusoidFitter>(
                                             IEKFSinusoidFitter::createFromHarmonicEstimates(Ax, Bx, omegas, offsets)),

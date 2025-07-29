@@ -1,8 +1,10 @@
 //
-// This file is part of the HARMEDA project, which implements a motion compensation algorithm.
-// The algorihtm works in realtime but runtime performances may be affected by the number of incoming events.
-// The script stores a HDF5 file compliant with Prophesee specification.
+// Enhanced Event-based Motion Tracking with Proper Visualization
+// Based on Metavision SDK patterns
 //
+
+//#define FANCY_VISUALIZATION
+#define STORE
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
@@ -22,12 +24,17 @@
 #include <sstream>
 #include <csignal>
 #include <thread>
+
+#ifdef STORE
+
 #include <metavision/sdk/driver/hdf5_event_file_writer.h>
 
+#endif
 
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
-#include "estimator/iekf_sinusoid_fitter.hpp"
+//#include "estimator/iekf_sinusoid_fitter.hpp"
+#include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
 #include "profiler.hpp"
@@ -35,11 +42,10 @@
 
 // Constants
 namespace {
-    constexpr double DEFAULT_FPS = 100.0;
+    constexpr double DEFAULT_FPS = 1000.0;
     constexpr std::uint32_t DEFAULT_ACCUMULATION = 5000;
-    constexpr double DEFAULT_MEASUREMENT_NOISE = 0.5;
     constexpr int ESC_KEY = 27;
-    constexpr int POLL_TIMEOUT_MS = 10;
+    constexpr int POLL_TIMEOUT_MS = 1;
     bool NUFFT_ESTIMATION_DONE = false;
 }
 
@@ -58,64 +64,12 @@ int processUI(int delay_ms) {
     return key;
 }
 
-// Mouse callback for tracker selection
+// Mouse callback for tracker1 selection
 void receiveMouseEvent(int event, int x, int y, int flags, void *userdata) {
     auto *callback = reinterpret_cast<std::function<void(int, int)> *>(userdata);
 
     if (event == cv::EVENT_LBUTTONDOWN && callback) {
         (*callback)(x, y);
-    }
-}
-
-/**
- * Creates and configures an IEKF sinusoid fitter with given parameters
- */
-IEKFSinusoidFitter createIEKFFitter(double A, double B, double omega, double C, int iterations = 1) {
-    IEKFSinusoidFitter::StateVector initial_state;
-    initial_state << A, B, omega, C;
-
-    IEKFSinusoidFitter::StateCovariance initial_covariance;
-    initial_covariance.setIdentity();
-    initial_covariance(0, 0) = 1e2;  // A amplitude
-    initial_covariance(1, 1) = 1e2;  // B amplitude
-    initial_covariance(2, 2) = 1e1;  // omega frequency
-    initial_covariance(3, 3) = 1e3;  // C DC offset
-
-    IEKFSinusoidFitter::StateCovariance process_noise;
-    process_noise.setIdentity();
-    process_noise(0, 0) = 1e0;
-    process_noise(1, 1) = 1e0;
-    process_noise(2, 2) = 1e-3;
-    process_noise(3, 3) = 1e0;
-
-    return {initial_state, initial_covariance, process_noise,
-            DEFAULT_MEASUREMENT_NOISE, iterations};
-}
-
-/**
- * Extracts harmonic parameters from NUFFT estimator results
- */
-void extractHarmonicParameters(const NUFFTHelixEstimator &estimator,
-                               std::vector<double> &Ax, std::vector<double> &Ay,
-                               std::vector<double> &Bx, std::vector<double> &By,
-                               std::vector<double> &omegas, std::vector<double> &offsets) {
-
-    for (const auto &harmonic: estimator.getHarmonics()) {
-        double phase_x = std::atan2(harmonic.amplitude_x, harmonic.amplitude_y);
-        double phase_y = std::atan2(harmonic.amplitude_y, harmonic.amplitude_x);
-
-        double ax = harmonic.amplitude_x * std::cos(phase_x);
-        double ay = harmonic.amplitude_y * std::sin(phase_y);
-        double bx = harmonic.amplitude_x * std::sin(phase_x);
-        double by = harmonic.amplitude_y * std::cos(phase_y);
-
-        Ax.push_back(ax);
-        Ay.push_back(ay);
-        Bx.push_back(bx);
-        By.push_back(by);
-        omegas.push_back(harmonic.frequency);
-        offsets.push_back(harmonic.offset_x);
-        offsets.push_back(harmonic.offset_y);
     }
 }
 
@@ -150,6 +104,13 @@ int main(int argc, char *argv[]) {
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
 
+    const int size = haste::HypothesisPatchTracker::kPatchSize;
+    const int half_size = size / 2;
+
+    const cv::Scalar color_tracker(0, 255, 0); // Green color for tracker1 visualizationv
+    const cv::Scalar color_tracker2(255, 0, 0); // Green color for tracker1 visualization
+    unsigned short t_centre_x = 0, t_centre_y = 0;
+    unsigned short t_centre_x2 = 0, t_centre_y2 = 0;
     // Initialize undistortion
     Undistort undistort(params.params->calib_file);
 
@@ -181,7 +142,7 @@ int main(int argc, char *argv[]) {
 
     // Initialize fitters and estimator
     NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
-    std::shared_ptr<HasteWrapper<Metavision::EventCD>> tracker;
+    std::shared_ptr<HasteWrapper<Metavision::EventCD>> tracker1, tracker2;
 
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
@@ -203,16 +164,22 @@ int main(int argc, char *argv[]) {
 #ifdef FANCY_VISUALIZATION
     int visualization_cut_off = width / 2; // Cut-off for visualization
 #endif
-    // Mouse callback for tracker initialization
+    // Mouse callback for tracker1 initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
-        if (tracker) {
+        if (tracker1) {
 #ifdef FANCY_VISUALIZATION
             visualization_cut_off = x; // Update cut-off for visualization
 #endif
             return;
         }
-        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
+        tracker1 = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
+        tracker2 = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
+
+        t_centre_x = x;
+        t_centre_y = y;
+        t_centre_x2 = x;
+        t_centre_y2 = y;
         std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
 
@@ -252,11 +219,10 @@ int main(int argc, char *argv[]) {
 
             const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6f;
 
-            // Process with tracker
-            if (tracker) {
-                if (tracker_enable) {
-                    in_tracker = tracker->feed(event_to_build);
-                }
+            // Process with tracker1
+            if (tracker1 && tracker2) {
+                    in_tracker = tracker1->feed(event_to_build);
+                    tracker2->feed(event_to_build);
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
 #ifdef FANCY_VISUALIZATION
                     // if the event is in the left half of the image skip
@@ -265,28 +231,30 @@ int main(int argc, char *argv[]) {
                     }
 #endif
 
-                    if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
-                        auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
-                        if (x_new < 0 || x_new >= width) {
-                            continue; // Skip if out of bounds
-                        }
-                        auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
-                        if (y_new < 0 || y_new >= height) {
-                            continue; // Skip if out of bounds
-                        }
-                        event_to_build.x = x_new;
-                        event_to_build.y = y_new;
-                        continue;
-                    }
+//                    if (tracker1->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
+//                        auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
+//                        if (x_new < 0 || x_new >= width) {
+//                            continue; // Skip if out of bounds
+//                        }
+//                        auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
+//                        if (y_new < 0 || y_new >= height) {
+//                            continue; // Skip if out of bounds
+//                        }
+//                        event_to_build.x = x_new;
+//                        event_to_build.y = y_new;
+//                        event_to_build.p = 0;
+//                        continue;
+//                    }
 
                 } else {
                     if (!in_tracker) {
                         continue;
                     }
 
-                    if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
+                    if (nufft_estimator.feed(std::move(tracker1->getCentroids()))) {
                         nufft_estimator.printResults();
-                        extractHarmonicParameters(nufft_estimator, Ax, Ay, Bx, By, omegas, offsets);
+                        NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator.getHarmonics(), Ax, Ay, Bx, By,
+                                                                       omegas, offsets);
 
                         if (!Ax.empty()) {
                             std::cout << "\033[1;34mTracker initialized with parameters:\033[0m" << std::endl;
@@ -294,13 +262,30 @@ int main(int argc, char *argv[]) {
                                       << ", Bx: " << Bx[0] << ", By: " << By[0]
                                       << ", omega: " << omegas[0] << ", offset_x: " << offsets[0]
                                       << ", offset_y: " << offsets[1] << std::endl;
-                            tracker->addFitters(
+
+                            std::vector<double> single_sinusoid_omegas = {omegas[0]};
+                            std::vector<double> single_sinusoid_offsets = {offsets[0], offsets[1]};
+                            std::vector<double> single_sinusoid_Ax = {Ax[0]};
+                            std::vector<double> single_sinusoid_Ay = {Ay[0]};
+                            std::vector<double> single_sinusoid_Bx = {Bx[0]};
+                            std::vector<double> single_sinusoid_By = {By[0]};
+
+                            tracker1->addFitters(
                                     std::make_unique<IEKFSinusoidFitter>(
-                                            createIEKFFitter(Ax[0], Bx[0], omegas[0], offsets[0],
-                                                             params.params->iekf_iterations)),
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(single_sinusoid_Ax,
+                                                                                            single_sinusoid_Bx,
+                                                                                            single_sinusoid_omegas,
+                                                                                            single_sinusoid_offsets)),
                                     std::make_unique<IEKFSinusoidFitter>(
-                                            createIEKFFitter(Ay[0], By[0], omegas[0], offsets[1],
-                                                             params.params->iekf_iterations)));
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(single_sinusoid_Ay,
+                                                                                            single_sinusoid_By,
+                                                                                            single_sinusoid_omegas,
+                                                                                            single_sinusoid_offsets)));
+                            tracker2->addFitters(
+                                    std::make_unique<IEKFSinusoidFitter>(
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ax, Bx, omegas, offsets)),
+                                    std::make_unique<IEKFSinusoidFitter>(
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ay, By, omegas, offsets)));
                         }
                         NUFFT_ESTIMATION_DONE = nufft_estimator.done();
                     }
@@ -339,8 +324,20 @@ int main(int argc, char *argv[]) {
                     cv::putText(display_frame, text, cv::Point(10, 20),
                                 cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(108, 143, 255), 1, cv::LINE_AA);
 
-                    // Add tracker info if available
-                    if (tracker) {
+                    // Add tracker1 info if available
+                    if (tracker1) {
+                        tracker1->getCurrentPosition(t_centre_x, t_centre_y);
+                        cv::rectangle(display_frame,
+                                      cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
+                                      cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
+                                      color_tracker, 2);
+
+                        tracker2->getCurrentPosition(t_centre_x2, t_centre_y2);
+                        cv::rectangle(display_frame,
+                                      cv::Point(t_centre_x2 - half_size, t_centre_y2 - half_size + 1),
+                                      cv::Point(t_centre_x2 + half_size, t_centre_y2 + half_size + 1),
+                                      color_tracker2, 2);
+
                         cv::putText(display_frame, "Tracker: Initialized", cv::Point(10, 40),
                                     cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
 
@@ -349,7 +346,7 @@ int main(int argc, char *argv[]) {
                                         cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
                         }
                     } else {
-                        cv::putText(display_frame, "Click to initialize tracker", cv::Point(10, 40),
+                        cv::putText(display_frame, "Click to initialize tracker1", cv::Point(10, 40),
                                     cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
                     }
                 }
@@ -371,9 +368,9 @@ int main(int argc, char *argv[]) {
                 break;
             case 'r': {
                 std::lock_guard<std::mutex> lock(processing_mutex);
-                tracker.reset();
+                tracker1.reset();
                 NUFFT_ESTIMATION_DONE = false;
-                std::cout << "Reset tracker" << std::endl;
+                std::cout << "Reset tracker1" << std::endl;
             }
             case 't': {
                 std::lock_guard<std::mutex> lock(processing_mutex);
@@ -385,9 +382,9 @@ int main(int argc, char *argv[]) {
                 std::cout << "Controls:\n"
                           << "  ESC/q: Exit\n"
                           << "  o: Toggle OSD\n"
-                          << "  r: Reset tracker\n"
+                          << "  r: Reset tracker1\n"
                           << "  h: This help\n"
-                          << "  Mouse click: Initialize tracker\n";
+                          << "  Mouse click: Initialize tracker1\n";
                 break;
             default:
                 break;
@@ -400,6 +397,12 @@ int main(int argc, char *argv[]) {
     end_time = std::chrono::steady_clock::now();
 
 #ifdef STORE
+    // print blue text
+    std::cout << "\033[1;34mWriting events to HDF5 file...\033[0m" << std::endl;
+    if (hdf5_writer.is_open()) {
+        std::cout << "\033[1;34mEvents written to: " << out_hdf5_file_path << "\033[0m" << std::endl;
+    }
+    // Close HDF5 writer
     hdf5_writer.close();
 #endif
 
