@@ -7,6 +7,7 @@
 #define STORE_FRAMES
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
+#include <metavision/sdk/core/algorithms/event_buffer_reslicer_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
@@ -78,7 +79,7 @@ int main(int argc, char *argv[]) {
 
 
     // create folder if not exists
-    std::string output_images = params.params->output_folder + "/imgs/img_bin/";
+    std::string output_images = params.params->output_folder + "/img_bin/";
     if (!std::filesystem::exists(output_images)) {
         std::filesystem::create_directories(output_images);
     }
@@ -156,15 +157,20 @@ int main(int argc, char *argv[]) {
     Metavision::timestamp duration_for_amiev = 0;
     unsigned short x_undistorted, y_undistorted;
 
+    cv::namedWindow("img bin", cv::WINDOW_AUTOSIZE);
     cv::Mat output_image = cv::Mat::zeros(cv::Size(width, height), CV_8UC1);
 
     long long counter = 0;
     std::once_flag init_flag;
+    long long slice_initial_time = 0;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
+        if (begin == end)
+            return;
         std::call_once(init_flag, [&]() {
             start_time = std::chrono::steady_clock::now();
             first_event_t = begin->t;
+            slice_initial_time = first_event_t;
         });
 
         compensated_events.clear();
@@ -188,9 +194,8 @@ int main(int argc, char *argv[]) {
 
             // Process with tracker
             if (tracker) {
-                if (tracker_enable) {
-                    in_tracker = tracker->feed(event_to_build);
-                }
+                in_tracker = tracker->feed(event_to_build);
+
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
                     if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
                         auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
@@ -204,15 +209,10 @@ int main(int argc, char *argv[]) {
                         event_to_build.x = x_new;
                         event_to_build.y = y_new;
                         event_to_build.p = 0;
-                        continue;
                     }
 
                 } else {
-                    if (!in_tracker) {
-                        continue;
-                    }
-
-                    if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
+                    if (in_tracker && nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
                         NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator.getHarmonics(), Ax, Ay, Bx, By,
                                                                        omegas, offsets);
@@ -233,24 +233,21 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
-        }
-        // Feed events to frame generator and rate estimator
-        const auto *begin_comp = compensated_events.data();
-        const auto *end_comp = begin_comp + compensated_events.size();
-#ifdef STORE
-        hdf5_writer.add_events(begin_comp, end_comp);
-#endif
-        unsigned short delta = end->t - begin->t;
-        duration_for_amiev += delta;
-        ev2img_metavision(compensated_events, output_image, ImageType::BINARY);
-        if (duration_for_amiev > 100000) { // Process every 100 ms 10 Hz
-            cv::imshow("img out", output_image);
-            cv::waitKey(1);
-            cv::imwrite(output_images + std::to_string(counter) + ".png",
-                        output_image);
-            output_image = cv::Mat::zeros(cv::Size(width, height), CV_8UC1);
-            duration_for_amiev = 0;
-            counter++;
+
+
+            // Feed events to frame generator and rate estimator
+            if (ev->t - slice_initial_time > 10000) { // 10 ms
+                cv::imwrite(output_images + std::to_string(counter) + ".png",
+                            output_image);
+                cv::imshow("img bin", output_image);
+                slice_initial_time = ev->t;
+                cv::waitKey(1);
+                counter++;
+                output_image = cv::Mat::zeros(cv::Size(width, height), CV_8UC1);
+                output_image.at<uchar>(event_to_build.y, event_to_build.x) = 255;
+            } else {
+                output_image.at<uchar>(event_to_build.y, event_to_build.x) = 255;
+            }
         }
     });
 
@@ -265,16 +262,9 @@ int main(int argc, char *argv[]) {
     }
 
     end_time = std::chrono::steady_clock::now();
-
-#ifdef STORE
-    // print blue text
-    std::cout << "\033[1;34mWriting events to HDF5 file...\033[0m" << std::endl;
-    if (hdf5_writer.is_open()) {
-        std::cout << "\033[1;34mEvents written to: " << out_hdf5_file_path << "\033[0m" << std::endl;
-    }
-    // Close HDF5 writer
-    hdf5_writer.close();
-#endif
+    // Print final results
+    cv::imwrite(output_images + std::to_string(counter) + ".png",
+                output_image);
 
     // Cleanup
     if (params.camera.is_running()) {

@@ -101,18 +101,12 @@ def rolling_min_max(data, window):
     return np.array(rolling_min), np.array(rolling_max)
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run entropy metric on event data.")
-    parser.add_argument(
-        "file_path", type=str, help="Path to the accumulated event frames"
-    )
-    args = parser.parse_args()
+def compute_entropy_for_folder(folder_path, folder_name):
+    """Compute entropy for all frames in a folder."""
+    print(f"\n=== Processing {folder_name}: {folder_path} ===")
 
     # Load events from the file
-    frame_loader = FrameLoader(args.file_path)
-
-    # Get parent directory for saving graphs
-    parent_dir = Path(args.file_path).parent
+    frame_loader = FrameLoader(folder_path)
 
     print(f"Found {frame_loader.get_frame_count()} frames")
     print(f"Frame dimensions: {frame_loader.get_geom_width()}x{frame_loader.get_geom_height()}")
@@ -120,7 +114,7 @@ if __name__ == "__main__":
     entropy = []
 
     # Use iterator to process frames one by one (memory efficient)
-    for i, frame in enumerate(tqdm(frame_loader, desc="Computing entropy", total=frame_loader.get_frame_count())):
+    for i, frame in enumerate(tqdm(frame_loader, desc=f"Computing entropy for {folder_name}", total=frame_loader.get_frame_count())):
         # Frame is already grayscale from FrameLoader
 
         # Ensure the image is in float format (0-255 range is fine for entropy)
@@ -137,88 +131,229 @@ if __name__ == "__main__":
     if entropy:
         entropy = np.array(entropy)
 
-        print(f"\nEntropy Results:")
+        print(f"\nEntropy Results for {folder_name}:")
         print(f"Processed {len(entropy)} frames")
         print(f"Mean Entropy: {np.mean(entropy):.4f}")
         print(f"Std Entropy: {np.std(entropy):.4f}")
         print(f"Min Entropy: {np.min(entropy):.4f}")
         print(f"Max Entropy: {np.max(entropy):.4f}")
 
-        # Create windowed version using median filter over 10 frames
+        return entropy
+    else:
+        print(f"No valid entropy computed for {folder_name}!")
+        return np.array([])
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run entropy metric on 'ev' and 'harmeda' folders within a given path.")
+    parser.add_argument(
+        "base_path", type=str, help="Base path containing 'ev' and 'harmeda' subfolders"
+    )
+    args = parser.parse_args()
+
+    # Construct paths to the two expected folders
+    base_path = Path(args.base_path)
+    ev_path = base_path / "ev/img_bin"
+    harmeda_path = base_path / "harmeda/img_bin"
+
+    # Check if both folders exist
+    if not ev_path.exists():
+        raise ValueError(f"'ev' folder not found at: {ev_path}")
+    if not harmeda_path.exists():
+        raise ValueError(f"'harmeda' folder not found at: {harmeda_path}")
+
+    print(f"Base path: {base_path}")
+    print(f"EV folder: {ev_path}")
+    print(f"Harmeda folder: {harmeda_path}")
+
+    # Compute entropy for both folders
+    entropy1 = compute_entropy_for_folder(str(ev_path), "EV")
+    entropy2 = compute_entropy_for_folder(str(harmeda_path), "Harmeda")
+
+    # Get base directory for saving graphs
+    parent_dir = base_path
+
+    if len(entropy1) > 0 and len(entropy2) > 0:
         window_size = 10
-        if len(entropy) >= window_size:
-            # Use scipy's median filter for windowed median
-            entropy_windowed = ndimage.median_filter(
-                entropy, size=window_size, mode="reflect"
-            )
 
-            print(f"\nWindowed Entropy (median over {window_size} frames):")
-            print(f"Mean Windowed Entropy: {np.mean(entropy_windowed):.4f}")
-            print(f"Std Windowed Entropy: {np.std(entropy_windowed):.4f}")
-            print(f"Min Windowed Entropy: {np.min(entropy_windowed):.4f}")
-            print(f"Max Windowed Entropy: {np.max(entropy_windowed):.4f}")
+        # Create windowed versions if we have enough frames
+        if len(entropy1) >= window_size:
+            entropy1_windowed = ndimage.median_filter(
+                entropy1, size=window_size, mode="reflect"
+            )
         else:
-            print(
-                f"Warning: Not enough frames ({len(entropy)}) for windowing (need >= {window_size})"
+            entropy1_windowed = entropy1
+
+        if len(entropy2) >= window_size:
+            entropy2_windowed = ndimage.median_filter(
+                entropy2, size=window_size, mode="reflect"
             )
-            entropy_windowed = entropy
+        else:
+            entropy2_windowed = entropy2
 
-        frame_numbers = np.arange(len(entropy))
+        # Create frame numbers for each dataset
+        frame_numbers1 = np.arange(len(entropy1))
+        frame_numbers2 = np.arange(len(entropy2))
 
-        # Plot 1: Original entropy only (as before)
-        plt.figure(figsize=(12, 6))
+        # Plot 1: Original entropy comparison
+        plt.figure(figsize=(15, 8))
         plt.plot(
-            frame_numbers,
-            entropy,
+            frame_numbers1,
+            entropy1,
             linewidth=1.5,
             marker="o",
             markersize=3,
             alpha=0.7,
+            color="blue",
+            label="EV (Original)"
+        )
+        plt.plot(
+            frame_numbers2,
+            entropy2,
+            linewidth=1.5,
+            marker="s",
+            markersize=3,
+            alpha=0.7,
+            color="green",
+            label="Harmeda (Original)"
         )
         plt.xlabel("Frame Number")
         plt.ylabel("Entropy")
-        plt.title("Entropy vs Frame Number")
+        plt.title("Entropy Comparison: Original Data")
         plt.grid(True, alpha=0.3)
+        plt.legend()
         plt.tight_layout()
-        plt.savefig(parent_dir / "entropy_vs_frame_number.png")
+        plt.savefig(parent_dir / "entropy_comparison_original.png", dpi=300, bbox_inches='tight')
         plt.show()
         plt.close()
 
-        min_entropy, max_entropy = rolling_min_max(entropy, window_size)
-
-        # Plot 2: Comparison of original and windowed entropy
+        # Plot 2: Windowed entropy comparison
         plt.figure(figsize=(15, 8))
         plt.plot(
-            frame_numbers,
-            entropy_windowed,
+            frame_numbers1,
+            entropy1_windowed,
             linewidth=2,
             marker="o",
             markersize=2,
             alpha=0.8,
             color="red",
-            label=f"Windowed Entropy (median, window={window_size})",
+            label=f"EV (Windowed, median={window_size})"
+        )
+        plt.plot(
+            frame_numbers2,
+            entropy2_windowed,
+            linewidth=2,
+            marker="s",
+            markersize=2,
+            alpha=0.8,
+            color="orange",
+            label=f"Harmeda (Windowed, median={window_size})"
+        )
+
+        # Add rolling min/max for both datasets
+        min_entropy1, max_entropy1 = rolling_min_max(entropy1, window_size)
+        min_entropy2, max_entropy2 = rolling_min_max(entropy2, window_size)
+
+        plt.fill_between(
+            frame_numbers1,
+            min_entropy1,
+            max_entropy1,
+            color="lightblue",
+            alpha=0.3,
+            label="EV Range"
         )
         plt.fill_between(
-            frame_numbers,
-            min_entropy,
-            max_entropy,
-            color="lightgray",
-            alpha=0.5,
-            label="Entropy Range",
+            frame_numbers2,
+            min_entropy2,
+            max_entropy2,
+            color="lightgreen",
+            alpha=0.3,
+            label="Harmeda Range"
         )
+
         plt.xlabel("Frame Number")
         plt.ylabel("Entropy")
-        plt.title(
-            f"Windowed Entropy vs Frame Number (Median over {window_size} frames)"
-        )
+        plt.title(f"Entropy Comparison: Windowed Data (Median over {window_size} frames)")
         plt.grid(True, alpha=0.3)
         plt.legend()
         plt.tight_layout()
-        plt.savefig(parent_dir / "windowed_entropy_vs_frame_number.png")
+        plt.savefig(parent_dir / "entropy_comparison_windowed.png", dpi=300, bbox_inches='tight')
         plt.show()
         plt.close()
+
+        # Plot 3: Combined view with both original and windowed
+        plt.figure(figsize=(15, 10))
+
+        # Original data (lighter colors)
+        plt.plot(
+            frame_numbers1,
+            entropy1,
+            linewidth=1,
+            alpha=0.4,
+            color="blue",
+            label="EV (Original)"
+        )
+        plt.plot(
+            frame_numbers2,
+            entropy2,
+            linewidth=1,
+            alpha=0.4,
+            color="green",
+            label="Harmeda (Original)"
+        )
+
+        # Windowed data (bolder colors)
+        plt.plot(
+            frame_numbers1,
+            entropy1_windowed,
+            linewidth=3,
+            alpha=0.9,
+            color="darkblue",
+            label="EV (Windowed)"
+        )
+        plt.plot(
+            frame_numbers2,
+            entropy2_windowed,
+            linewidth=3,
+            alpha=0.9,
+            color="darkgreen",
+            label="Harmeda (Windowed)"
+        )
+
+        plt.xlabel("Frame Number")
+        plt.ylabel("Entropy")
+        plt.title(f"Complete Entropy Comparison: Original vs Windowed (window size={window_size})")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(parent_dir / "entropy_comparison_complete.png", dpi=300, bbox_inches='tight')
+        plt.show()
+        plt.close()
+
+        # Print comparative statistics
+        print(f"\n=== COMPARATIVE STATISTICS ===")
+        print(f"\nEV:")
+        print(f"  Frames: {len(entropy1)}")
+        print(f"  Mean Entropy: {np.mean(entropy1):.4f}")
+        print(f"  Std Entropy: {np.std(entropy1):.4f}")
+        print(f"  Mean Windowed Entropy: {np.mean(entropy1_windowed):.4f}")
+        print(f"  Std Windowed Entropy: {np.std(entropy1_windowed):.4f}")
+
+        print(f"\nHarmeda:")
+        print(f"  Frames: {len(entropy2)}")
+        print(f"  Mean Entropy: {np.mean(entropy2):.4f}")
+        print(f"  Std Entropy: {np.std(entropy2):.4f}")
+        print(f"  Mean Windowed Entropy: {np.mean(entropy2_windowed):.4f}")
+        print(f"  Std Windowed Entropy: {np.std(entropy2_windowed):.4f}")
+
+        print(f"\nDifferences (EV - Harmeda):")
+        print(f"  Mean Entropy Difference: {np.mean(entropy1) - np.mean(entropy2):.4f}")
+        print(f"  Mean Windowed Entropy Difference: {np.mean(entropy1_windowed) - np.mean(entropy2_windowed):.4f}")
 
         print(f"\nGraphs saved to: {parent_dir}")
 
     else:
-        print("No valid entropy computed!")
+        if len(entropy1) == 0:
+            print("No valid entropy computed for EV folder!")
+        if len(entropy2) == 0:
+            print("No valid entropy computed for Harmeda folder!")
