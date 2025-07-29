@@ -111,6 +111,9 @@ target_link_libraries(compensation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK:
 add_executable(compensation_harm_test evaluation/compensation_harm_test.cpp)
 target_link_libraries(compensation_harm_test PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
 
+add_executable(compensation_store_imgs evaluation/compensation_store_imgs.cpp)
+target_link_libraries(compensation_store_imgs PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+
 
 add_executable(depth_estimation demo/depth_estimation.cpp)
 target_link_libraries(depth_estimation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)

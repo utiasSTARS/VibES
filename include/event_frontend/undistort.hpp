@@ -17,7 +17,7 @@ public:
     Undistort(std::string filepath) {
         std::vector<double> K, D;
 
-        if (filepath == "") {
+        if (filepath.empty()) {
             // warning text yellow
             std::cout << "\033[33mWarning: No calibration file provided. Undistortion will not be applied.\033[0m"
                       << std::endl;
@@ -53,10 +53,10 @@ public:
                 cv::undistortPoints(distorted_points, undistorted_points, K_mat, D_mat);
 
                 // Convert normalized coordinates back to pixel coordinates
-                _undistort_x[y * _width + x] =
-                        undistorted_points[0].x * K_mat.at<double>(0, 0) + K_mat.at<double>(0, 2);
-                _undistort_y[y * _width + x] =
-                        undistorted_points[0].y * K_mat.at<double>(1, 1) + K_mat.at<double>(1, 2);
+                _undistort_x[y * _width + x] = static_cast<coords_type>(
+                        undistorted_points[0].x * K_mat.at<double>(0, 0) + K_mat.at<double>(0, 2));
+                _undistort_y[y * _width + x] = static_cast<coords_type>(
+                        undistorted_points[0].y * K_mat.at<double>(1, 1) + K_mat.at<double>(1, 2));
             }
         }
 //        _populated = true;
@@ -106,8 +106,9 @@ public:
     }
 
 private:
+    using coords_type = unsigned short;
     // make a look-up table for the undistortion
-    std::vector<unsigned short> _undistort_x, _undistort_y;
+    std::vector<coords_type> _undistort_x, _undistort_y;
     int _width, _height;
     bool _is_calibrated = false;
 

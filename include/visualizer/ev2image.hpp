@@ -99,4 +99,101 @@ ImageResults ev2img_metavision(Metavision::Stage::EventBuffer &evs, int MAT_ROWS
     return results;
 }
 
+enum ImageType {
+    BINARY,
+    COUNT,           // Event count with colormap
+    COUNT_GRAY,      // Event count grayscale
+    TS,              // Timestamp with colormap
+    TS_GRAY,         // Timestamp grayscale
+    AVERAGE_TS,      // Average timestamp with colormap
+    AVERAGE_TS_GRAY  // Average timestamp grayscale
+};
+
+void ev2img_metavision(Metavision::Stage::EventBuffer &evs, cv::Mat &output, ImageType type) {
+        if (evs.empty()) {
+            return;
+        }
+
+        Metavision::timestamp t_end = (evs.end() - 1)->t;
+        const float microsec_to_sec = 1.0f / 1000000.0f;
+        const float time_constant = 0.02f;
+
+        // Pre-compute what we need based on the type
+        bool need_count = (type == COUNT || type == COUNT_GRAY || type == AVERAGE_TS || type == AVERAGE_TS_GRAY);
+        bool need_sum = (type == AVERAGE_TS || type == AVERAGE_TS_GRAY);
+        bool need_ts = (type == TS || type == TS_GRAY);
+
+        cv::Mat count_mat, sum_mat, ts_mat;
+
+        if (need_count) count_mat = cv::Mat::zeros(output.rows, output.cols, CV_16UC1);
+        if (need_sum) sum_mat = cv::Mat::zeros(output.rows, output.cols, CV_32FC1);
+        if (need_ts) ts_mat = cv::Mat::zeros(output.rows, output.cols, CV_32FC1);
+
+        // Single pass through events
+        for (auto &ev : evs) {
+            if (type == BINARY) {
+                if (output.empty()) output = cv::Mat::zeros(output.rows, output.cols, CV_8UC1);
+                output.at<uchar>(ev.y, ev.x) = 255;
+                continue;
+            }
+
+            float deltaT = float(t_end - ev.t) * microsec_to_sec;
+
+            if (need_count) {
+                uint16_t& count_ref = count_mat.at<uint16_t>(ev.y, ev.x);
+                if (count_ref < 65535) count_ref++;
+            }
+
+            if (need_sum) {
+                sum_mat.at<float>(ev.y, ev.x) += deltaT;
+            }
+
+            if (need_ts) {
+                ts_mat.at<float>(ev.y, ev.x) = std::exp(-deltaT / time_constant);
+            }
+        }
+
+        // Generate final output based on type
+        switch (type) {
+            case COUNT_GRAY:
+                output = count_mat;
+                break;
+
+            case COUNT: {
+                cv::Mat count_norm;
+                cv::normalize(count_mat, count_norm, 0, 255, cv::NORM_MINMAX);
+                count_norm.convertTo(count_norm, CV_8UC1);
+                cv::applyColorMap(count_norm, output, cv::COLORMAP_JET);
+                break;
+            }
+
+            case TS_GRAY:
+                output = ts_mat;
+                break;
+
+            case TS: {
+                cv::Mat ts_norm;
+                cv::normalize(ts_mat, ts_norm, 0, 255, cv::NORM_MINMAX);
+                ts_norm.convertTo(ts_norm, CV_8UC1);
+                cv::applyColorMap(ts_norm, output, cv::COLORMAP_JET);
+                break;
+            }
+
+            case AVERAGE_TS_GRAY:
+                cv::divide(sum_mat, count_mat, output, 1.0f, CV_32FC1);
+                break;
+
+            case AVERAGE_TS: {
+                cv::Mat avg_ts;
+                cv::divide(sum_mat, count_mat, avg_ts, 1.0f, CV_32FC1);
+                cv::Mat avg_norm;
+                cv::normalize(avg_ts, avg_norm, 0, 255, cv::NORM_MINMAX);
+                avg_norm.convertTo(avg_norm, CV_8UC1);
+                cv::medianBlur(avg_norm, avg_norm, 3);
+                cv::applyColorMap(avg_norm, output, cv::COLORMAP_BONE);
+                break;
+            }
+        }
+    }
+
 #endif //PROJECT_EV2IMAGE_HPP

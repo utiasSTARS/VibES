@@ -30,6 +30,30 @@ std::map<Colors, std::tuple<int, int, int>> color_map = {
         {BLUE,  std::tuple<int, int, int>(255, 0, 0)}
 };
 
+// UI processing function similar to original
+int processUI(int delay_ms) {
+    auto then = std::chrono::high_resolution_clock::now();
+    int key = cv::waitKey(delay_ms);
+    auto now = std::chrono::high_resolution_clock::now();
+
+    // Ensure consistent timing
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - then).count();
+    if (elapsed < delay_ms) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms - elapsed));
+    }
+
+    return key;
+}
+
+// Mouse callback for tracker selection
+void receiveMouseEvent(int event, int x, int y, int flags, void *userdata) {
+    auto *callback = reinterpret_cast<std::function<void(int, int)> *>(userdata);
+
+    if (event == cv::EVENT_LBUTTONDOWN && callback) {
+        (*callback)(x, y);
+    }
+}
+
 
 template<typename T>
 inline T linear_interp(T alpha, T x0, T x1) {

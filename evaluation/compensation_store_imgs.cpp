@@ -3,8 +3,8 @@
 // Based on Metavision SDK patterns
 //
 
-//#define FANCY_VISUALIZATION
 //#define STORE
+#define STORE_FRAMES
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
@@ -12,7 +12,6 @@
 #include <metavision/sdk/ui/utils/event_loop.h>
 #include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
-
 
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -33,20 +32,19 @@
 
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
-//#include "estimator/iekf_sinusoid_fitter.hpp"
 #include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
-#include "profiler.hpp"
+#include "utils.hpp"
 
-#include "filter/freq_filter.hpp"
+#include "visualizer/ev2image.hpp"
 
 // Constants
 namespace {
-    constexpr double DEFAULT_FPS = 100.0;
+    constexpr double DEFAULT_FPS = 1000.0;
     constexpr std::uint32_t DEFAULT_ACCUMULATION = 5000;
     constexpr int ESC_KEY = 27;
-    constexpr int POLL_TIMEOUT_MS = 10;
+    constexpr int POLL_TIMEOUT_MS = 1;
     bool NUFFT_ESTIMATION_DONE = false;
 }
 
@@ -78,8 +76,21 @@ int main(int argc, char *argv[]) {
     HARMEDA::ParamsLoader params(argc, argv);
     std::cout << params;
 
+
+    // create folder if not exists
+    std::string output_images = params.params->output_folder + "/imgs/img_bin/";
+    if (!std::filesystem::exists(output_images)) {
+        std::filesystem::create_directories(output_images);
+    }
+
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
+
+    const int size = haste::HypothesisPatchTracker::kPatchSize;
+    const int half_size = size / 2;
+
+    const cv::Scalar color_tracker(0, 255, 0); // Green color for tracker visualization
+    unsigned short t_centre_x = 0, t_centre_y = 0;
 
     // Initialize undistortion
     Undistort undistort(params.params->calib_file);
@@ -114,6 +125,15 @@ int main(int argc, char *argv[]) {
     NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
     std::shared_ptr<HasteWrapper<Metavision::EventCD>> tracker;
 
+    if (params.params->tracker_x != 0 && params.params->tracker_y != 0) {
+        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(params.params->tracker_x,
+                                                                      params.params->tracker_y,
+                                                                      TRACKER_RATE, first_event_t);
+        t_centre_x = params.params->tracker_x;
+        t_centre_y = params.params->tracker_y;
+        std::cout << "Tracker initialized at (" << t_centre_x << ", " << t_centre_y << ")" << std::endl;
+    }
+
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
 
@@ -131,19 +151,16 @@ int main(int argc, char *argv[]) {
     cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
     cv::resizeWindow(window_name, width, height);
     cv::moveWindow(window_name, 0, 0);
-#ifdef FANCY_VISUALIZATION
-    int visualization_cut_off = width / 2; // Cut-off for visualization
-#endif
+
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
         if (tracker) {
-#ifdef FANCY_VISUALIZATION
-            visualization_cut_off = x; // Update cut-off for visualization
-#endif
             return;
         }
         tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
+        t_centre_x = x;
+        t_centre_y = y;
         std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
 
@@ -154,11 +171,13 @@ int main(int argc, char *argv[]) {
 
     double x_pred = 0, y_pred = 0;
 
-    std::unique_ptr<FreqFilter> freq_filter;
-
-    Metavision::Stage::EventBuffer compensated_events;
+    Metavision::Stage::EventBuffer compensated_events, frames_events;
+    Metavision::timestamp duration_for_amiev = 0;
     unsigned short x_undistorted, y_undistorted;
 
+    cv::Mat output_image = cv::Mat::zeros(cv::Size(width, height), CV_8UC1);
+
+    long long counter = 0;
     std::once_flag init_flag;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
@@ -178,10 +197,6 @@ int main(int argc, char *argv[]) {
                 continue; // Skip events that are out of bounds
             }
 
-            if(freq_filter && !freq_filter->check(x_undistorted, y_undistorted, ev->t)) {
-                continue; // Skip events that do not pass the frequency filter
-            }
-
             auto &event_to_build = compensated_events.emplace_back();
             event_to_build.x = x_undistorted;
             event_to_build.y = y_undistorted;
@@ -192,18 +207,10 @@ int main(int argc, char *argv[]) {
 
             // Process with tracker
             if (tracker) {
-
                 if (tracker_enable) {
                     in_tracker = tracker->feed(event_to_build);
                 }
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
-#ifdef FANCY_VISUALIZATION
-                    // if the event is in the left half of the image skip
-                    if (event_to_build.x < visualization_cut_off) {
-                        continue;
-                    }
-#endif
-
                     if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
                         auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
                         if (x_new < 0 || x_new >= width) {
@@ -234,9 +241,7 @@ int main(int argc, char *argv[]) {
                             std::cout << "Ax: " << Ax[0] << ", Ay: " << Ay[0]
                                       << ", Bx: " << Bx[0] << ", By: " << By[0]
                                       << ", omega: " << omegas[0] << ", offset_x: " << offsets[0]
-                                      << " omega hz: " << rad2Hz(omegas[0])
                                       << ", offset_y: " << offsets[1] << std::endl;
-                            freq_filter = std::make_unique<FreqFilter>(width, height, rad2Hz(omegas[0]) - 15, rad2Hz(omegas[0]) + 15);
                             tracker->addFitters(
                                     std::make_unique<IEKFSinusoidFitter>(
                                             IEKFSinusoidFitter::createFromHarmonicEstimates(Ax, Bx, omegas, offsets)),
@@ -256,6 +261,20 @@ int main(int argc, char *argv[]) {
 #endif
         cd_frame_generator.add_events(begin_comp, end_comp);
         cd_rate_estimator.add_data(std::prev(end_comp)->t, std::distance(begin_comp, end_comp));
+
+        unsigned short delta = end->t - begin->t;
+        duration_for_amiev += delta;
+        frames_events.insert(frames_events.end(), begin, end);
+        if (duration_for_amiev > 1000) { // Process every 10 ms 100 Hz
+            ev2img_metavision(compensated_events, output_image, ImageType::BINARY);
+            cv::imwrite(output_images + std::to_string(counter) + ".png",
+                        output_image);
+            output_image = cv::Mat::zeros(cv::Size(width, height), CV_8UC1);
+
+            duration_for_amiev = 0;
+            frames_events.clear();
+            counter++;
+        }
     });
 
     // Start camera
@@ -272,6 +291,14 @@ int main(int argc, char *argv[]) {
                 cd_frame.copyTo(display_frame);
 
                 if (osd) {
+                    if (tracker) {
+                        tracker->getCurrentPosition(t_centre_x, t_centre_y);
+                        cv::rectangle(display_frame,
+                                      cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
+                                      cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
+                                      color_tracker, 2);
+                    }
+
                     // Add on-screen display info
                     std::string text = Metavision::getHumanReadableTime(cd_frame_ts);
                     text += "     ";
