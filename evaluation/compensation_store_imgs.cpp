@@ -100,18 +100,6 @@ int main(int argc, char *argv[]) {
     cv::Mat cd_frame;
     Metavision::timestamp cd_frame_ts{0};
 
-    Metavision::CDFrameGenerator cd_frame_generator(width, height);
-    cd_frame_generator.set_display_accumulation_time_us(DEFAULT_ACCUMULATION);
-
-    // Start frame generator with callback
-    cd_frame_generator.start(DEFAULT_FPS,
-                             [&cd_frame_mutex, &cd_frame, &cd_frame_ts](const Metavision::timestamp &ts,
-                                                                        const cv::Mat &frame) {
-                                 std::unique_lock<std::mutex> lock(cd_frame_mutex);
-                                 cd_frame_ts = ts;
-                                 frame.copyTo(cd_frame);
-                             });
-
     // Setup event rate estimator
     double avg_rate = 0, peak_rate = 0;
     Metavision::RateEstimator cd_rate_estimator(
@@ -125,7 +113,7 @@ int main(int argc, char *argv[]) {
     NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
     std::shared_ptr<HasteWrapper<Metavision::EventCD>> tracker;
 
-    if (params.params->tracker_x != 0 && params.params->tracker_y != 0) {
+    if (!params.params->nocompensation && params.params->tracker_x != 0 && params.params->tracker_y != 0) {
         tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(params.params->tracker_x,
                                                                       params.params->tracker_y,
                                                                       TRACKER_RATE, first_event_t);
@@ -146,16 +134,11 @@ int main(int argc, char *argv[]) {
     hdf5_writer.add_metadata_map_from_camera(params.camera);
 #endif
 
-    // Setup display window (similar to original)
-    std::string window_name("HARMEDA Event Tracking");
-    cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
-    cv::resizeWindow(window_name, width, height);
-    cv::moveWindow(window_name, 0, 0);
 
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
-        if (tracker) {
+        if (tracker || params.params->nocompensation) {
             return;
         }
         tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
@@ -163,8 +146,6 @@ int main(int argc, char *argv[]) {
         t_centre_y = y;
         std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
-
-    cv::setMouseCallback(window_name, receiveMouseEvent, &mouse_callback);
 
     bool osd = false; // On-screen display toggle
     bool in_tracker = true, tracker_enable = true;
@@ -259,20 +240,16 @@ int main(int argc, char *argv[]) {
 #ifdef STORE
         hdf5_writer.add_events(begin_comp, end_comp);
 #endif
-        cd_frame_generator.add_events(begin_comp, end_comp);
-        cd_rate_estimator.add_data(std::prev(end_comp)->t, std::distance(begin_comp, end_comp));
-
         unsigned short delta = end->t - begin->t;
         duration_for_amiev += delta;
-        frames_events.insert(frames_events.end(), begin, end);
-        if (duration_for_amiev > 1000) { // Process every 10 ms 100 Hz
-            ev2img_metavision(compensated_events, output_image, ImageType::BINARY);
+        ev2img_metavision(compensated_events, output_image, ImageType::BINARY);
+        if (duration_for_amiev > 100000) { // Process every 100 ms 10 Hz
+            cv::imshow("img out", output_image);
+            cv::waitKey(1);
             cv::imwrite(output_images + std::to_string(counter) + ".png",
                         output_image);
             output_image = cv::Mat::zeros(cv::Size(width, height), CV_8UC1);
-
             duration_for_amiev = 0;
-            frames_events.clear();
             counter++;
         }
     });
@@ -283,84 +260,6 @@ int main(int argc, char *argv[]) {
 
     // Main processing loop (similar to original)
     while (params.camera.is_running()) {
-        // Display frame with thread safety
-        {
-            std::unique_lock<std::mutex> lock(cd_frame_mutex);
-            if (!cd_frame.empty()) {
-                cv::Mat display_frame;
-                cd_frame.copyTo(display_frame);
-
-                if (osd) {
-                    if (tracker) {
-                        tracker->getCurrentPosition(t_centre_x, t_centre_y);
-                        cv::rectangle(display_frame,
-                                      cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
-                                      cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
-                                      color_tracker, 2);
-                    }
-
-                    // Add on-screen display info
-                    std::string text = Metavision::getHumanReadableTime(cd_frame_ts);
-                    text += "     ";
-                    text += Metavision::getHumanReadableRate(avg_rate);
-
-                    cv::putText(display_frame, text, cv::Point(10, 20),
-                                cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(108, 143, 255), 1, cv::LINE_AA);
-
-                    // Add tracker info if available
-                    if (tracker) {
-                        cv::putText(display_frame, "Tracker: Initialized", cv::Point(10, 40),
-                                    cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
-
-                        if (NUFFT_ESTIMATION_DONE) {
-                            cv::putText(display_frame, "NUFFT: Complete", cv::Point(10, 60),
-                                        cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
-                        }
-                    } else {
-                        cv::putText(display_frame, "Click to initialize tracker", cv::Point(10, 40),
-                                    cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
-                    }
-                }
-
-                cv::imshow(window_name, display_frame);
-            }
-        }
-
-        // Process UI with consistent timing
-        int key = processUI(POLL_TIMEOUT_MS);
-        switch (key) {
-            case ESC_KEY:
-            case 'q':
-                params.camera.stop();
-                break;
-            case 'o':
-                osd = !osd;
-                std::cout << "OSD: " << (osd ? "ON" : "OFF") << std::endl;
-                break;
-            case 'r': {
-                std::lock_guard<std::mutex> lock(processing_mutex);
-                tracker.reset();
-                NUFFT_ESTIMATION_DONE = false;
-                std::cout << "Reset tracker" << std::endl;
-            }
-            case 't': {
-                std::lock_guard<std::mutex> lock(processing_mutex);
-                tracker_enable = !tracker_enable;
-                std::cout << "Tracker " << (tracker_enable ? "enabled" : "disabled") << std::endl;
-            }
-                break;
-            case 'h':
-                std::cout << "Controls:\n"
-                          << "  ESC/q: Exit\n"
-                          << "  o: Toggle OSD\n"
-                          << "  r: Reset tracker\n"
-                          << "  h: This help\n"
-                          << "  Mouse click: Initialize tracker\n";
-                break;
-            default:
-                break;
-        }
-
         // Poll Metavision events
         Metavision::EventLoop::poll_and_dispatch(1);
     }
@@ -378,7 +277,6 @@ int main(int argc, char *argv[]) {
 #endif
 
     // Cleanup
-    cd_frame_generator.stop();
     if (params.camera.is_running()) {
         params.camera.stop();
     }

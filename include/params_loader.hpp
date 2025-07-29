@@ -33,6 +33,7 @@ namespace HARMEDA {
         int tracker_y = 0; // Tracker y position
         int tracker_size = 10; // Tracker size
         int iekf_iterations = 1; // Number of iterations for IEKF fitting
+        bool nocompensation = false; // Flag for no compensation
     };
 
     class ParamsLoader {
@@ -68,7 +69,9 @@ namespace HARMEDA {
                     ("iekf-iterations", po::value<int>(&params->iekf_iterations)->default_value(1),
                      "Number of iterations for IEKF fitting (default: 1).")
                     ("output-folder,o", po::value<std::string>(&params->output_folder)->default_value("output"),
-                     "Folder to save output frames (default: 'output').");
+                     "Folder to save output frames (default: 'output').")
+                    ("nocompensation", po::bool_switch(&params->nocompensation)->default_value(false),
+                     "Disable compensation of events (default: false).");
 
             po::variables_map vm;
 
