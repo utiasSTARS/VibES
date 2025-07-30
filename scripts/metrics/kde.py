@@ -4,6 +4,8 @@ import h5py
 import argparse
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import os
+from pathlib import Path
 
 # Optional imports with fallbacks
 try:
@@ -201,10 +203,11 @@ class KDEMetrics:
     Compute Kernel Density Estimation metrics for event camera data.
     """
 
-    def __init__(self, event_loader: FastEventLoader):
+    def __init__(self, event_loader: FastEventLoader, name="Dataset"):
         self.event_loader = event_loader
         self.cam_w = event_loader.get_geom_width()
         self.cam_h = event_loader.get_geom_height()
+        self.name = name
 
     def _compute_kde_densities(self, pts):
         """Compute KDE densities for given points using available libraries."""
@@ -300,6 +303,68 @@ Count: {len(densities)}"""
             )
 
         return results, all_densities
+
+    def compute_kde_densities_for_comparison(self, window_size_us=50000, max_events=50000):
+        """
+        Compute KDE densities using time-windowed approach instead of random sampling.
+        Returns normalized densities for comparison between datasets.
+
+        Args:
+            window_size_us: Size of time windows in microseconds
+            max_events: Maximum number of events to collect from time windows
+        """
+        print(f"Computing KDE densities for {self.name} using time-windowed approach...")
+
+        all_densities = []
+        events_collected = 0
+
+        counter = 0
+        # Collect events from time windows until we reach max_events
+        for start_time, end_time, window_data in self.event_loader.get_time_windows(window_size_us, overlap_us=0):
+            # if events_collected >= max_events:
+            #     break
+
+            if counter>100:
+                break
+
+            if len(window_data) < 10:  # Skip windows with too few events
+                continue
+
+            # Extract and normalize coordinates
+            pts = window_data[['x', 'y']].values.astype(float)
+            pts[:, 0] /= self.cam_w
+            pts[:, 1] /= self.cam_h
+
+            # Limit events from this window if needed
+            remaining_capacity = max_events - events_collected
+            if len(pts) > remaining_capacity:
+                pts = pts[:remaining_capacity]
+
+            # Compute densities for this window
+            window_densities = self._compute_kde_densities(pts)
+            all_densities.extend(window_densities)
+            events_collected += len(pts)
+
+            counter+=1
+            print(f"{counter} Processed window {start_time}-{end_time}, collected {events_collected}/{max_events} events")
+
+        if not all_densities:
+            print(f"Warning: No densities computed for {self.name}")
+            return np.array([])
+
+        all_densities = np.array(all_densities)
+
+        # Normalize densities to [0, 1] range
+        min_density = np.min(all_densities)
+        max_density = np.max(all_densities)
+        if max_density > min_density:
+            normalized_densities = (all_densities - min_density) / (max_density - min_density)
+        else:
+            normalized_densities = np.zeros_like(all_densities)
+
+        print(f"Computed {len(normalized_densities)} normalized KDE densities for {self.name}")
+        print(f"Time-windowed approach: collected events from {events_collected} total events")
+        return normalized_densities
 
     def point_distribution_full_data(self):
         """Compute and visualize point distribution for the entire dataset."""
@@ -397,10 +462,110 @@ Count: {len(densities)}"""
         print(f"Mean events per window: {np.mean(num_events):.1f} ± {np.std(num_events):.1f}")
 
 
+def compare_kde_densities(kde_metrics_list, bins=50, window_size_us=50000, max_events=50000):
+    """
+    Compare KDE density distributions between multiple datasets using time-windowed approach.
+
+    Args:
+        kde_metrics_list: List of KDEMetrics objects to compare
+        bins: Number of histogram bins
+        window_size_us: Size of time windows in microseconds
+        max_events: Maximum number of events to collect per dataset
+    """
+    plt.figure(figsize=(12, 8))
+
+    colors = ['skyblue', 'lightcoral', 'lightgreen', 'gold', 'plum']
+    all_densities = []
+
+    for i, kde_metrics in enumerate(kde_metrics_list):
+        # Compute normalized densities using time-windowed approach
+        normalized_densities = kde_metrics.compute_kde_densities_for_comparison(
+            window_size_us=window_size_us,
+            max_events=max_events
+        )
+
+        if len(normalized_densities) == 0:
+            print(f"Warning: No densities computed for {kde_metrics.name}, skipping...")
+            continue
+
+        all_densities.append(normalized_densities)
+
+        # Plot histogram
+        color = colors[i % len(colors)]
+        plt.hist(normalized_densities, bins=bins, alpha=0.6, label=kde_metrics.name,
+                 color=color, edgecolor='black', density=True)
+
+    plt.xlabel('Normalized KDE Density (0-1)')
+    plt.ylabel('Density')
+    plt.title(f'Comparison of Normalized KDE Density Distributions\n(Time-windowed approach: {window_size_us}μs windows)')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+
+    # Add statistics text box
+    stats_text = "Statistics:\n"
+    for i, (kde_metrics, densities) in enumerate(zip(kde_metrics_list, all_densities)):
+        stats_text += f"{kde_metrics.name}:\n"
+        stats_text += f"  Mean: {np.mean(densities):.3f}\n"
+        stats_text += f"  Std: {np.std(densities):.3f}\n"
+        stats_text += f"  Events: {len(densities)}\n"
+
+    plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes,
+             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+    plt.tight_layout()
+    plt.show()
+
+    return all_densities
+
+
+def load_folder_datasets(folder_path):
+    """
+    Load datasets from harmeda and ev subfolders.
+
+    Args:
+        folder_path: Path to the main folder containing harmeda and ev subfolders
+
+    Returns:
+        List of KDEMetrics objects
+    """
+    folder_path = Path(folder_path)
+
+    if not folder_path.exists():
+        raise ValueError(f"Folder {folder_path} does not exist")
+
+    subfolders = ['harmeda', 'ev']
+    kde_metrics_list = []
+
+    for subfolder in subfolders:
+        subfolder_path = folder_path / subfolder
+        events_file = subfolder_path / 'events.hdf5'
+
+        if not events_file.exists():
+            print(f"Warning: {events_file} not found, skipping {subfolder}")
+            continue
+
+        print(f"\nLoading {subfolder} dataset from {events_file}")
+        try:
+            event_loader = FastEventLoader(str(events_file))
+            kde_metrics = KDEMetrics(event_loader, name=subfolder.upper())
+            kde_metrics_list.append(kde_metrics)
+        except Exception as e:
+            print(f"Error loading {subfolder}: {e}")
+            continue
+
+    if not kde_metrics_list:
+        raise ValueError("No valid datasets found in the specified folder")
+
+    return kde_metrics_list
+
+
 def main():
     """Main function with command line interface."""
     parser = argparse.ArgumentParser(description="Analyze HDF5 event camera data with KDE metrics.")
-    parser.add_argument("file_path", type=str, help="Path to the HDF5 file")
+
+    # Make the input argument more flexible
+    parser.add_argument("input_path", type=str,
+                        help="Path to HDF5 file OR folder containing harmeda/ev subfolders")
     parser.add_argument(
         "--time_window_us", "-t", type=float, default=50000.0,
         help="Time window in microseconds for analysis (default: 50ms)"
@@ -417,36 +582,80 @@ def main():
         "--histogram_only", action="store_true",
         help="Only show KDE density histogram for time windows"
     )
+    parser.add_argument(
+        "--compare_folders", action="store_true",
+        help="Compare KDE densities between harmeda and ev folders"
+    )
+    parser.add_argument(
+        "--max_events", type=int, default=50000,
+        help="Maximum number of events to collect from time windows for comparison (default: 50000)"
+    )
 
     args = parser.parse_args()
 
     try:
-        # Load data
-        print(f"Processing file: {args.file_path}")
-        event_loader = FastEventLoader(args.file_path)
+        input_path = Path(args.input_path)
 
-        print(f"Camera Geometry: {event_loader.get_geom_height()}x{event_loader.get_geom_width()}")
+        # Check if input is a folder with harmeda/ev structure or a single file
+        if input_path.is_dir():
+            harmeda_file = input_path / 'harmeda' / 'events.hdf5'
+            ev_file = input_path / 'ev' / 'events.hdf5'
 
-        # Initialize KDE metrics
-        kde_metrics = KDEMetrics(event_loader=event_loader)
+            if harmeda_file.exists() or ev_file.exists():
+                print(f"Found folder structure, processing both datasets...")
+                kde_metrics_list = load_folder_datasets(args.input_path)
 
-        if args.full_data:
-            # Analyze entire dataset
-            kde_metrics.point_distribution_full_data()
-        elif args.histogram_only:
-            # Only compute and show histogram
-            _, all_densities = kde_metrics.point_distribution_time_windows(
-                args.time_window_us, args.overlap_us
-            )
-        else:
-            # Full temporal analysis
-            kde_metrics.analyze_temporal_kde_variance(args.time_window_us, args.overlap_us)
+                if args.compare_folders or len(kde_metrics_list) > 1:
+                    # Compare datasets using time-windowed approach
+                    print(f"\nComparing {len(kde_metrics_list)} datasets using time-windowed approach...")
+                    compare_kde_densities(
+                        kde_metrics_list,
+                        window_size_us=args.time_window_us,
+                        max_events=args.max_events
+                    )
+                else:
+                    # Process single dataset found
+                    kde_metrics = kde_metrics_list[0]
+                    print(f"Processing single dataset: {kde_metrics.name}")
+                    process_single_dataset(kde_metrics, args)
+
+                return 0
+            else:
+                print(f"Folder {input_path} does not contain harmeda/ev structure, treating as single file path")
+
+        # Process as single file
+        if not input_path.exists():
+            print(f"Error: {input_path} does not exist")
+            return 1
+
+        print(f"Processing single file: {args.input_path}")
+        event_loader = FastEventLoader(str(args.input_path))
+        kde_metrics = KDEMetrics(event_loader, name="Dataset")
+
+        process_single_dataset(kde_metrics, args)
 
     except Exception as e:
         print(f"Error: {e}")
         return 1
 
     return 0
+
+
+def process_single_dataset(kde_metrics, args):
+    """Process a single dataset based on command line arguments."""
+    print(f"Camera Geometry: {kde_metrics.event_loader.get_geom_height()}x{kde_metrics.event_loader.get_geom_width()}")
+
+    if args.full_data:
+        # Analyze entire dataset
+        kde_metrics.point_distribution_full_data()
+    elif args.histogram_only:
+        # Only compute and show histogram
+        _, all_densities = kde_metrics.point_distribution_time_windows(
+            args.time_window_us, args.overlap_us
+        )
+    else:
+        # Full temporal analysis
+        kde_metrics.analyze_temporal_kde_variance(args.time_window_us, args.overlap_us)
 
 
 if __name__ == "__main__":
