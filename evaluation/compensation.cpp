@@ -119,6 +119,15 @@ int main(int argc, char *argv[]) {
     NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
     std::shared_ptr<HasteWrapper<Metavision::EventCD>> tracker;
 
+    if (!params.params->nocompensation && params.params->tracker_x != 0 && params.params->tracker_y != 0) {
+        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(params.params->tracker_x,
+                                                                      params.params->tracker_y,
+                                                                      TRACKER_RATE, first_event_t);
+        t_centre_x = params.params->tracker_x;
+        t_centre_y = params.params->tracker_y;
+        std::cout << "Tracker initialized at (" << t_centre_x << ", " << t_centre_y << ")" << std::endl;
+    }
+
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
 
@@ -142,7 +151,7 @@ int main(int argc, char *argv[]) {
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
-        if (tracker) {
+        if (tracker || params.params->nocompensation) {
 #ifdef FANCY_VISUALIZATION
             visualization_cut_off = x; // Update cut-off for visualization
 #endif
