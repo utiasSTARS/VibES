@@ -49,30 +49,6 @@ namespace {
     bool NUFFT_ESTIMATION_DONE = false;
 }
 
-// UI processing function similar to original
-int processUI(int delay_ms) {
-    auto then = std::chrono::high_resolution_clock::now();
-    int key = cv::waitKey(delay_ms);
-    auto now = std::chrono::high_resolution_clock::now();
-
-    // Ensure consistent timing
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - then).count();
-    if (elapsed < delay_ms) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms - elapsed));
-    }
-
-    return key;
-}
-
-// Mouse callback for tracker selection
-void receiveMouseEvent(int event, int x, int y, int flags, void *userdata) {
-    auto *callback = reinterpret_cast<std::function<void(int, int)> *>(userdata);
-
-    if (event == cv::EVENT_LBUTTONDOWN && callback) {
-        (*callback)(x, y);
-    }
-}
-
 static std::chrono::steady_clock::time_point end_time, start_time;
 static Metavision::timestamp first_event_t = 0, last_event_t = 0;
 
@@ -196,6 +172,8 @@ int main(int argc, char *argv[]) {
     std::once_flag init_flag;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
+
+        std::lock_guard<std::mutex> lock(processing_mutex);
         std::call_once(init_flag, [&]() {
             start_time = std::chrono::steady_clock::now();
             first_event_t = begin->t;
@@ -221,7 +199,6 @@ int main(int argc, char *argv[]) {
 
             // Process with tracker
             for (auto &tracker: trackers) {
-                std::lock_guard<std::mutex> lock(processing_mutex);
                 if (!tracker->feed(event_to_build)) {
                     continue;
                 }
@@ -304,17 +281,28 @@ int main(int argc, char *argv[]) {
                         for (const auto &tracker: trackers) {
                             i++;
                             tracker->getCurrentPosition(t_centre_x, t_centre_y);
-//                            std::cout << i << " " << tracker->color() << std::endl;
-                            const auto rel_color = tracker->color() / double(color_main);
+                            std::cout << i << " " << tracker->color() << std::endl;
+//                            const auto rel_color = tracker->color() / double(color_main);
+                            // write the text with the tracker color
+//                            cv::putText(display_frame, "Tracker " + std::to_string(i) + ": " +
+//                                                std::to_string(t_centre_x) + ", " + std::to_string(t_centre_y),
+//                                        cv::Point(10, 20 + i * 20),
+//                                        cv::FONT_HERSHEY_PLAIN, 1,
+//                                        cv::Scalar(
+//                                                std::clamp(main_color[0] * rel_color, 0.0, 255.0),
+//                                                std::clamp(main_color[1] * rel_color, 0.0, 255.0),
+//                                                std::clamp(main_color[2] * rel_color, 0.0, 255.0)
+//                                        ), 1, cv::LINE_AA);
 
-                            cv::rectangle(display_frame,
-                                          cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
-                                          cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
-                                          cv::Scalar(
-                                                  std::clamp(main_color[0] * rel_color, 0.0, 255.0),
-                                                  std::clamp(main_color[1] * rel_color, 0.0, 255.0),
-                                                  std::clamp(main_color[2] * rel_color, 0.0, 255.0)
-                                          ), 2);
+
+//                            cv::rectangle(display_frame,
+//                                          cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
+//                                          cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
+//                                          cv::Scalar(
+//                                                  std::clamp(main_color[0] * rel_color, 0.0, 255.0),
+//                                                  std::clamp(main_color[1] * rel_color, 0.0, 255.0),
+//                                                  std::clamp(main_color[2] * rel_color, 0.0, 255.0)
+//                                          ), 2);
                         }
 
                         cv::putText(display_frame, "Tracker: Initialized", cv::Point(10, 40),

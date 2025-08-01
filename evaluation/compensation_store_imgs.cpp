@@ -33,6 +33,7 @@
 
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
+//#include "estimator/iekf_sinusoid_fitter.hpp"
 #include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
@@ -165,8 +166,6 @@ int main(int argc, char *argv[]) {
     long long slice_initial_time = 0;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
-        if (begin == end)
-            return;
         std::call_once(init_flag, [&]() {
             start_time = std::chrono::steady_clock::now();
             first_event_t = begin->t;

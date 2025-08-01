@@ -11,7 +11,6 @@
 #include <metavision/sdk/ui/utils/window.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
 
-#include "sim/ini_sim.hpp"
 #include "event_frontend/undistort.hpp"
 
 // Main example function

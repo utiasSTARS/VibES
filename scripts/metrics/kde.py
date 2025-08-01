@@ -174,16 +174,18 @@ class FastEventLoader:
 
         # Start from 10 seconds into the data
         current_start = start_time + 10_000_000  # 10 seconds
+        end_time = current_start + 10_000_000  # 5 seconds after start
         step_size = window_size_us - overlap_us
 
         print(f"Generating time windows from {current_start} to {end_time}")
         print(f"Window size: {window_size_us} us, overlap: {overlap_us} us")
 
         counter = 0
-        while current_start < end_time and counter < max_windows:
+        while current_start < end_time: # and counter < max_windows:
             current_end = min(current_start + window_size_us, end_time)
             window_data = self.get_time_slice(current_start, current_end)
 
+            print(f"Yielding window {counter}: {current_start} to {current_end}, events: {len(window_data)}")
             if len(window_data) > 0:  # Only yield non-empty windows
                 yield current_start, current_end, window_data
                 counter += 1
@@ -264,11 +266,11 @@ class KDEMetrics:
 
         # Add statistics text
         stats_text = f"""Statistics:
-Mean: {np.mean(densities):.4f}
-Std: {np.std(densities):.4f}
-Min: {np.min(densities):.4f}
-Max: {np.max(densities):.4f}
-Count: {len(densities)}"""
+            Mean: {np.mean(densities):.4f}
+            Std: {np.std(densities):.4f}
+            Min: {np.min(densities):.4f}
+            Max: {np.max(densities):.4f}
+            Count: {len(densities)}"""
 
         plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes,
                  verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
@@ -324,8 +326,8 @@ Count: {len(densities)}"""
             # if events_collected >= max_events:
             #     break
 
-            if counter>100:
-                break
+            # if counter>100:
+            #     break
 
             if len(window_data) < 10:  # Skip windows with too few events
                 continue
@@ -345,8 +347,8 @@ Count: {len(densities)}"""
             all_densities.extend(window_densities)
             events_collected += len(pts)
 
-            counter+=1
-            print(f"{counter} Processed window {start_time}-{end_time}, collected {events_collected}/{max_events} events")
+            # counter+=1
+            # print(f"{counter} Processed window {start_time}-{end_time}, collected {events_collected}/{max_events} events")
 
         if not all_densities:
             print(f"Warning: No densities computed for {self.name}")

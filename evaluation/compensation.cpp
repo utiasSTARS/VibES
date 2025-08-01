@@ -7,6 +7,7 @@
 #define STORE
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
+#include <metavision/sdk/core/algorithms/event_buffer_reslicer_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
@@ -37,7 +38,6 @@
 #include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
-#include "profiler.hpp"
 
 
 // Constants
@@ -77,6 +77,13 @@ int main(int argc, char *argv[]) {
     HARMEDA::ParamsLoader params(argc, argv);
     std::cout << params;
 
+
+    // create folder if not exists
+    std::string output_images = params.params->output_folder + "/compensated_events/";
+    if (!std::filesystem::exists(output_images)) {
+        std::filesystem::create_directories(output_images);
+    }
+
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
 
@@ -84,7 +91,7 @@ int main(int argc, char *argv[]) {
     const int half_size = size / 2;
 
     const cv::Scalar color_tracker(0, 255, 0); // Green color for tracker visualization
-    unsigned short t_centre_x=0, t_centre_y=0;
+    unsigned short t_centre_x = 0, t_centre_y = 0;
 
     // Initialize undistortion
     Undistort undistort(params.params->calib_file);
@@ -132,7 +139,7 @@ int main(int argc, char *argv[]) {
     std::mutex processing_mutex;
 
 #ifdef STORE
-    std::filesystem::path out_hdf5_file_path = params.params->output_folder + "/events.hdf5";
+    std::filesystem::path out_hdf5_file_path = output_images + "/events.hdf5";
     if (!out_hdf5_file_path.parent_path().empty() && !std::filesystem::exists(out_hdf5_file_path.parent_path())) {
         std::filesystem::create_directories(out_hdf5_file_path.parent_path());
     }
@@ -201,9 +208,9 @@ int main(int argc, char *argv[]) {
 
             // Process with tracker
             if (tracker) {
-                if (tracker_enable) {
-                    in_tracker = tracker->feed(event_to_build);
-                }
+
+                in_tracker = tracker->feed(event_to_build);
+
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
 #ifdef FANCY_VISUALIZATION
                     // if the event is in the left half of the image skip
@@ -223,16 +230,11 @@ int main(int argc, char *argv[]) {
                         }
                         event_to_build.x = x_new;
                         event_to_build.y = y_new;
-                        event_to_build.p = 0;
-                        continue;
+//                        event_to_build.p = 0;
                     }
 
                 } else {
-                    if (!in_tracker) {
-                        continue;
-                    }
-
-                    if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
+                    if (in_tracker && nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
                         NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator.getHarmonics(), Ax, Ay, Bx, By,
                                                                        omegas, offsets);
@@ -365,7 +367,6 @@ int main(int argc, char *argv[]) {
 #endif
 
     // Cleanup
-    cd_frame_generator.stop();
     if (params.camera.is_running()) {
         params.camera.stop();
     }

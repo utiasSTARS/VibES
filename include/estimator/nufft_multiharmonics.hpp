@@ -274,53 +274,6 @@ public:
         return std::make_tuple(mean_x_, mean_y_);
     }
 
-    // Initialize IEKF with estimated harmonics
-    Eigen::VectorXd getIEKFInitialState(int num_harmonics_requested) const {
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        if (harmonics_.empty()) {
-            throw std::runtime_error("No harmonics estimated yet.");
-        }
-
-        int actual_harmonics = std::min(num_harmonics_requested, static_cast<int>(harmonics_.size()));
-        int state_size = 6 * actual_harmonics + 4;
-
-        Eigen::VectorXd initial_state = Eigen::VectorXd::Zero(state_size);
-
-        // Set harmonic coefficients
-        for (int h = 0; h < actual_harmonics; ++h) {
-            const auto &harmonic = harmonics_[h];
-
-            // For each dimension (X, Y, T)
-            for (int dim = 0; dim < 3; ++dim) {
-                int base_idx = h * 6 + dim * 2;
-
-                double amplitude, phase;
-                if (dim == 0) {
-                    amplitude = harmonic.amplitude_x;
-                    phase = harmonic.phase_x;
-                } else if (dim == 1) {
-                    amplitude = harmonic.amplitude_y;
-                    phase = harmonic.phase_y;
-                }
-
-                // Convert A*sin(wt + phi) to A_sin*sin(wt) + A_cos*cos(wt)
-                // A*sin(wt + phi) = A*sin(phi)*cos(wt) + A*cos(phi)*sin(wt)
-                initial_state(base_idx) = amplitude * std::cos(phase);     // A coefficient (sin term)
-                initial_state(base_idx + 1) = amplitude * std::sin(phase); // B coefficient (cos term)
-            }
-        }
-
-        // Set omega (fundamental frequency)
-        initial_state(state_size - 4) = harmonics_[0].frequency / (actual_harmonics > 0 ? 1.0 : 1.0);
-
-        // Set offsets
-        initial_state(state_size - 2) = mean_x_;  // Cx
-        initial_state(state_size - 1) = mean_y_;  // Cy
-
-        return initial_state;
-    }
-
     // Print results
     void printResults() const {
         std::lock_guard<std::mutex> lock(mutex_);
