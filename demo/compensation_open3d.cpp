@@ -32,44 +32,20 @@
 
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
-//#include "estimator/iekf_sinusoid_fitter.hpp"
 #include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
-#include "profiler.hpp"
+#include "utils.hpp"
+
 #include "visualizer/open3d_visualizer.hpp"
 
 // Constants
 namespace {
-    constexpr double DEFAULT_FPS = 100.0;
+    constexpr double DEFAULT_FPS = 1000.0;
     constexpr std::uint32_t DEFAULT_ACCUMULATION = 5000;
     constexpr int ESC_KEY = 27;
-    constexpr int POLL_TIMEOUT_MS = 10;
+    constexpr int POLL_TIMEOUT_MS = 1;
     bool NUFFT_ESTIMATION_DONE = false;
-}
-
-// UI processing function similar to original
-int processUI(int delay_ms) {
-    auto then = std::chrono::high_resolution_clock::now();
-    int key = cv::waitKey(delay_ms);
-    auto now = std::chrono::high_resolution_clock::now();
-
-    // Ensure consistent timing
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - then).count();
-    if (elapsed < delay_ms) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms - elapsed));
-    }
-
-    return key;
-}
-
-// Mouse callback for tracker selection
-void receiveMouseEvent(int event, int x, int y, int flags, void *userdata) {
-    auto *callback = reinterpret_cast<std::function<void(int, int)> *>(userdata);
-
-    if (event == cv::EVENT_LBUTTONDOWN && callback) {
-        (*callback)(x, y);
-    }
 }
 
 static std::chrono::steady_clock::time_point end_time, start_time;
@@ -161,10 +137,7 @@ int main(int argc, char *argv[]) {
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
-        if (tracker) {
-#ifdef FANCY_VISUALIZATION
-            visualization_cut_off = x; // Update cut-off for visualization
-#endif
+        if (tracker || params.params->nocompensation) {
             return;
         }
         tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
@@ -211,9 +184,8 @@ int main(int argc, char *argv[]) {
 
             // Process with tracker
             if (tracker) {
-                if (tracker_enable) {
-                    in_tracker = tracker->feed(event_to_build);
-                }
+                in_tracker = tracker->feed(event_to_build);
+
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
 #ifdef FANCY_VISUALIZATION
                     // if the event is in the left half of the image skip
@@ -241,15 +213,10 @@ int main(int argc, char *argv[]) {
                         event_to_build.x = x_new;
                         event_to_build.y = y_new;
                         event_to_build.p = 0;
-                        continue;
                     }
 
                 } else {
-                    if (!in_tracker) {
-                        continue;
-                    }
-
-                    if (nufft_estimator.feed(std::move(tracker->getCentroids()))) {
+                    if (in_tracker && nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
                         NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator.getHarmonics(), Ax, Ay, Bx, By,
                                                                        omegas, offsets);
@@ -365,15 +332,6 @@ int main(int argc, char *argv[]) {
 
     end_time = std::chrono::steady_clock::now();
 
-#ifdef STORE
-    // print blue text
-    std::cout << "\033[1;34mWriting events to HDF5 file...\033[0m" << std::endl;
-    if (hdf5_writer.is_open()) {
-        std::cout << "\033[1;34mEvents written to: " << out_hdf5_file_path << "\033[0m" << std::endl;
-    }
-    // Close HDF5 writer
-    hdf5_writer.close();
-#endif
 
     // Cleanup
     cd_frame_generator.stop();

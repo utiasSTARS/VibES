@@ -100,7 +100,7 @@ ImageResults ev2img_metavision(Metavision::Stage::EventBuffer &evs, int MAT_ROWS
 }
 
 enum ImageType {
-    BINARY,
+    BIN,
     COUNT,           // Event count with colormap
     COUNT_GRAY,      // Event count grayscale
     TS,              // Timestamp with colormap
@@ -131,7 +131,7 @@ void ev2img_metavision(Metavision::Stage::EventBuffer &evs, cv::Mat &output, Ima
 
         // Single pass through events
         for (auto &ev : evs) {
-            if (type == BINARY) {
+            if (type == BIN) {
                 if (output.empty()) output = cv::Mat::zeros(output.rows, output.cols, CV_8UC1);
                 output.at<uchar>(ev.y, ev.x) = 255;
                 continue;
@@ -140,8 +140,7 @@ void ev2img_metavision(Metavision::Stage::EventBuffer &evs, cv::Mat &output, Ima
             float deltaT = float(t_end - ev.t) * microsec_to_sec;
 
             if (need_count) {
-                uint16_t& count_ref = count_mat.at<uint16_t>(ev.y, ev.x);
-                if (count_ref < 65535) count_ref++;
+
             }
 
             if (need_sum) {

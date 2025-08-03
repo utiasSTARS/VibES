@@ -3,11 +3,8 @@
 // Based on Metavision SDK patterns
 //
 
-//#define FANCY_VISUALIZATION
-#define STORE
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
-#include <metavision/sdk/core/algorithms/event_buffer_reslicer_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
@@ -26,26 +23,21 @@
 #include <csignal>
 #include <thread>
 
-#ifdef STORE
-
-#include <metavision/sdk/driver/hdf5_event_file_writer.h>
-
-#endif
-
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
 //#include "estimator/iekf_sinusoid_fitter.hpp"
 #include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
+#include "profiler.hpp"
 
 
 // Constants
 namespace {
-    constexpr double DEFAULT_FPS = 1000.0;
+    constexpr double DEFAULT_FPS = 100.0;
     constexpr std::uint32_t DEFAULT_ACCUMULATION = 5000;
     constexpr int ESC_KEY = 27;
-    constexpr int POLL_TIMEOUT_MS = 1;
+    constexpr int POLL_TIMEOUT_MS = 10;
     bool NUFFT_ESTIMATION_DONE = false;
 }
 
@@ -77,21 +69,11 @@ int main(int argc, char *argv[]) {
     HARMEDA::ParamsLoader params(argc, argv);
     std::cout << params;
 
-
-    // create folder if not exists
-    std::string output_images = params.params->output_folder + "/compensated_events/";
-    if (!std::filesystem::exists(output_images)) {
-        std::filesystem::create_directories(output_images);
-    }
-
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
 
     const int size = haste::HypothesisPatchTracker::kPatchSize;
     const int half_size = size / 2;
-
-    const cv::Scalar color_tracker(0, 255, 0); // Green color for tracker visualization
-    unsigned short t_centre_x = 0, t_centre_y = 0;
 
     // Initialize undistortion
     Undistort undistort(params.params->calib_file);
@@ -123,51 +105,30 @@ int main(int argc, char *argv[]) {
             100000, 1000000, true);
 
     // Initialize fitters and estimator
-    NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
+    auto nufft_estimator = std::make_shared<NUFFTHelixEstimator>(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
     std::shared_ptr<HasteWrapper<Metavision::EventCD>> tracker;
-
-    if (!params.params->nocompensation && params.params->tracker_x != 0 && params.params->tracker_y != 0) {
-        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(params.params->tracker_x,
-                                                                      params.params->tracker_y,
-                                                                      TRACKER_RATE, first_event_t);
-        t_centre_x = params.params->tracker_x;
-        t_centre_y = params.params->tracker_y;
-        std::cout << "Tracker initialized at (" << t_centre_x << ", " << t_centre_y << ")" << std::endl;
-    }
 
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
-
-#ifdef STORE
-    std::filesystem::path out_hdf5_file_path = output_images + "/events.hdf5";
-    if (!out_hdf5_file_path.parent_path().empty() && !std::filesystem::exists(out_hdf5_file_path.parent_path())) {
-        std::filesystem::create_directories(out_hdf5_file_path.parent_path());
-    }
-    Metavision::HDF5EventFileWriter hdf5_writer(out_hdf5_file_path);
-    hdf5_writer.add_metadata_map_from_camera(params.camera);
-#endif
 
     // Setup display window (similar to original)
     std::string window_name("HARMEDA Event Tracking");
     cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
     cv::resizeWindow(window_name, width, height);
     cv::moveWindow(window_name, 0, 0);
-#ifdef FANCY_VISUALIZATION
-    int visualization_cut_off = width / 2; // Cut-off for visualization
-#endif
+
+    std::vector<std::pair<unsigned short, unsigned short>> tracker_centers;
+    NUFFT_ESTIMATION_DONE = true; // Flag to indicate if NUFFT estimation is done
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
-        if (tracker || params.params->nocompensation) {
-#ifdef FANCY_VISUALIZATION
-            visualization_cut_off = x; // Update cut-off for visualization
-#endif
+        if (!NUFFT_ESTIMATION_DONE) {
+            std::cout << "Working on the first tracker, please wait..." << std::endl;
             return;
         }
-        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
-        t_centre_x = x;
-        t_centre_y = y;
-        std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
+        tracker_centers.emplace_back(x, y);
+        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(810, 490, TRACKER_RATE, first_event_t);
+        NUFFT_ESTIMATION_DONE = false;
     };
 
     cv::setMouseCallback(window_name, receiveMouseEvent, &mouse_callback);
@@ -178,11 +139,14 @@ int main(int argc, char *argv[]) {
     double x_pred = 0, y_pred = 0;
 
     Metavision::Stage::EventBuffer compensated_events;
-    unsigned short x_undistorted, y_undistorted;
+    unsigned short x_undistorted, y_undistorted, t_centre_x, t_centre_y;
+
 
     std::once_flag init_flag;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
+
+        std::lock_guard<std::mutex> lock(processing_mutex);
         std::call_once(init_flag, [&]() {
             start_time = std::chrono::steady_clock::now();
             first_event_t = begin->t;
@@ -207,62 +171,27 @@ int main(int argc, char *argv[]) {
             const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6f;
 
             // Process with tracker
-            if (tracker) {
+            if (!NUFFT_ESTIMATION_DONE && tracker->feed(event_to_build) &&
+                nufft_estimator->feed(std::move(tracker->getCentroids()))) {
+                nufft_estimator->printResults();
+                NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator->getHarmonics(), Ax, Ay, Bx, By,
+                                                               omegas, offsets);
 
-                in_tracker = tracker->feed(event_to_build);
-
-                if (NUFFT_ESTIMATION_DONE) [[likely]] {
-#ifdef FANCY_VISUALIZATION
-                    // if the event is in the left half of the image skip
-                    if (event_to_build.x < visualization_cut_off) {
-                        continue;
-                    }
-#endif
-
-                    if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
-                        auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
-                        if (x_new < 0 || x_new >= width) {
-                            continue; // Skip if out of bounds
-                        }
-                        auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
-                        if (y_new < 0 || y_new >= height) {
-                            continue; // Skip if out of bounds
-                        }
-                        event_to_build.x = x_new;
-                        event_to_build.y = y_new;
-//                        event_to_build.p = 0;
-                        continue;
-                    }
-
-                } else {
-                    if (in_tracker && nufft_estimator.feed(std::move(tracker->getCentroids()))) {
-                        nufft_estimator.printResults();
-                        NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator.getHarmonics(), Ax, Ay, Bx, By,
-                                                                       omegas, offsets);
-
-                        if (!Ax.empty()) {
-                            std::cout << "\033[1;34mTracker initialized with parameters:\033[0m" << std::endl;
-                            std::cout << "Ax: " << Ax[0] << ", Ay: " << Ay[0]
-                                      << ", Bx: " << Bx[0] << ", By: " << By[0]
-                                      << ", omega: " << omegas[0] << ", offset_x: " << offsets[0]
-                                      << ", offset_y: " << offsets[1] << std::endl;
-                            tracker->addFitters(
-                                    std::make_unique<IEKFSinusoidFitter>(
-                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ax, Bx, omegas, offsets)),
-                                    std::make_unique<IEKFSinusoidFitter>(
-                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ay, By, omegas, offsets)));
-                        }
-                        NUFFT_ESTIMATION_DONE = nufft_estimator.done();
-                    }
+                if (!Ax.empty()) {
+                    std::cout << "\033[1;34mTracker initialized with parameters:\033[0m" << std::endl;
+                    std::cout << "Ax: " << Ax[0] << ", Ay: " << Ay[0]
+                              << ", Bx: " << Bx[0] << ", By: " << By[0]
+                              << ", omega: " << omegas[0] << ", offset_x: " << offsets[0]
+                              << ", offset_y: " << offsets[1] << std::endl;
                 }
+                NUFFT_ESTIMATION_DONE = nufft_estimator->done();
             }
+
+
         }
         // Feed events to frame generator and rate estimator
         const auto *begin_comp = compensated_events.data();
         const auto *end_comp = begin_comp + compensated_events.size();
-#ifdef STORE
-        hdf5_writer.add_events(begin_comp, end_comp);
-#endif
         cd_frame_generator.add_events(begin_comp, end_comp);
         cd_rate_estimator.add_data(std::prev(end_comp)->t, std::distance(begin_comp, end_comp));
     });
@@ -281,14 +210,7 @@ int main(int argc, char *argv[]) {
                 cd_frame.copyTo(display_frame);
 
                 if (osd) {
-                    if (tracker) {
-                        tracker->getCurrentPosition(t_centre_x, t_centre_y);
-                        cv::rectangle(display_frame,
-                                      cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
-                                      cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
-                                      color_tracker, 2);
-                    }
-
+                    std::lock_guard<std::mutex> lock(processing_mutex);
                     // Add on-screen display info
                     std::string text = Metavision::getHumanReadableTime(cd_frame_ts);
                     text += "     ";
@@ -299,6 +221,20 @@ int main(int argc, char *argv[]) {
 
                     // Add tracker info if available
                     if (tracker) {
+                        int i = 0;
+                        const cv::Scalar main_color(128, 200, 128);
+                        tracker->getCurrentPosition(t_centre_x, t_centre_y);
+
+                        cv::rectangle(display_frame,
+                                      cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
+                                      cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
+                                      cv::Scalar(
+                                              std::clamp(main_color[0], 0.0, 255.0),
+                                              std::clamp(main_color[1], 0.0, 255.0),
+                                              std::clamp(main_color[2], 0.0, 255.0)
+                                      ), 2);
+
+
                         cv::putText(display_frame, "Tracker: Initialized", cv::Point(10, 40),
                                     cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
 
@@ -329,14 +265,10 @@ int main(int argc, char *argv[]) {
                 break;
             case 'r': {
                 std::lock_guard<std::mutex> lock(processing_mutex);
-                tracker.reset();
+                nufft_estimator = std::make_shared<NUFFTHelixEstimator>(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
+                tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(810, 490, TRACKER_RATE, first_event_t);
                 NUFFT_ESTIMATION_DONE = false;
                 std::cout << "Reset tracker" << std::endl;
-            }
-            case 't': {
-                std::lock_guard<std::mutex> lock(processing_mutex);
-                tracker_enable = !tracker_enable;
-                std::cout << "Tracker " << (tracker_enable ? "enabled" : "disabled") << std::endl;
             }
                 break;
             case 'h':
@@ -357,17 +289,8 @@ int main(int argc, char *argv[]) {
 
     end_time = std::chrono::steady_clock::now();
 
-#ifdef STORE
-    // print blue text
-    std::cout << "\033[1;34mWriting events to HDF5 file...\033[0m" << std::endl;
-    if (hdf5_writer.is_open()) {
-        std::cout << "\033[1;34mEvents written to: " << out_hdf5_file_path << "\033[0m" << std::endl;
-    }
-    // Close HDF5 writer
-    hdf5_writer.close();
-#endif
-
     // Cleanup
+    cd_frame_generator.stop();
     if (params.camera.is_running()) {
         params.camera.stop();
     }

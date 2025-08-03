@@ -9,6 +9,7 @@ from pathlib import Path
 
 import skimage.measure
 
+
 class FrameLoader:
     def __init__(self, fp):
         self._fp = fp
@@ -114,7 +115,8 @@ def compute_entropy_for_folder(folder_path, folder_name):
     entropy = []
 
     # Use iterator to process frames one by one (memory efficient)
-    for i, frame in enumerate(tqdm(frame_loader, desc=f"Computing entropy for {folder_name}", total=frame_loader.get_frame_count())):
+    for i, frame in enumerate(
+            tqdm(frame_loader, desc=f"Computing entropy for {folder_name}", total=frame_loader.get_frame_count())):
         # Frame is already grayscale from FrameLoader
 
         # Ensure the image is in float format (0-255 range is fine for entropy)
@@ -145,16 +147,19 @@ def compute_entropy_for_folder(folder_path, folder_name):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run entropy metric on 'ev' and 'harmeda' folders within a given path.")
+    parser = argparse.ArgumentParser(
+        description="Run entropy metric on 'ev' and 'harmeda' folders within a given path.")
     parser.add_argument(
         "base_path", type=str, help="Base path containing 'ev' and 'harmeda' subfolders"
     )
+    parser.add_argument("type", type=str, choices=["bin", "gray"],
+                        help="Type of images to process (bin or gray)")
     args = parser.parse_args()
 
     # Construct paths to the two expected folders
     base_path = Path(args.base_path)
-    ev_path = base_path / "ev/img_bin"
-    harmeda_path = base_path / "harmeda/img_bin"
+    ev_path = base_path / f"ev/img_{args.type}"
+    harmeda_path = base_path / f"harmeda/img_{args.type}"
 
     # Check if both folders exist
     if not ev_path.exists():

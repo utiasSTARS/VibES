@@ -4,7 +4,7 @@
 //
 
 //#define STORE
-#define STORE_FRAMES
+#define BINARY
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/algorithms/event_buffer_reslicer_algorithm.h>
@@ -14,6 +14,7 @@
 #include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
 
+#include <opencv2/opencv.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -80,7 +81,11 @@ int main(int argc, char *argv[]) {
 
 
     // create folder if not exists
+#ifdef BINARY
     std::string output_images = params.params->output_folder + "/img_bin/";
+#elif
+    std::string output_images = params.params->output_folder + "/img_gray/";
+#endif
     if (!std::filesystem::exists(output_images)) {
         std::filesystem::create_directories(output_images);
     }
@@ -158,9 +163,13 @@ int main(int argc, char *argv[]) {
     Metavision::timestamp duration_for_amiev = 0;
     unsigned short x_undistorted, y_undistorted;
 
+#ifdef BINARY
     cv::namedWindow("img bin", cv::WINDOW_AUTOSIZE);
     cv::Mat output_image = cv::Mat::zeros(cv::Size(width, height), CV_8UC1);
-
+#elif
+    cv::namedWindow("img gray", cv::WINDOW_AUTOSIZE);
+    cv::Mat output_image = cv::Mat::zeros(cv::Size(width, height), CV_16UC1);
+#endif
     long long counter = 0;
     std::once_flag init_flag;
     long long slice_initial_time = 0;
@@ -194,22 +203,21 @@ int main(int argc, char *argv[]) {
             // Process with tracker
             if (tracker) {
                 in_tracker = tracker->feed(event_to_build);
-
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
-                    if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
-                        auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
-                        if (x_new < 0 || x_new >= width) {
-                            continue; // Skip if out of bounds
-                        }
-                        auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
-                        if (y_new < 0 || y_new >= height) {
-                            continue; // Skip if out of bounds
-                        }
-                        event_to_build.x = x_new;
-                        event_to_build.y = y_new;
-                        event_to_build.p = 0;
+//                    if(event_to_build.x > 320) {
+                        if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
+                            auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
+                            if (x_new < 0 || x_new >= width) {
+                                continue; // Skip if out of bounds
+                            }
+                            auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
+                            if (y_new < 0 || y_new >= height) {
+                                continue; // Skip if out of bounds
+                            }
+                            event_to_build.x = x_new;
+                            event_to_build.y = y_new;
+//                        }
                     }
-
                 } else {
                     if (in_tracker && nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
@@ -233,19 +241,38 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-
             // Feed events to frame generator and rate estimator
             if (ev->t - slice_initial_time > 10000) { // 10 ms
+#ifndef BINARY
+                output_image.convertTo(output_image, CV_8UC1);
+                cv::normalize(output_image, output_image, 0, 255, cv::NORM_MINMAX);
+                cv::applyColorMap(output_image, output_image, cv::COLORMAP_BONE);
+#endif
                 cv::imwrite(output_images + std::to_string(counter) + ".png",
                             output_image);
+#ifdef BINARY
                 cv::imshow("img bin", output_image);
+#elif
+                cv::imshow("img gray", output_image);
+#endif
                 slice_initial_time = ev->t;
                 cv::waitKey(1);
                 counter++;
+#ifdef BINARY
                 output_image = cv::Mat::zeros(cv::Size(width, height), CV_8UC1);
                 output_image.at<uchar>(event_to_build.y, event_to_build.x) = 255;
+#elif
+                output_image = cv::Mat::zeros(cv::Size(width, height), CV_16UC1);
+                uint16_t& count_ref = output_image.at<uint16_t>(event_to_build.y, event_to_build.x);
+                if (count_ref < 65535) count_ref++;
+#endif
             } else {
+#ifdef BINARY
                 output_image.at<uchar>(event_to_build.y, event_to_build.x) = 255;
+#elif
+                uint16_t& count_ref = output_image.at<uint16_t>(event_to_build.y, event_to_build.x);
+                if (count_ref < 65535) count_ref++;
+#endif
             }
         }
     });
@@ -268,6 +295,13 @@ int main(int argc, char *argv[]) {
     // Cleanup
     if (params.camera.is_running()) {
         params.camera.stop();
+    }
+
+    // print tracker status
+    if (tracker) {
+        tracker->printFittersStatus();
+    } else {
+        std::cout << "No tracker initialized." << std::endl;
     }
 
     return 0;

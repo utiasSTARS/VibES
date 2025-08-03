@@ -77,6 +77,8 @@ int main(int argc, char *argv[]) {
     HARMEDA::ParamsLoader params(argc, argv);
     std::cout << params;
 
+//    params.camera.biases().set_from_file("/home/viciopoli/Documents/metavision/biases/biases_filtered.bias");
+
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
 
@@ -281,8 +283,8 @@ int main(int argc, char *argv[]) {
                         for (const auto &tracker: trackers) {
                             i++;
                             tracker->getCurrentPosition(t_centre_x, t_centre_y);
-                            std::cout << i << " " << tracker->color() << std::endl;
-//                            const auto rel_color = tracker->color() / double(color_main);
+//                            std::cout << i << " " << tracker->color() << std::endl;
+                            const auto rel_color = tracker->color() / double(color_main);
                             // write the text with the tracker color
 //                            cv::putText(display_frame, "Tracker " + std::to_string(i) + ": " +
 //                                                std::to_string(t_centre_x) + ", " + std::to_string(t_centre_y),
@@ -295,14 +297,14 @@ int main(int argc, char *argv[]) {
 //                                        ), 1, cv::LINE_AA);
 
 
-//                            cv::rectangle(display_frame,
-//                                          cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
-//                                          cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
-//                                          cv::Scalar(
-//                                                  std::clamp(main_color[0] * rel_color, 0.0, 255.0),
-//                                                  std::clamp(main_color[1] * rel_color, 0.0, 255.0),
-//                                                  std::clamp(main_color[2] * rel_color, 0.0, 255.0)
-//                                          ), 2);
+                            cv::rectangle(display_frame,
+                                          cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
+                                          cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
+                                          cv::Scalar(
+                                                  std::clamp(main_color[0] * rel_color, 0.0, 255.0),
+                                                  std::clamp(main_color[1] * rel_color, 0.0, 255.0),
+                                                  std::clamp(main_color[2] * rel_color, 0.0, 255.0)
+                                          ), 2);
                         }
 
                         cv::putText(display_frame, "Tracker: Initialized", cv::Point(10, 40),

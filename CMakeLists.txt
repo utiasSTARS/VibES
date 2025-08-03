@@ -138,3 +138,9 @@ target_link_libraries(frequency_filter PRIVATE finufft ${OpenCV_LIBS} Metavision
 
 add_executable(amiev_visualization evaluation/amiev_visualization.cpp)
 target_link_libraries(amiev_visualization PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+
+add_executable(frequency_estimation_visualizer evaluation/frequency_estimation_visualizer.cpp)
+target_link_libraries(frequency_estimation_visualizer PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+
+add_executable(frequency_estimation evaluation/frequency_estimation.cpp)
+target_link_libraries(frequency_estimation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)

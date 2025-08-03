@@ -38,14 +38,14 @@ public:
 
             // Create covariance matrices
             StateCovariance4 initial_covariance = StateCovariance4::Identity();
-            initial_covariance(0, 0) = 1e1;  // A amplitude
-            initial_covariance(1, 1) = 1e1;  // B amplitude
+            initial_covariance(0, 0) = 1e2;  // A amplitude
+            initial_covariance(1, 1) = 1e2;  // B amplitude
             initial_covariance(2, 2) = 1e1;  // omega frequency
-            initial_covariance(3, 3) = 1e4;  // C DC offset
+            initial_covariance(3, 3) = 1e3;  // C DC offset
 
             StateCovariance4 process_noise = StateCovariance4::Identity();
-            process_noise(0, 0) = 1e-2;
-            process_noise(1, 1) = 1e-2;
+            process_noise(0, 0) = 1e0;
+            process_noise(1, 1) = 1e0;
             process_noise(2, 2) = 1e-3;
             process_noise(3, 3) = 1e3;
 
@@ -71,8 +71,8 @@ public:
 
 
             StateCovariance7 process_noise = StateCovariance7::Identity() * process_noise_scale;
-            process_noise(0, 0) = 1e0;
-            process_noise(1, 1) = 1e0;
+            process_noise(0, 0) = 1e1;
+            process_noise(1, 1) = 1e1;
             process_noise(2, 2) = 1e0;
             process_noise(3, 3) = 1e0;
             process_noise(4, 4) = 1e-3;

@@ -33,7 +33,7 @@ using TrackerPtr = std::shared_ptr<haste::HypothesisPatchTracker>;
 
 namespace {
     constexpr double MIN_FREQUENCY = 5.0;   // Hz
-    constexpr double MAX_FREQUENCY = 80.0;  // Hz
+    constexpr double MAX_FREQUENCY = 40.0;  // Hz
     constexpr int MAX_HARMONICS = 1;
     constexpr double TRACKER_RATE = 0.1;
     constexpr int TRACKER_MARGIN = haste::HypothesisPatchTracker::kPatchSize / 2 + 15;
@@ -95,6 +95,20 @@ public:
 #ifdef STORE
         file_centroid_.open(output_folder + "/centroids.txt");
 #endif
+    }
+
+    void printFittersStatus(){
+        std::lock_guard<std::mutex> lock(centroids_mutex_);
+        if (x_fitter_) {
+            std::cout << "X Fitter: " << x_fitter_->to_string() << std::endl;
+        } else {
+            std::cout << "X Fitter: Not initialized" << std::endl;
+        }
+        if (y_fitter_) {
+            std::cout << "Y Fitter: " << y_fitter_->to_string() << std::endl;
+        } else {
+            std::cout << "Y Fitter: Not initialized" << std::endl;
+        }
     }
 
     virtual ~HasteWrapperBase() {
@@ -280,10 +294,10 @@ public:
     }
 
     bool feed(const T &event) {
-//        if (inTracker(event)) {
+        if (inTracker(event)) {
             return event_stack_.push(event);
-//        }
-//        return false;
+        }
+        return false;
     }
 
     bool feed(const T &event, unsigned short &x, unsigned short &y) {
