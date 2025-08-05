@@ -519,7 +519,7 @@ private:
         return !harmonics.empty();
     }
 
-    void refineEstimates(const std::vector<double> &t_data,
+    static void refineEstimates(const std::vector<double> &t_data,
                          const std::vector<double> &x_data,
                          const std::vector<double> &y_data,
                          double mean_x, double mean_y,
@@ -542,17 +542,18 @@ private:
         }
     }
 
-    std::tuple<double, double, double> leastSquaresHarmonic(double omega,
+    static std::tuple<double, double, double> leastSquaresHarmonic(double omega,
                                                             const std::vector<double> &data,
                                                             double mean_val,
                                                             const std::vector<double> &t_data) {
         // Fit: y = A*sin(ωt) + B*cos(ωt) + C
         double S11 = 0.0, S12 = 0.0, S13 = 0.0;  // sin-sin, sin-cos, sin-1
         double S22 = 0.0, S23 = 0.0;              // cos-cos, cos-1
-        double S33 = static_cast<double>(N);       // 1-1
+        auto n = data.size();
+        auto S33 = static_cast<double>(n);    // 1-1
         double S1y = 0.0, S2y = 0.0, S3y = 0.0;   // sin-y, cos-y, 1-y
 
-        for (int i = 0; i < N; ++i) {
+        for (int i = 0; i < n; ++i) {
             double s = std::sin(omega * t_data[i]);
             double c = std::cos(omega * t_data[i]);
             double y = data[i] - mean_val;

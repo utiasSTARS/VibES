@@ -3,8 +3,8 @@
 // Based on Metavision SDK patterns
 //
 
+#define FANCY_VISUALIZATION
 //#define STORE
-//#define BINARY
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/algorithms/event_buffer_reslicer_algorithm.h>
@@ -14,7 +14,7 @@
 #include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
 
-#include <opencv2/opencv.hpp>
+
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -38,9 +38,8 @@
 #include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
-#include "utils.hpp"
 
-#include "visualizer/ev2image.hpp"
+#include "slice_visualizer.hpp"
 
 // Constants
 namespace {
@@ -53,6 +52,40 @@ namespace {
 
 static std::chrono::steady_clock::time_point end_time, start_time;
 static Metavision::timestamp first_event_t = 0, last_event_t = 0;
+
+void updateSliceVisualizers(HARMEDA::SliceVisualizer &slice_x, HARMEDA::SliceVisualizer &slice_y,
+                            std::shared_ptr<HasteWrapper<Metavision::EventCD>> &tracker,
+                            double current_time) {
+
+    if (auto pair = tracker->getEstimate(current_time); pair.has_value()) {
+        auto [x_pred, y_pred] = *pair;
+
+        slice_y.editFrame([&](cv::Mat &frame) {
+            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(y_pred)), 1, cv::Scalar(255, 255, 0), -1);
+        });
+
+        slice_x.editFrame([&](cv::Mat &frame) {
+            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(x_pred)), 1, cv::Scalar(255, 255, 0), -1);
+        });
+    }
+}
+
+void updateTrackerVisualization(HARMEDA::SliceVisualizer &slice_x, HARMEDA::SliceVisualizer &slice_y,
+                                std::shared_ptr<HasteWrapper<Metavision::EventCD>> &tracker) {
+
+    auto [x, y, t] = tracker->getTrackerState();
+    slice_x.editFrame([&](cv::Mat &frame) {
+        cv::circle(frame, cv::Point(slice_x.time_value, int(x)),
+                   1, cv::Scalar(0, 255, 255), -1);
+    });
+
+    slice_y.editFrame([&](cv::Mat &frame) {
+        cv::circle(frame, cv::Point(slice_y.time_value, int(y)),
+                   1, cv::Scalar(0, 255, 255), -1);
+    });
+}
+
+
 
 void print_on_exit() {
     auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
@@ -81,17 +114,18 @@ int main(int argc, char *argv[]) {
 
 
     // create folder if not exists
-#ifdef BINARY
-    std::string output_images = params.params->output_folder + "/img_bin/";
-#else
-    std::string output_images = params.params->output_folder + "/img_gray/";
-#endif
+    std::string output_images = params.params->output_folder + "/compensated_events/";
     if (!std::filesystem::exists(output_images)) {
         std::filesystem::create_directories(output_images);
     }
 
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
+
+    HARMEDA::SliceVisualizer slice_visualizer_x(height, width, 0, HARMEDA::X_AXIS, 3);
+    HARMEDA::SliceVisualizer slice_visualizer_y(height, width, 0, HARMEDA::Y_AXIS, 3);
+    cv::namedWindow("Slice X Visualizer", cv::WINDOW_NORMAL);
+    cv::namedWindow("Slice Y Visualizer", cv::WINDOW_NORMAL);
 
     const int size = haste::HypothesisPatchTracker::kPatchSize;
     const int half_size = size / 2;
@@ -106,6 +140,18 @@ int main(int argc, char *argv[]) {
     std::mutex cd_frame_mutex;
     cv::Mat cd_frame;
     Metavision::timestamp cd_frame_ts{0};
+
+    Metavision::CDFrameGenerator cd_frame_generator(width, height);
+    cd_frame_generator.set_display_accumulation_time_us(DEFAULT_ACCUMULATION);
+
+    // Start frame generator with callback
+    cd_frame_generator.start(DEFAULT_FPS,
+                             [&cd_frame_mutex, &cd_frame, &cd_frame_ts](const Metavision::timestamp &ts,
+                                                                        const cv::Mat &frame) {
+                                 std::unique_lock<std::mutex> lock(cd_frame_mutex);
+                                 cd_frame_ts = ts;
+                                 frame.copyTo(cd_frame);
+                             });
 
     // Setup event rate estimator
     double avg_rate = 0, peak_rate = 0;
@@ -133,7 +179,7 @@ int main(int argc, char *argv[]) {
     std::mutex processing_mutex;
 
 #ifdef STORE
-    std::filesystem::path out_hdf5_file_path = params.params->output_folder + "/events.hdf5";
+    std::filesystem::path out_hdf5_file_path = output_images + "/events.hdf5";
     if (!out_hdf5_file_path.parent_path().empty() && !std::filesystem::exists(out_hdf5_file_path.parent_path())) {
         std::filesystem::create_directories(out_hdf5_file_path.parent_path());
     }
@@ -141,11 +187,21 @@ int main(int argc, char *argv[]) {
     hdf5_writer.add_metadata_map_from_camera(params.camera);
 #endif
 
-
+    // Setup display window (similar to original)
+    std::string window_name("HARMEDA Event Tracking");
+    cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
+    cv::resizeWindow(window_name, width, height);
+    cv::moveWindow(window_name, 0, 0);
+#ifdef FANCY_VISUALIZATION
+    int visualization_cut_off = width / 2; // Cut-off for visualization
+#endif
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
         if (tracker || params.params->nocompensation) {
+#ifdef FANCY_VISUALIZATION
+            visualization_cut_off = x; // Update cut-off for visualization
+#endif
             return;
         }
         tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
@@ -154,31 +210,22 @@ int main(int argc, char *argv[]) {
         std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
 
+    cv::setMouseCallback(window_name, receiveMouseEvent, &mouse_callback);
+
     bool osd = false; // On-screen display toggle
     bool in_tracker = true, tracker_enable = true;
 
     double x_pred = 0, y_pred = 0;
 
-    Metavision::Stage::EventBuffer compensated_events, frames_events;
-    Metavision::timestamp duration_for_amiev = 0;
+    Metavision::Stage::EventBuffer compensated_events;
     unsigned short x_undistorted, y_undistorted;
 
-#ifdef BINARY
-    cv::namedWindow("img bin", cv::WINDOW_AUTOSIZE);
-    cv::Mat output_image = cv::Mat::zeros(cv::Size(width, height), CV_8UC1);
-#else
-    cv::namedWindow("img gray", cv::WINDOW_AUTOSIZE);
-    cv::Mat output_image = cv::Mat::zeros(cv::Size(width, height), CV_16UC1);
-#endif
-    long long counter = 0;
     std::once_flag init_flag;
-    long long slice_initial_time = 0;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
         std::call_once(init_flag, [&]() {
             start_time = std::chrono::steady_clock::now();
             first_event_t = begin->t;
-            slice_initial_time = first_event_t;
         });
 
         compensated_events.clear();
@@ -191,7 +238,6 @@ int main(int argc, char *argv[]) {
             if (x_undistorted < 0 || x_undistorted >= width || y_undistorted < 0 || y_undistorted >= height) {
                 continue; // Skip events that are out of bounds
             }
-
             auto &event_to_build = compensated_events.emplace_back();
             event_to_build.x = x_undistorted;
             event_to_build.y = y_undistorted;
@@ -200,24 +246,41 @@ int main(int argc, char *argv[]) {
 
             const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6f;
 
+            slice_visualizer_x.feed(x_undistorted, y_undistorted, ev->p, ev->t);
+            slice_visualizer_y.feed(x_undistorted, y_undistorted, ev->p, ev->t);
+
             // Process with tracker
             if (tracker) {
+                updateSliceVisualizers(slice_visualizer_x, slice_visualizer_y, tracker, current_t_sec);
+
                 in_tracker = tracker->feed(event_to_build);
+                if (in_tracker) {
+                    updateTrackerVisualization(slice_visualizer_x, slice_visualizer_y, tracker);
+                }
+
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
-//                    if(event_to_build.x > 320) {
-                        if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
-                            auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
-                            if (x_new < 0 || x_new >= width) {
-                                continue; // Skip if out of bounds
-                            }
-                            auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
-                            if (y_new < 0 || y_new >= height) {
-                                continue; // Skip if out of bounds
-                            }
-                            event_to_build.x = x_new;
-                            event_to_build.y = y_new;
-//                        }
+#ifdef FANCY_VISUALIZATION
+                    // if the event is in the left half of the image skip
+                    if (event_to_build.x < visualization_cut_off) {
+                        continue;
                     }
+#endif
+
+                    if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
+                        auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
+                        if (x_new < 0 || x_new >= width) {
+                            continue; // Skip if out of bounds
+                        }
+                        auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
+                        if (y_new < 0 || y_new >= height) {
+                            continue; // Skip if out of bounds
+                        }
+                        event_to_build.x = x_new;
+                        event_to_build.y = y_new;
+                        event_to_build.p = 0;
+                        continue;
+                    }
+
                 } else {
                     if (in_tracker && nufft_estimator.feed(std::move(tracker->getCentroids()))) {
                         nufft_estimator.printResults();
@@ -240,41 +303,16 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
-
-            // Feed events to frame generator and rate estimator
-            if (ev->t - slice_initial_time > 10000) { // 10 ms
-#ifndef BINARY
-                output_image.convertTo(output_image, CV_8UC1);
-                cv::normalize(output_image, output_image, 0, 255, cv::NORM_MINMAX);
-                cv::applyColorMap(output_image, output_image, cv::COLORMAP_BONE);
-#endif
-                cv::imwrite(output_images + std::to_string(counter) + ".png",
-                            output_image);
-#ifdef BINARY
-                cv::imshow("img bin", output_image);
-#else
-                cv::imshow("img gray", output_image);
-#endif
-                slice_initial_time = ev->t;
-                cv::waitKey(1);
-                counter++;
-#ifdef BINARY
-                output_image = cv::Mat::zeros(cv::Size(width, height), CV_8UC1);
-                output_image.at<uchar>(event_to_build.y, event_to_build.x) = 255;
-#else
-                output_image = cv::Mat::zeros(cv::Size(width, height), CV_16UC1);
-                uint16_t& count_ref = output_image.at<uint16_t>(event_to_build.y, event_to_build.x);
-                if (count_ref < 65535) count_ref++;
-#endif
-            } else {
-#ifdef BINARY
-                output_image.at<uchar>(event_to_build.y, event_to_build.x) = 255;
-#else
-                uint16_t& count_ref = output_image.at<uint16_t>(event_to_build.y, event_to_build.x);
-                if (count_ref < 65535) count_ref++;
-#endif
-            }
         }
+        // Feed events to frame generator and rate estimator
+        const auto *begin_comp = compensated_events.data();
+        const auto *end_comp = begin_comp + compensated_events.size();
+#ifdef STORE
+        hdf5_writer.add_events(begin_comp, end_comp);
+#endif
+        cd_frame_generator.add_events(begin_comp, end_comp);
+        cd_rate_estimator.add_data(std::prev(end_comp)->t, std::distance(begin_comp, end_comp));
+
     });
 
     // Start camera
@@ -283,25 +321,106 @@ int main(int argc, char *argv[]) {
 
     // Main processing loop (similar to original)
     while (params.camera.is_running()) {
+        // Display frame with thread safety
+        {
+            std::unique_lock<std::mutex> lock(cd_frame_mutex);
+            if (!cd_frame.empty()) {
+                cv::Mat display_frame;
+                cd_frame.copyTo(display_frame);
+
+                if (osd) {
+                    if (tracker) {
+                        tracker->getCurrentPosition(t_centre_x, t_centre_y);
+                        cv::rectangle(display_frame,
+                                      cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
+                                      cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
+                                      color_tracker, 2);
+                    }
+
+                    // Add on-screen display info
+                    std::string text = Metavision::getHumanReadableTime(cd_frame_ts);
+                    text += "     ";
+                    text += Metavision::getHumanReadableRate(avg_rate);
+
+                    cv::putText(display_frame, text, cv::Point(10, 20),
+                                cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(108, 143, 255), 1, cv::LINE_AA);
+
+                    // Add tracker info if available
+                    if (tracker) {
+                        cv::putText(display_frame, "Tracker: Initialized", cv::Point(10, 40),
+                                    cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+
+                        if (NUFFT_ESTIMATION_DONE) {
+                            cv::putText(display_frame, "NUFFT: Complete", cv::Point(10, 60),
+                                        cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+                        }
+                    } else {
+                        cv::putText(display_frame, "Click to initialize tracker", cv::Point(10, 40),
+                                    cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+                    }
+                }
+
+                cv::imshow(window_name, display_frame);
+                cv::imshow("Slice X Visualizer", slice_visualizer_x.getFrameSide());
+                cv::imshow("Slice Y Visualizer", slice_visualizer_y.getFrameSide());
+//                cv::waitKey(0);
+            }
+        }
+
+        // Process UI with consistent timing
+        int key = processUI(POLL_TIMEOUT_MS);
+        switch (key) {
+            case ESC_KEY:
+            case 'q':
+                params.camera.stop();
+                break;
+            case 'o':
+                osd = !osd;
+                std::cout << "OSD: " << (osd ? "ON" : "OFF") << std::endl;
+                break;
+            case 'r': {
+                std::lock_guard<std::mutex> lock(processing_mutex);
+                tracker.reset();
+                NUFFT_ESTIMATION_DONE = false;
+                std::cout << "Reset tracker" << std::endl;
+            }
+            case 't': {
+                std::lock_guard<std::mutex> lock(processing_mutex);
+                tracker_enable = !tracker_enable;
+                std::cout << "Tracker " << (tracker_enable ? "enabled" : "disabled") << std::endl;
+            }
+                break;
+            case 'h':
+                std::cout << "Controls:\n"
+                          << "  ESC/q: Exit\n"
+                          << "  o: Toggle OSD\n"
+                          << "  r: Reset tracker\n"
+                          << "  h: This help\n"
+                          << "  Mouse click: Initialize tracker\n";
+                break;
+            default:
+                break;
+        }
+
         // Poll Metavision events
         Metavision::EventLoop::poll_and_dispatch(1);
     }
 
     end_time = std::chrono::steady_clock::now();
-    // Print final results
-    cv::imwrite(output_images + std::to_string(counter) + ".png",
-                output_image);
+
+#ifdef STORE
+    // print blue text
+    std::cout << "\033[1;34mWriting events to HDF5 file...\033[0m" << std::endl;
+    if (hdf5_writer.is_open()) {
+        std::cout << "\033[1;34mEvents written to: " << out_hdf5_file_path << "\033[0m" << std::endl;
+    }
+    // Close HDF5 writer
+    hdf5_writer.close();
+#endif
 
     // Cleanup
     if (params.camera.is_running()) {
         params.camera.stop();
-    }
-
-    // print tracker status
-    if (tracker) {
-        tracker->printFittersStatus();
-    } else {
-        std::cout << "No tracker initialized." << std::endl;
     }
 
     return 0;

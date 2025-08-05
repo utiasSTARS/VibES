@@ -3,7 +3,7 @@
 // Based on Metavision SDK patterns
 //
 
-//#define FANCY_VISUALIZATION
+#define FANCY_VISUALIZATION
 #define STORE
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
@@ -230,7 +230,7 @@ int main(int argc, char *argv[]) {
                         }
                         event_to_build.x = x_new;
                         event_to_build.y = y_new;
-//                        event_to_build.p = 0;
+                        event_to_build.p = 0;
                         continue;
                     }
 

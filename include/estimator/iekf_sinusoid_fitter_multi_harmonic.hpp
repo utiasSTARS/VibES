@@ -41,7 +41,7 @@ public:
             initial_covariance(0, 0) = 1e2;  // A amplitude
             initial_covariance(1, 1) = 1e2;  // B amplitude
             initial_covariance(2, 2) = 1e1;  // omega frequency
-            initial_covariance(3, 3) = 1e3;  // C DC offset
+            initial_covariance(3, 3) = 1e4;  // C DC offset
 
             StateCovariance4 process_noise = StateCovariance4::Identity();
             process_noise(0, 0) = 1e0;

@@ -31,6 +31,8 @@ namespace HARMEDA {
         std::string output_folder = "output"; // Default output folder for frames
         int tracker_x = 0; // Tracker x position
         int tracker_y = 0; // Tracker y position
+        std::vector<int> trackers_x; // Tracker x position
+        std::vector<int> trackers_y; // Tracker y position
         int tracker_size = 10; // Tracker size
         int iekf_iterations = 1; // Number of iterations for IEKF fitting
         bool nocompensation = false; // Flag for no compensation
@@ -71,7 +73,11 @@ namespace HARMEDA {
                     ("output-folder,o", po::value<std::string>(&params->output_folder)->default_value("output"),
                      "Folder to save output frames (default: 'output').")
                     ("nocompensation", po::bool_switch(&params->nocompensation)->default_value(false),
-                     "Disable compensation of events (default: false).");
+                     "Disable compensation of events (default: false).")
+                    ("trackers-x", po::value<std::vector<int>>(&params->trackers_x)->multitoken(),
+                     "List of X positions for multiple trackers (optional, comma-separated).")
+                    ("trackers-y", po::value<std::vector<int>>(&params->trackers_y)->multitoken(),
+                     "List of Y positions for multiple trackers (optional, comma-separated).");
 
             po::variables_map vm;
 
@@ -100,6 +106,13 @@ namespace HARMEDA {
             } catch (const Metavision::CameraException &e) {
                 std::cerr << "Camera initialization error: " << e.what() << std::endl;
                 throw std::runtime_error("Failed to initialize camera.");
+            }
+
+            std::cout <<"size of trackers_x: " << params->trackers_x.size() << std::endl;
+            std::cout <<"size of trackers_y: " << params->trackers_y.size() << std::endl;
+            if(params->trackers_x.size() != params->trackers_y.size()) {
+                std::cerr << "Error: The number of tracker X and Y positions must match." << std::endl;
+                throw std::runtime_error("Tracker positions mismatch.");
             }
         }
 

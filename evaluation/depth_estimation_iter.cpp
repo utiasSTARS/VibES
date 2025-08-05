@@ -151,11 +151,7 @@ void signal_handler(int signal) {
     std::exit(signal);
 }
 
-int main(int argc, char *argv[]) {
-    std::signal(SIGTERM, signal_handler);
-    std::signal(SIGINT, signal_handler);
-    std::atexit(print_on_exit);
-
+double test_depth(int argc, char *argv[]) {
     // Initialize parameters and camera
     HARMEDA::ParamsLoader params(argc, argv);
     std::cout << params;
@@ -176,26 +172,26 @@ int main(int argc, char *argv[]) {
     cv::Mat cd_frame;
     Metavision::timestamp cd_frame_ts{0};
 
-    Metavision::CDFrameGenerator cd_frame_generator(width, height);
-    cd_frame_generator.set_display_accumulation_time_us(DEFAULT_ACCUMULATION);
+//    Metavision::CDFrameGenerator cd_frame_generator(width, height);
+//    cd_frame_generator.set_display_accumulation_time_us(DEFAULT_ACCUMULATION);
 
     // Start frame generator with callback
-    cd_frame_generator.start(DEFAULT_FPS,
-                             [&cd_frame_mutex, &cd_frame, &cd_frame_ts](const Metavision::timestamp &ts,
-                                                                        const cv::Mat &frame) {
-                                 std::unique_lock<std::mutex> lock(cd_frame_mutex);
-                                 cd_frame_ts = ts;
-                                 frame.copyTo(cd_frame);
-                             });
+//    cd_frame_generator.start(DEFAULT_FPS,
+//                             [&cd_frame_mutex, &cd_frame, &cd_frame_ts](const Metavision::timestamp &ts,
+//                                                                        const cv::Mat &frame) {
+//                                 std::unique_lock<std::mutex> lock(cd_frame_mutex);
+//                                 cd_frame_ts = ts;
+//                                 frame.copyTo(cd_frame);
+//                             });
 
     // Setup event rate estimator
-    double avg_rate = 0, peak_rate = 0;
-    Metavision::RateEstimator cd_rate_estimator(
-            [&avg_rate, &peak_rate](Metavision::timestamp ts, double arate, double prate) {
-                avg_rate = arate;
-                peak_rate = prate;
-            },
-            100000, 1000000, true);
+//    double avg_rate = 0, peak_rate = 0;
+//    Metavision::RateEstimator cd_rate_estimator(
+//            [&avg_rate, &peak_rate](Metavision::timestamp ts, double arate, double prate) {
+//                avg_rate = arate;
+//                peak_rate = prate;
+//            },
+//            100000, 1000000, true);
 
     // Initialize fitters and estimator
 
@@ -211,10 +207,10 @@ int main(int argc, char *argv[]) {
 #endif
 
     // Setup display window (similar to original)
-    std::string window_name("HARMEDA Event Tracking");
-    cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
-    cv::resizeWindow(window_name, width, height);
-    cv::moveWindow(window_name, 0, 0);
+//    std::string window_name("HARMEDA Event Tracking");
+//    cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
+//    cv::resizeWindow(window_name, width, height);
+//    cv::moveWindow(window_name, 0, 0);
 
     std::vector<std::pair<unsigned short, unsigned short>> tracker_centers;
 
@@ -228,21 +224,21 @@ int main(int argc, char *argv[]) {
                 std::make_shared<MultipleNUFFT>(params.params->trackers_x[i],
                                                 params.params->trackers_y[i],
                                                 first_event_t, width, height,
-                                                i < 1)); // the first 4 trackers are front
+                                                i < 3)); // the first 3 trackers are front, total 6 trackers
     }
 
     std::cout << "All trackers initialized." << std::endl;
 
     // Mouse callback for tracker initialization
-    std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
-        std::lock_guard<std::mutex> lock(processing_mutex);
-        std::cout << "Mouse clicked at (" << x << ", " << y << "), no info on the front-back, adding back" << std::endl;
-        tracker_centers.emplace_back(x, y);
-        trackers.push_back(
-                std::make_shared<MultipleNUFFT>(x, y, first_event_t, width, height, false));
-    };
+//    std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
+//        std::lock_guard<std::mutex> lock(processing_mutex);
+//        std::cout << "Mouse clicked at (" << x << ", " << y << "), no info on the front-back, adding back" << std::endl;
+//        tracker_centers.emplace_back(x, y);
+//        trackers.push_back(
+//                std::make_shared<MultipleNUFFT>(x, y, first_event_t, width, height, false));
+//    };
 
-    cv::setMouseCallback(window_name, receiveMouseEvent, &mouse_callback);
+//    cv::setMouseCallback(window_name, receiveMouseEvent, &mouse_callback);
 
     bool osd = false; // On-screen display toggle
     bool tracker_enable = true;
@@ -286,10 +282,10 @@ int main(int argc, char *argv[]) {
             }
         }
         // Feed events to frame generator and rate estimator
-        const auto *begin_comp = compensated_events.data();
-        const auto *end_comp = begin_comp + compensated_events.size();
-        cd_frame_generator.add_events(begin_comp, end_comp);
-        cd_rate_estimator.add_data(std::prev(end_comp)->t, std::distance(begin_comp, end_comp));
+//        const auto *begin_comp = compensated_events.data();
+//        const auto *end_comp = begin_comp + compensated_events.size();
+//        cd_frame_generator.add_events(begin_comp, end_comp);
+//        cd_rate_estimator.add_data(std::prev(end_comp)->t, std::distance(begin_comp, end_comp));
     });
 
     // Start camera
@@ -299,65 +295,65 @@ int main(int argc, char *argv[]) {
     // Main processing loop (similar to original)
     while (params.camera.is_running()) {
         // Display frame with thread safety
-        {
-            std::unique_lock<std::mutex> lock(cd_frame_mutex);
-            if (!cd_frame.empty()) {
-                cv::Mat display_frame;
-                cd_frame.copyTo(display_frame);
-
-                if (osd) {
-                    std::lock_guard<std::mutex> lock(processing_mutex);
-                    // Add on-screen display info
-                    std::string text = Metavision::getHumanReadableTime(cd_frame_ts);
-                    text += "     ";
-                    text += Metavision::getHumanReadableRate(avg_rate);
-
-                    cv::putText(display_frame, text, cv::Point(10, 20),
-                                cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(108, 143, 255), 1, cv::LINE_AA);
-
-                    // Add tracker info if available
-                    if (!trackers.empty()) {
-                        int i = 0;
-                        int color_main = trackers.back()->tracker->color();
-                        const cv::Scalar main_color(128, 200, 128);
-                        for (const auto &tracker: trackers) {
-                            i++;
-                            tracker->tracker->getCurrentPosition(t_centre_x, t_centre_y);
-//                            std::cout << i << " " << tracker->color() << std::endl;
-                            const auto rel_color = tracker->tracker->color() / double(color_main);
-                            // write the text with the tracker color
-//                            cv::putText(display_frame, "Tracker " + std::to_string(i) + ": " +
-//                                                std::to_string(t_centre_x) + ", " + std::to_string(t_centre_y),
-//                                        cv::Point(10, 20 + i * 20),
-//                                        cv::FONT_HERSHEY_PLAIN, 1,
-//                                        cv::Scalar(
-//                                                std::clamp(main_color[0] * rel_color, 0.0, 255.0),
-//                                                std::clamp(main_color[1] * rel_color, 0.0, 255.0),
-//                                                std::clamp(main_color[2] * rel_color, 0.0, 255.0)
-//                                        ), 1, cv::LINE_AA);
-
-
-                            cv::rectangle(display_frame,
-                                          cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
-                                          cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
-                                          cv::Scalar(
-                                                  std::clamp(main_color[0] * rel_color, 0.0, 255.0),
-                                                  std::clamp(main_color[1] * rel_color, 0.0, 255.0),
-                                                  std::clamp(main_color[2] * rel_color, 0.0, 255.0)
-                                          ), 2);
-                        }
-
-                        cv::putText(display_frame, "Tracker: Initialized", cv::Point(10, 40),
-                                    cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
-                    } else {
-                        cv::putText(display_frame, "Click to initialize tracker", cv::Point(10, 40),
-                                    cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
-                    }
-                }
-
-                cv::imshow(window_name, display_frame);
-            }
-        }
+//        {
+//            std::unique_lock<std::mutex> lock(cd_frame_mutex);
+//            if (!cd_frame.empty()) {
+//                cv::Mat display_frame;
+//                cd_frame.copyTo(display_frame);
+//
+//                if (osd) {
+//                    std::lock_guard<std::mutex> lock(processing_mutex);
+//                    // Add on-screen display info
+//                    std::string text = Metavision::getHumanReadableTime(cd_frame_ts);
+//                    text += "     ";
+//                    text += Metavision::getHumanReadableRate(avg_rate);
+//
+//                    cv::putText(display_frame, text, cv::Point(10, 20),
+//                                cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(108, 143, 255), 1, cv::LINE_AA);
+//
+//                    // Add tracker info if available
+//                    if (!trackers.empty()) {
+//                        int i = 0;
+//                        int color_main = trackers.back()->tracker->color();
+//                        const cv::Scalar main_color(128, 200, 128);
+//                        for (const auto &tracker: trackers) {
+//                            i++;
+//                            tracker->tracker->getCurrentPosition(t_centre_x, t_centre_y);
+////                            std::cout << i << " " << tracker->color() << std::endl;
+//                            const auto rel_color = tracker->tracker->color() / double(color_main);
+//                            // write the text with the tracker color
+////                            cv::putText(display_frame, "Tracker " + std::to_string(i) + ": " +
+////                                                std::to_string(t_centre_x) + ", " + std::to_string(t_centre_y),
+////                                        cv::Point(10, 20 + i * 20),
+////                                        cv::FONT_HERSHEY_PLAIN, 1,
+////                                        cv::Scalar(
+////                                                std::clamp(main_color[0] * rel_color, 0.0, 255.0),
+////                                                std::clamp(main_color[1] * rel_color, 0.0, 255.0),
+////                                                std::clamp(main_color[2] * rel_color, 0.0, 255.0)
+////                                        ), 1, cv::LINE_AA);
+//
+//
+//                            cv::rectangle(display_frame,
+//                                          cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
+//                                          cv::Point(t_centre_x + half_size, t_centre_y + half_size + 1),
+//                                          cv::Scalar(
+//                                                  std::clamp(main_color[0] * rel_color, 0.0, 255.0),
+//                                                  std::clamp(main_color[1] * rel_color, 0.0, 255.0),
+//                                                  std::clamp(main_color[2] * rel_color, 0.0, 255.0)
+//                                          ), 2);
+//                        }
+//
+//                        cv::putText(display_frame, "Tracker: Initialized", cv::Point(10, 40),
+//                                    cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+//                    } else {
+//                        cv::putText(display_frame, "Click to initialize tracker", cv::Point(10, 40),
+//                                    cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+//                    }
+//                }
+//
+//                cv::imshow(window_name, display_frame);
+//            }
+//        }
 
         // Process UI with consistent timing
         int key = processUI(POLL_TIMEOUT_MS);
@@ -395,7 +391,7 @@ int main(int argc, char *argv[]) {
     end_time = std::chrono::steady_clock::now();
 
     // Cleanup
-    cd_frame_generator.stop();
+//    cd_frame_generator.stop();
     if (params.camera.is_running()) {
         params.camera.stop();
     }
@@ -424,6 +420,30 @@ int main(int argc, char *argv[]) {
     std::cout << "Average amplitude front: " << avg_front << std::endl;
     std::cout << "Average amplitude back: " << avg_back << std::endl;
     std::cout << "Average amplitude ratio (front/back): " << avg_front / avg_back << std::endl;
+
+    return avg_front / avg_back;
+}
+
+int main(int argc, char *argv[]) {
+    std::signal(SIGTERM, signal_handler);
+    std::signal(SIGINT, signal_handler);
+    std::atexit(print_on_exit);
+
+    std::vector<double> ratios;
+    for (int i = 0; i < 10; ++i) {
+        ratios.push_back(test_depth(argc, argv) - 0.5);
+    }
+
+    // statistics
+    double avg_ratio = std::accumulate(ratios.begin(), ratios.end(), 0.0) / ratios.size();
+    double std_ratio = 0.0;
+    for (const auto &ratio: ratios) {
+        std_ratio += (ratio - avg_ratio) * (ratio - avg_ratio);
+    }
+    std_ratio = std::sqrt(std_ratio / ratios.size());
+    std::cout << " ------ Statistics of ratios ------ " << std::endl << std::endl;
+    std::cout << "Average ratio (front/back): " << avg_ratio << std::endl;
+    std::cout << "3 Standard deviation of ratio (front/back): " << 3 * std_ratio << std::endl;
 
     return 0;
 }

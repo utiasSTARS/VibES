@@ -33,7 +33,7 @@ using TrackerPtr = std::shared_ptr<haste::HypothesisPatchTracker>;
 
 namespace {
     constexpr double MIN_FREQUENCY = 5.0;   // Hz
-    constexpr double MAX_FREQUENCY = 40.0;  // Hz
+    constexpr double MAX_FREQUENCY = 80.0;  // Hz
     constexpr int MAX_HARMONICS = 1;
     constexpr double TRACKER_RATE = 0.1;
     constexpr int TRACKER_MARGIN = haste::HypothesisPatchTracker::kPatchSize / 2 + 15;
@@ -97,7 +97,7 @@ public:
 #endif
     }
 
-    void printFittersStatus(){
+    void printFittersStatus() {
         std::lock_guard<std::mutex> lock(centroids_mutex_);
         if (x_fitter_) {
             std::cout << "X Fitter: " << x_fitter_->to_string() << std::endl;
@@ -184,6 +184,20 @@ public:
         return true;
     }
 
+    std::tuple<haste::HypothesisPatchTracker::Scalar, haste::HypothesisPatchTracker::Scalar,haste::HypothesisPatchTracker::Scalar> getTrackerState() const {
+        if (tracker_) {
+            return {tracker_->x(), tracker_->y(), tracker_->t()};
+        }
+        return {0.0, 0.0, 0.0};
+    }
+
+    double getAmplitude() const {
+        if (x_fitter_ && y_fitter_) {
+            return std::sqrt(std::pow(x_fitter_->getAmplitude(), 2) + std::pow(y_fitter_->getAmplitude(), 2));
+        }
+        return 0.0;
+    }
+
     int color() const {
         return color_.load(std::memory_order_relaxed);
     }
@@ -262,7 +276,7 @@ protected:
 //                                                                amplitude * 1000 / static_cast<double>(MAX_AMPLITUDE) *
 //                                                                255.0))),
 //                             std::memory_order_relaxed);
-                color_.store(static_cast<int>(amplitude*1000),
+                color_.store(static_cast<int>(amplitude * 1000),
                              std::memory_order_relaxed);
                 last_x_.store(x_fitter_->getShift(), std::memory_order_relaxed);
             }
