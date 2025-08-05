@@ -61,11 +61,22 @@ void updateSliceVisualizers(HARMEDA::SliceVisualizer &slice_x, HARMEDA::SliceVis
         auto [x_pred, y_pred] = *pair;
 
         slice_y.editFrame([&](cv::Mat &frame) {
-            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(y_pred)), 1, cv::Scalar(255, 255, 0), -1);
+            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(y_pred)), 1, cv::Scalar(125, 255, 0), -1);
         });
 
         slice_x.editFrame([&](cv::Mat &frame) {
-            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(x_pred)), 1, cv::Scalar(255, 255, 0), -1);
+            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(x_pred)), 1, cv::Scalar(125, 255, 0), -1);
+        });
+    }
+    if (auto pair = tracker->getShift(); pair.has_value()) {
+        auto [x_pred, y_pred] = *pair;
+
+        slice_y.editFrame([&](cv::Mat &frame) {
+            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(y_pred)), 1, cv::Scalar(255, 255, 255), -1);
+        });
+
+        slice_x.editFrame([&](cv::Mat &frame) {
+            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(x_pred)), 1, cv::Scalar(255, 255, 255), -1);
         });
     }
 }
