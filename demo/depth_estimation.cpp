@@ -55,6 +55,8 @@ public:
             width(width), height(height), is_front(is_front) {
         nufft_estimator = std::make_unique<NUFFTHelixEstimator>(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
         tracker = std::make_unique<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
+        // output in red
+        std::cout << "\033[1;31m" << "INIT: " << (is_front ? "FRONT" : "BACK") << "\033[0m" << std::endl;
     }
 
     bool isFront() { return is_front; }
@@ -63,6 +65,7 @@ public:
         if (!tracker->feed(event_to_build)) {
             return;
         }
+        if(time_<0){time_ = current_t_sec;}
 
         if (NUFFT_ESTIMATION_DONE) [[likely]] {
 
@@ -78,8 +81,7 @@ public:
                 event_to_build.x = x_new;
                 event_to_build.y = y_new;
                 event_to_build.p = 0;
-
-                amplitudes.push_back(tracker->getAmplitude());
+                amplitudes.emplace_back(tracker->getAmplitude());
                 return;
             }
 
@@ -106,17 +108,55 @@ public:
         }
     }
 
-    double avgAmplitude() const {
-        if (amplitudes.empty()) return 0.0;
-        double sum = std::accumulate(amplitudes.begin(), amplitudes.end(), 0.0);
-        return sum / amplitudes.size();
+    std::vector<double> medianFilterWithPadding(const std::vector<double> &data, int window_size) {
+        if (data.empty()) {
+            return {};
+        }
+
+        if (window_size <= 0 || window_size % 2 == 0) {
+            throw std::invalid_argument("Window size must be positive and odd");
+        }
+
+        std::vector<double> result(data.size());
+        int half_window = window_size / 2;
+
+        for (size_t i = 0; i < data.size(); ++i) {
+            std::vector<double> window;
+
+            // Fill window with padding for edge cases
+            for (int j = -half_window; j <= half_window; ++j) {
+                int idx = static_cast<int>(i) + j;
+                if (idx < 0) {
+                    window.push_back(data[0]); // Pad with first value
+                } else if (idx >= static_cast<int>(data.size())) {
+                    window.push_back(data.back()); // Pad with last value
+                } else {
+                    window.push_back(data[idx]);
+                }
+            }
+
+            // Sort and find median
+            std::sort(window.begin(), window.end());
+            result[i] = window[window.size() / 2];
+        }
+
+        return result;
     }
 
-    double stdAmplitude() const {
+
+    [[nodiscard]] double avgAmplitude() {
+        // return the meadian filter of the amplitudes
+        if (amplitudes.empty()) return 0.0;
+        auto res = medianFilterWithPadding(amplitudes, 5);
+        double sum = std::accumulate(res.begin(), res.end(), 0.0);
+        return sum / res.size();
+    }
+
+    [[nodiscard]] double stdAmplitude() {
         if (amplitudes.empty()) return 0.0;
         double mean = avgAmplitude();
         double accum = 0.0;
-        for (const auto &a: amplitudes) {
+        for (const auto &a: medianFilterWithPadding(amplitudes, 5)) {
             accum += (a - mean) * (a - mean);
         }
         return std::sqrt(accum / amplitudes.size());
@@ -128,6 +168,8 @@ private:
     double x_pred = 0, y_pred = 0;
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets, amplitudes;
     const unsigned short width, height;
+
+    double time_ = -1;
 
     bool NUFFT_ESTIMATION_DONE = false, is_front = false;
 };
@@ -233,13 +275,14 @@ int main(int argc, char *argv[]) {
 
     std::cout << "All trackers initialized." << std::endl;
 
+    bool is_init_front = true;
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
         std::cout << "Mouse clicked at (" << x << ", " << y << "), no info on the front-back, adding back" << std::endl;
         tracker_centers.emplace_back(x, y);
         trackers.push_back(
-                std::make_shared<MultipleNUFFT>(x, y, first_event_t, width, height, false));
+                std::make_shared<MultipleNUFFT>(x, y, first_event_t, width, height, is_init_front));
     };
 
     cv::setMouseCallback(window_name, receiveMouseEvent, &mouse_callback);
@@ -296,6 +339,7 @@ int main(int argc, char *argv[]) {
     params.camera.start();
     start_time = std::chrono::steady_clock::now();
 
+    std::string front_init_string = "Click to init front tracker";
     // Main processing loop (similar to original)
     while (params.camera.is_running()) {
         // Display frame with thread safety
@@ -355,6 +399,9 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
+                cv::putText(display_frame, front_init_string, cv::Point(10, height - 10),
+                            cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(255, 255, 0), 1, cv::LINE_AA);
+
                 cv::imshow(window_name, display_frame);
             }
         }
@@ -374,6 +421,12 @@ int main(int argc, char *argv[]) {
                 std::lock_guard<std::mutex> lock(processing_mutex);
                 tracker_enable = !tracker_enable;
                 std::cout << "Tracker " << (tracker_enable ? "enabled" : "disabled") << std::endl;
+            }
+                break;
+            case 'i': {
+                is_init_front = !is_init_front;
+                front_init_string = is_init_front ? "Click to init front tracker" : "Click to init back tracker";
+                std::cout << "Next tracker will be initialized as " << (is_init_front ? "front" : "back") << std::endl;
             }
                 break;
             case 'h':
@@ -404,23 +457,30 @@ int main(int argc, char *argv[]) {
         tracker->tracker->printFittersStatus();
     }
 
-    std::vector<double> avg_amplitudes_front, avg_amplitudes_back;
+    std::vector<double> avg_amplitudes_front, avg_amplitudes_back, var_amplitudes_front, var_amplitudes_back;
+    double var_sum_front = 0.0, var_sum_back = 0.0;
     for (const auto &tracker: trackers) {
         if (tracker->isFront()) {
-            avg_amplitudes_back.push_back(tracker->avgAmplitude());
+            auto var = std::pow(tracker->stdAmplitude(), 2);
+            avg_amplitudes_front.push_back(tracker->avgAmplitude() * 1. / var);
+            var_sum_front += var;
+            var_amplitudes_front.push_back(var);
             std::cout << "Tracker front amplitude avg (front): " << tracker->avgAmplitude() << std::endl;
             std::cout << "Tracker front amplitude std (front): " << tracker->stdAmplitude() << std::endl;
         } else {
-            avg_amplitudes_front.push_back(tracker->avgAmplitude());
+            auto var = std::pow(tracker->stdAmplitude(), 2);
+            avg_amplitudes_back.push_back(tracker->avgAmplitude() * 1. / var);
+            var_sum_back += var;
+            var_amplitudes_back.push_back(var);
             std::cout << "Tracker front amplitude avg (back): " << tracker->avgAmplitude() << std::endl;
             std::cout << "Tracker front amplitude std (back): " << tracker->stdAmplitude() << std::endl;
         }
     }
+    std::cout << "Back size: " << avg_amplitudes_back.size() << ", Front size: " << avg_amplitudes_front.size()
+              << std::endl;
     // compute the average amplitude across all trackers
-    double avg_front = std::accumulate(avg_amplitudes_front.begin(), avg_amplitudes_front.end(), 0.0) /
-                       avg_amplitudes_front.size();
-    double avg_back = std::accumulate(avg_amplitudes_back.begin(), avg_amplitudes_back.end(), 0.0) /
-                      avg_amplitudes_back.size();
+    double avg_front = std::accumulate(avg_amplitudes_front.begin(), avg_amplitudes_front.end(), 0.0) / var_sum_front;
+    double avg_back = std::accumulate(avg_amplitudes_back.begin(), avg_amplitudes_back.end(), 0.0) / var_sum_back;
     std::cout << "Average amplitude front: " << avg_front << std::endl;
     std::cout << "Average amplitude back: " << avg_back << std::endl;
     std::cout << "Average amplitude ratio (front/back): " << avg_front / avg_back << std::endl;
