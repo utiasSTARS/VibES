@@ -120,14 +120,7 @@ int main(int argc, char *argv[]) {
     NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
     std::shared_ptr<HasteWrapper<Metavision::EventCD>> tracker;
 
-    if (!params.params->nocompensation && params.params->tracker_x != 0 && params.params->tracker_y != 0) {
-        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(params.params->tracker_x,
-                                                                      params.params->tracker_y,
-                                                                      TRACKER_RATE, first_event_t);
-        t_centre_x = params.params->tracker_x;
-        t_centre_y = params.params->tracker_y;
-        std::cout << "Tracker initialized at (" << t_centre_x << ", " << t_centre_y << ")" << std::endl;
-    }
+
 
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
@@ -154,6 +147,8 @@ int main(int argc, char *argv[]) {
         std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
 
+
+
     bool osd = false; // On-screen display toggle
     bool in_tracker = true, tracker_enable = true;
 
@@ -164,12 +159,11 @@ int main(int argc, char *argv[]) {
     unsigned short x_undistorted, y_undistorted;
 
 #ifdef BINARY
-    cv::namedWindow("img bin", cv::WINDOW_AUTOSIZE);
     cv::Mat output_image = cv::Mat::zeros(cv::Size(width, height), CV_8UC1);
 #else
-    cv::namedWindow("img gray", cv::WINDOW_AUTOSIZE);
     cv::Mat output_image = cv::Mat::zeros(cv::Size(width, height), CV_16UC1);
 #endif
+
     long long counter = 0;
     std::once_flag init_flag;
     long long slice_initial_time = 0;
@@ -179,6 +173,15 @@ int main(int argc, char *argv[]) {
             start_time = std::chrono::steady_clock::now();
             first_event_t = begin->t;
             slice_initial_time = first_event_t;
+
+            if (!params.params->nocompensation && params.params->tracker_x != 0 && params.params->tracker_y != 0) {
+                tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(params.params->tracker_x,
+                                                                              params.params->tracker_y,
+                                                                              TRACKER_RATE, first_event_t);
+                t_centre_x = params.params->tracker_x;
+                t_centre_y = params.params->tracker_y;
+                std::cout << "Tracker initialized at (" << t_centre_x << ", " << t_centre_y << ")" << std::endl;
+            }
         });
 
         compensated_events.clear();
@@ -246,6 +249,8 @@ int main(int argc, char *argv[]) {
 #ifndef BINARY
                 output_image.convertTo(output_image, CV_8UC1);
                 cv::normalize(output_image, output_image, 0, 255, cv::NORM_MINMAX);
+                // invert the image for better visualization
+                output_image = 255 - output_image;
                 cv::applyColorMap(output_image, output_image, cv::COLORMAP_BONE);
 #endif
                 cv::imwrite(output_images + std::to_string(counter) + ".png",

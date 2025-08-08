@@ -30,7 +30,7 @@ namespace HARMEDA {
             }
 
             // Add reference lines at regular intervals (every 0.1 seconds)
-            _addTimeReferenceLines();
+//            _addTimeReferenceLines();
 
             _axis_value = axis_value;
             _lower_bound = axis_value - _margin;
@@ -47,6 +47,7 @@ namespace HARMEDA {
             _axis_value = axis_value;
             _lower_bound = axis_value - _margin;
             _upper_bound = axis_value + _margin;
+            std::cout << "Axis set to: " << _lower_bound << " - " << _upper_bound << std::endl;
         }
 
         void feed(const Metavision::EventCD &event) {
@@ -108,17 +109,21 @@ namespace HARMEDA {
             auto color = (p == 0) ? cv::Vec3b(255, 0, 0) : cv::Vec3b(0, 0, 255); // Blue for p=0, Red for p=1
 
             // Update the main frame (spatial view)
-            if (_axis == X_AXIS && x >= _lower_bound && x <= _upper_bound) {
-                _frame.at<cv::Vec3b>(x, _axis_value) = color;
-            } else if (_axis == Y_AXIS && y >= _lower_bound && y <= _upper_bound) {
-                _frame.at<cv::Vec3b>(_axis_value, y) = color;
-            }
+//            if (_axis == X_AXIS && x >= _lower_bound && x <= _upper_bound) {
+//                _frame.at<cv::Vec3b>(x, _axis_value) = color;
+//            } else if (_axis == Y_AXIS && y > _lower_bound && y < _upper_bound) {
+//                _frame.at<cv::Vec3b>(_axis_value, y) = color;
+//            }
 
             // Update the temporal frame (always draw at the current time column)
             int spatial_coord = (_axis == X_AXIS) ? x : y;
             if (spatial_coord >= 0 && spatial_coord < _frame_side.rows &&
                 _current_time_column >= 0 && _current_time_column < _frame_side.cols) {
-                _frame_side.at<cv::Vec3b>(spatial_coord, _current_time_column) = color;
+                if (_axis == X_AXIS && y >= _lower_bound && y <= _upper_bound) {
+                    _frame_side.at<cv::Vec3b>(spatial_coord, _current_time_column) = color;
+                } else if (_axis == Y_AXIS && x > _lower_bound && x < _upper_bound) {
+                    _frame_side.at<cv::Vec3b>(spatial_coord, _current_time_column) = color;
+                }
             }
         }
 
@@ -129,7 +134,7 @@ namespace HARMEDA {
             // This shifts all data one column to the right
             for (int row = 0; row < _frame_side.rows; ++row) {
                 // Get pointer to the row
-                cv::Vec3b* row_ptr = _frame_side.ptr<cv::Vec3b>(row);
+                cv::Vec3b *row_ptr = _frame_side.ptr<cv::Vec3b>(row);
                 // Shift all pixels in this row one position to the right
                 std::memmove(row_ptr + 1, row_ptr, (_frame_side.cols - 1) * sizeof(cv::Vec3b));
                 // Clear the first pixel in the row (where new data will go)
@@ -140,7 +145,7 @@ namespace HARMEDA {
             _current_time_column = 0;
 
             // Redraw time reference lines after scrolling
-            _addTimeReferenceLines();
+//            _addTimeReferenceLines();
         }
 
         void _addTimeReferenceLines() {

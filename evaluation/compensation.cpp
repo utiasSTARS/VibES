@@ -2,18 +2,14 @@
 // Enhanced Event-based Motion Tracking with Proper Visualization
 // Based on Metavision SDK patterns
 //
-
 #define FANCY_VISUALIZATION
-#define STORE
+//#define STORE
 
-#include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
-#include <metavision/sdk/core/algorithms/event_buffer_reslicer_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
 #include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
-
 
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -24,7 +20,6 @@
 #include <iomanip>
 #include <sstream>
 #include <csignal>
-#include <thread>
 
 #ifdef STORE
 
@@ -34,7 +29,6 @@
 
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
-//#include "estimator/iekf_sinusoid_fitter.hpp"
 #include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
@@ -102,6 +96,7 @@ int main(int argc, char *argv[]) {
     Metavision::timestamp cd_frame_ts{0};
 
     Metavision::CDFrameGenerator cd_frame_generator(width, height);
+    cd_frame_generator.set_color_palette(Metavision::ColorPalette::Light);
     cd_frame_generator.set_display_accumulation_time_us(DEFAULT_ACCUMULATION);
 
     // Start frame generator with callback
@@ -126,15 +121,6 @@ int main(int argc, char *argv[]) {
     NUFFTHelixEstimator nufft_estimator(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
     std::shared_ptr<HasteWrapper<Metavision::EventCD>> tracker;
 
-    if (!params.params->nocompensation && params.params->tracker_x != 0 && params.params->tracker_y != 0) {
-        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(params.params->tracker_x,
-                                                                      params.params->tracker_y,
-                                                                      TRACKER_RATE, first_event_t);
-        t_centre_x = params.params->tracker_x;
-        t_centre_y = params.params->tracker_y;
-        std::cout << "Tracker initialized at (" << t_centre_x << ", " << t_centre_y << ")" << std::endl;
-    }
-
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
 
@@ -152,9 +138,11 @@ int main(int argc, char *argv[]) {
     cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
     cv::resizeWindow(window_name, width, height);
     cv::moveWindow(window_name, 0, 0);
+
 #ifdef FANCY_VISUALIZATION
     int visualization_cut_off = width / 2; // Cut-off for visualization
 #endif
+
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
@@ -186,6 +174,16 @@ int main(int argc, char *argv[]) {
         std::call_once(init_flag, [&]() {
             start_time = std::chrono::steady_clock::now();
             first_event_t = begin->t;
+
+            if (!params.params->nocompensation && params.params->tracker_x != 0 && params.params->tracker_y != 0) {
+                tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(params.params->tracker_x,
+                                                                              params.params->tracker_y,
+                                                                              TRACKER_RATE, first_event_t);
+                t_centre_x = params.params->tracker_x;
+                t_centre_y = params.params->tracker_y;
+                std::cout << "Tracker initialized at (" << t_centre_x << ", " << t_centre_y << ")" << std::endl;
+            }
+
         });
 
         compensated_events.clear();
@@ -230,7 +228,7 @@ int main(int argc, char *argv[]) {
                         }
                         event_to_build.x = x_new;
                         event_to_build.y = y_new;
-                        event_to_build.p = 0;
+//                        event_to_build.p = 0;
                         continue;
                     }
 

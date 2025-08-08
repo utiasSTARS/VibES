@@ -35,7 +35,7 @@ namespace {
     constexpr double MIN_FREQUENCY = 5.0;   // Hz
     constexpr double MAX_FREQUENCY = 80.0;  // Hz
     constexpr int MAX_HARMONICS = 1;
-    constexpr double TRACKER_RATE = 0.1;
+    constexpr double TRACKER_RATE = 0.001;
     constexpr int TRACKER_MARGIN = haste::HypothesisPatchTracker::kPatchSize / 2 + 15;
     constexpr double TRACKER_MARGIN_SQ = TRACKER_MARGIN * TRACKER_MARGIN;
     constexpr size_t MAX_CENTROIDS_QUEUE = 1000;

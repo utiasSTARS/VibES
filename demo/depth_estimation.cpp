@@ -65,7 +65,7 @@ public:
         if (!tracker->feed(event_to_build)) {
             return;
         }
-        if(time_<0){time_ = current_t_sec;}
+        if (time_ < 0) { time_ = current_t_sec; }
 
         if (NUFFT_ESTIMATION_DONE) [[likely]] {
 
@@ -81,7 +81,10 @@ public:
                 event_to_build.x = x_new;
                 event_to_build.y = y_new;
                 event_to_build.p = 0;
-                amplitudes.emplace_back(tracker->getAmplitude());
+                if (current_t_sec - time_ > 0.001) {
+                    amplitudes.emplace_back(tracker->getAmplitude());
+                    time_ = current_t_sec;
+                }
                 return;
             }
 
@@ -147,16 +150,16 @@ public:
     [[nodiscard]] double avgAmplitude() {
         // return the meadian filter of the amplitudes
         if (amplitudes.empty()) return 0.0;
-        auto res = medianFilterWithPadding(amplitudes, 5);
-        double sum = std::accumulate(res.begin(), res.end(), 0.0);
-        return sum / res.size();
+//        auto res = medianFilterWithPadding(amplitudes, 5);
+        double sum = std::accumulate(amplitudes.begin(), amplitudes.end(), 0.0);
+        return sum / amplitudes.size();
     }
 
     [[nodiscard]] double stdAmplitude() {
         if (amplitudes.empty()) return 0.0;
         double mean = avgAmplitude();
         double accum = 0.0;
-        for (const auto &a: medianFilterWithPadding(amplitudes, 5)) {
+        for (const auto &a: amplitudes) {
             accum += (a - mean) * (a - mean);
         }
         return std::sqrt(accum / amplitudes.size());
@@ -173,6 +176,26 @@ private:
 
     bool NUFFT_ESTIMATION_DONE = false, is_front = false;
 };
+
+
+static std::pair<double, double> stats_fusion(std::vector<double> &means, std::vector<double> &stds) {
+    if (means.size() != stds.size()) {
+        throw std::invalid_argument("Means and standard deviations must have the same size");
+    }
+
+    double final_var_inv = 0.0;
+    double final_mean = 0.0;
+    for (size_t i = 0; i < means.size(); ++i) {
+        if (stds[i] <= 0) {
+            throw std::invalid_argument("Standard deviation must be positive");
+        }
+        auto var = stds[i] * stds[i];
+        final_var_inv += 1.0 / var;
+        final_mean += means[i] / var;
+    }
+    final_mean = final_mean / final_var_inv;
+    return {final_mean, std::sqrt(1.0 / final_var_inv)};
+}
 
 static std::chrono::steady_clock::time_point end_time, start_time;
 static Metavision::timestamp first_event_t = 0, last_event_t = 0;
@@ -270,7 +293,7 @@ int main(int argc, char *argv[]) {
                 std::make_shared<MultipleNUFFT>(params.params->trackers_x[i],
                                                 params.params->trackers_y[i],
                                                 first_event_t, width, height,
-                                                i < 1)); // the first 4 trackers are front
+                                                i < params.params->front_trackers));
     }
 
     std::cout << "All trackers initialized." << std::endl;
@@ -457,21 +480,16 @@ int main(int argc, char *argv[]) {
         tracker->tracker->printFittersStatus();
     }
 
-    std::vector<double> avg_amplitudes_front, avg_amplitudes_back, var_amplitudes_front, var_amplitudes_back;
-    double var_sum_front = 0.0, var_sum_back = 0.0;
+    std::vector<double> avg_amplitudes_front, avg_amplitudes_back, std_amplitudes_front, std_amplitudes_back;
     for (const auto &tracker: trackers) {
         if (tracker->isFront()) {
-            auto var = std::pow(tracker->stdAmplitude(), 2);
-            avg_amplitudes_front.push_back(tracker->avgAmplitude() * 1. / var);
-            var_sum_front += var;
-            var_amplitudes_front.push_back(var);
+            avg_amplitudes_front.push_back(tracker->avgAmplitude());
+            std_amplitudes_front.push_back(tracker->stdAmplitude());
             std::cout << "Tracker front amplitude avg (front): " << tracker->avgAmplitude() << std::endl;
             std::cout << "Tracker front amplitude std (front): " << tracker->stdAmplitude() << std::endl;
         } else {
-            auto var = std::pow(tracker->stdAmplitude(), 2);
-            avg_amplitudes_back.push_back(tracker->avgAmplitude() * 1. / var);
-            var_sum_back += var;
-            var_amplitudes_back.push_back(var);
+            avg_amplitudes_back.push_back(tracker->avgAmplitude());
+            std_amplitudes_back.push_back(tracker->stdAmplitude());
             std::cout << "Tracker front amplitude avg (back): " << tracker->avgAmplitude() << std::endl;
             std::cout << "Tracker front amplitude std (back): " << tracker->stdAmplitude() << std::endl;
         }
@@ -479,11 +497,16 @@ int main(int argc, char *argv[]) {
     std::cout << "Back size: " << avg_amplitudes_back.size() << ", Front size: " << avg_amplitudes_front.size()
               << std::endl;
     // compute the average amplitude across all trackers
-    double avg_front = std::accumulate(avg_amplitudes_front.begin(), avg_amplitudes_front.end(), 0.0) / var_sum_front;
-    double avg_back = std::accumulate(avg_amplitudes_back.begin(), avg_amplitudes_back.end(), 0.0) / var_sum_back;
-    std::cout << "Average amplitude front: " << avg_front << std::endl;
-    std::cout << "Average amplitude back: " << avg_back << std::endl;
-    std::cout << "Average amplitude ratio (front/back): " << avg_front / avg_back << std::endl;
+    auto [avg_front, std_front] = stats_fusion(avg_amplitudes_front, std_amplitudes_front);
+    auto [avg_back, std_back] = stats_fusion(avg_amplitudes_back, std_amplitudes_back);
+    std::cout << "Average amplitude front: " << avg_front << " std: " << std_front << std::endl;
+    std::cout << "Average amplitude back: " << avg_back << " std: " << std_back << std::endl;
+    std::cout << "Amplitude ratio (back/front): " << avg_back / avg_front << std::endl;
+    // compute the error on the ratio
+    double ratio_error = std::sqrt(std_front * std_front / (avg_front * avg_front) +
+                                   std_back * std_back / (avg_back * avg_back)) *
+                         (avg_back / avg_front);
+    std::cout << "Amplitude ratio error: " << ratio_error << std::endl;
 
     return 0;
 }

@@ -72,8 +72,8 @@ def calculate_dataset_metrics(gt_directory,
     gt_images = sorted(glob(gt_directory + '/*.png'))
 
     # loads and sorts edge images
-    pred_images = sorted(glob(pred_directory + '/*.png'))
-    # pred_images = sorted(glob(pred_directory + '/*.png'),key=lambda x: int(x.split('_')[-1].split('.')[0]))
+    # pred_images = sorted(glob(pred_directory + '/*.png'))
+    pred_images = sorted(glob(pred_directory + '/*.png'),key=lambda x: int(x.split('/')[-1].split('.')[0]))
 
     # "skips" intermediate edges if one is longer than the other
     gt_len = len(gt_images)

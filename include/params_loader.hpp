@@ -36,6 +36,7 @@ namespace HARMEDA {
         int tracker_size = 10; // Tracker size
         int iekf_iterations = 1; // Number of iterations for IEKF fitting
         bool nocompensation = false; // Flag for no compensation
+        int front_trackers = 0;
     };
 
     class ParamsLoader {
@@ -77,7 +78,9 @@ namespace HARMEDA {
                     ("trackers-x", po::value<std::vector<int>>(&params->trackers_x)->multitoken(),
                      "List of X positions for multiple trackers (optional, comma-separated).")
                     ("trackers-y", po::value<std::vector<int>>(&params->trackers_y)->multitoken(),
-                     "List of Y positions for multiple trackers (optional, comma-separated).");
+                     "List of Y positions for multiple trackers (optional, comma-separated).")
+                    ("front-trackers", po::value<int>(&params->front_trackers)->default_value(0),
+                        "Number of front trackers (default: 0).");
 
             po::variables_map vm;
 
