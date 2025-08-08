@@ -3,7 +3,7 @@
 Image Processing Pipeline - Python Version
 Converted from C++ OpenCV code
 Created by viciopoli on 08/08/25
-Enhanced with NoVib plotting
+Enhanced with NoVib plotting and registration memory
 """
 
 import cv2
@@ -17,6 +17,7 @@ import logging
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class ImageProcessor:
     def __init__(self):
@@ -38,12 +39,19 @@ class ImageProcessor:
 
         # Update paths to match MATLAB structure
         self.frame_gray_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/frames_amiev/"
-        self.frame_novib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/amiev/ev/img_bin/"
-        self.frame_vib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/amiev/harmeda/img_bin/"
+        self.frame_novib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/amiev/ev/img_gray/"
+        self.frame_vib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/amiev/harmeda/img_gray/"
 
-        # Store the transformation matrix for registration
-        self.transformation_matrix = np.eye(2, 3, dtype=np.float32)
-        self.has_initial_transform = False
+        # Store separate transformation matrices for both registration types
+        self.vib_transformation_matrix = np.eye(2, 3, dtype=np.float32)
+        self.novib_transformation_matrix = np.eye(2, 3, dtype=np.float32)
+        self.has_vib_transform = False
+        self.has_novib_transform = False
+
+        # Registration parameters
+        self.max_iterations = 2000
+        self.termination_eps = 1e-6
+        self.use_previous_transform = False
 
     def apply_threshold(self, image: np.ndarray, thresh: float) -> np.ndarray:
         """Apply binary thresholding"""
@@ -96,36 +104,96 @@ class ImageProcessor:
         return result
 
     def register_images(self, fixed: np.ndarray, moving: np.ndarray,
-                        update_transform: bool = True) -> np.ndarray:
-        """Register images using ECC algorithm"""
+                        registration_type: str = 'vib') -> np.ndarray:
+        """
+        Register images using ECC algorithm with previous transformation as initial guess
+
+        Args:
+            fixed: Reference image (grayscale)
+            moving: Image to be registered (grayscale)
+            registration_type: Either 'vib' or 'novib' to track different transform matrices
+
+        Returns:
+            Registered image
+        """
         try:
             # Convert images to appropriate format
-            moving_f = moving.astype(np.float32)
+            # Convert to float32
             fixed_f = fixed.astype(np.float32)
+            moving_f = moving.astype(np.float32)
 
-            # Create proper 2x3 affine matrix
-            warp_matrix = np.eye(2, 3, dtype=np.float32)
+            # --- Improve ECC stability ---
+            # 1. Normalize to [0,1]
+            fixed_f = cv2.normalize(fixed_f, None, 0, 1, cv2.NORM_MINMAX)
+            moving_f = cv2.normalize(moving_f, None, 0, 1, cv2.NORM_MINMAX)
+
+            # Get the appropriate transformation matrix based on type
+            if registration_type == 'vib':
+                if self.has_vib_transform and self.use_previous_transform:
+                    warp_matrix = self.vib_transformation_matrix.copy()
+                    logger.info("Using previous vibration transform as initial guess")
+                else:
+                    warp_matrix = np.eye(2, 3, dtype=np.float32)
+                    logger.info("Using identity transform for vibration registration")
+            elif registration_type == 'novib':
+                if self.has_novib_transform and self.use_previous_transform:
+                    warp_matrix = self.novib_transformation_matrix.copy()
+                    logger.info("Using previous no-vibration transform as initial guess")
+                else:
+                    warp_matrix = np.eye(2, 3, dtype=np.float32)
+                    logger.info("Using identity transform for no-vibration registration")
+            else:
+                raise ValueError(f"Invalid registration_type: {registration_type}")
 
             # Set termination criteria
-            criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 1000, 1e-2)
+            criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+                        self.max_iterations, self.termination_eps)
 
             try:
-                # Perform registration
-                _, warp_matrix = cv2.findTransformECC(fixed_f, moving_f, warp_matrix,
-                                                      cv2.MOTION_AFFINE, criteria)
-                logger.info("ECC registration successful")
+                # Perform registration with previous transform as initial guess
+                correlation_coeff, warp_matrix = cv2.findTransformECC(
+                    fixed_f, moving_f, warp_matrix, cv2.MOTION_AFFINE, criteria, gaussFiltSize=5)
+
+                logger.info(f"ECC registration successful for {registration_type}, "
+                            f"correlation: {correlation_coeff:.4f}")
+
+                # Store the successful transformation matrix for next iteration
+                if registration_type == 'vib':
+                    self.vib_transformation_matrix = warp_matrix.copy()
+                    self.has_vib_transform = True
+                elif registration_type == 'novib':
+                    self.novib_transformation_matrix = warp_matrix.copy()
+                    self.has_novib_transform = True
+
             except cv2.error as e:
-                logger.warning("ECC registration failed, using identity transform")
-                # warp_matrix remains as identity
+                logger.warning(f"ECC registration failed for {registration_type}: {e}")
+                # If registration fails, keep the previous transform or use identity
+                if registration_type == 'vib' and not self.has_vib_transform:
+                    warp_matrix = np.eye(2, 3, dtype=np.float32)
+                elif registration_type == 'novib' and not self.has_novib_transform:
+                    warp_matrix = np.eye(2, 3, dtype=np.float32)
 
             # Apply transformation
-            registered = cv2.warpAffine(moving, warp_matrix, (fixed.shape[1], fixed.shape[0]))
+            registered = cv2.warpAffine(moving, warp_matrix,
+                                        (fixed.shape[1], fixed.shape[0]))
 
             return registered
 
         except Exception as e:
-            logger.error(f"Registration error: {e}")
+            logger.error(f"Registration error for {registration_type}: {e}")
             return moving.copy()
+
+    def get_transform_info(self):
+        """Get current transformation matrices information"""
+        vib_info = {
+            'has_transform': self.has_vib_transform,
+            'matrix': self.vib_transformation_matrix.copy()
+        }
+        novib_info = {
+            'has_transform': self.has_novib_transform,
+            'matrix': self.novib_transformation_matrix.copy()
+        }
+        return {'vib': vib_info, 'novib': novib_info}
 
     def process_gray_image(self, index: int) -> np.ndarray:
         """Process the gray reference image"""
@@ -162,7 +230,6 @@ class ImageProcessor:
 
         # Show the processed gray image
         cv2.imshow("Processed Gray Image", result)
-        cv2.waitKey(1)
 
         return result
 
@@ -186,14 +253,14 @@ class ImageProcessor:
                     right = min(cols - 1, jj + self.SEARCH_RADIUS)
 
                     # Extract region
-                    region = image[up:down+1, left:right+1]
+                    region = image[up:down + 1, left:right + 1]
 
                     # Check for matches
                     if cv2.countNonZero(region) > 0:
                         match_count += 1
 
                     # Clear the region in temporary image
-                    image_tmp[up:down+1, left:right+1] = 0
+                    image_tmp[up:down + 1, left:right + 1] = 0
 
         no_match_count = cv2.countNonZero(image_tmp)
         total_pixels = cv2.countNonZero(image)
@@ -228,11 +295,11 @@ class ImageProcessor:
         vib_gray = cv2.cvtColor(vib, cv2.COLOR_BGR2GRAY)
 
         # Apply thresholding with fixed values from MATLAB
-        vib_edge = self.apply_threshold(vib_gray, 0.22)
-        novib_edge = self.apply_threshold(novib_gray, 0.26)
+        vib_edge = self.apply_threshold(vib_gray, 0.20)
+        novib_edge = self.apply_threshold(novib_gray, 0.01)
 
         # Morphological operations on novib_edge
-        novib_edge = self.morphological_operations(novib_edge)
+        # novib_edge = self.morphological_operations(novib_edge)
 
         # Median filtering
         vib_edge = cv2.medianBlur(vib_edge, 3)
@@ -241,29 +308,63 @@ class ImageProcessor:
         # Remove small areas
         novib_edge = self.bwareaopen(novib_edge, 100)
 
-        # Register both images to gray_img
-        mv_vib_edge = self.register_images(vib_edge, gray_img)
-        mv_novib_edge = self.register_images(novib_edge, gray_img)
+        # Register both images to gray_img using separate transformation tracking
+        mv_vib_edge = self.register_images(gray_img, vib_edge, registration_type='vib')
+        mv_novib_edge = self.register_images(gray_img, novib_edge, registration_type='novib')
 
-        # Create visualizations
+        # Create comprehensive visualizations
         imgcolor = np.zeros((vib_edge.shape[0], vib_edge.shape[1], 3), dtype=np.uint8)
         imgcolor[:, :, 0] = 0  # Blue channel
         imgcolor[:, :, 1] = novib_edge  # Green channel
-        imgcolor[:, :, 2] = vib_edge    # Red channel
+        imgcolor[:, :, 2] = vib_edge  # Red channel
 
         imgcolor2 = np.zeros((vib_edge.shape[0], vib_edge.shape[1], 3), dtype=np.uint8)
         imgcolor2[:, :, 0] = 0  # Blue channel
-        imgcolor2[:, :, 1] = gray_img    # Green channel
-        imgcolor2[:, :, 2] = mv_vib_edge # Red channel
+        imgcolor2[:, :, 1] = gray_img  # Green channel
+        imgcolor2[:, :, 2] = mv_vib_edge  # Red channel
+
+        # NEW: Create visualization for NoVib vs Gray alignment
+        imgcolor3 = np.zeros((vib_edge.shape[0], vib_edge.shape[1], 3), dtype=np.uint8)
+        imgcolor3[:, :, 0] = 0  # Blue channel
+        imgcolor3[:, :, 1] = gray_img  # Green channel (Gray reference)
+        imgcolor3[:, :, 2] = mv_novib_edge  # Red channel (Registered NoVib)
 
         # Convert single channel images to color for display
         novib_color = cv2.cvtColor(novib_edge, cv2.COLOR_GRAY2BGR)
         vib_color = cv2.cvtColor(vib_edge, cv2.COLOR_GRAY2BGR)
+        gray_color = cv2.cvtColor(gray_img, cv2.COLOR_GRAY2BGR)
+        mv_novib_color = cv2.cvtColor(mv_novib_edge, cv2.COLOR_GRAY2BGR)
 
-        # Display results in subplots
-        display1 = np.hstack([novib_color, vib_color])
-        display2 = np.hstack([imgcolor, imgcolor2])
+        # Create a comprehensive 2x3 display layout
+        # Top row: Original images
+        display1 = np.hstack([novib_color, vib_color, gray_color])
+
+        # Bottom row: Overlays
+        display2 = np.hstack([imgcolor,  # NoVib(G) + Vib(R)
+                              imgcolor2,  # Gray(G) + RegVib(R)
+                              imgcolor3])  # Gray(G) + RegNoVib(R)
+
         full_display = np.vstack([display1, display2])
+
+        # Add text labels for clarity
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.7
+        thickness = 2
+
+        # Top row labels
+        cv2.putText(full_display, "NoVib Original", (10, 30), font, font_scale, (255, 255, 255), thickness)
+        cv2.putText(full_display, "Vib Original", (novib_color.shape[1] + 10, 30), font, font_scale, (255, 255, 255),
+                    thickness)
+        cv2.putText(full_display, "Gray Reference", (novib_color.shape[1] + vib_color.shape[1] + 10, 30), font,
+                    font_scale, (255, 255, 255), thickness)
+
+        # Bottom row labels
+        y_offset = display1.shape[0] + 30
+        cv2.putText(full_display, "NoVib(G)+Vib(R)", (10, y_offset), font, font_scale, (255, 255, 255), thickness)
+        cv2.putText(full_display, "Gray(G)+RegVib(R)", (novib_color.shape[1] + 10, y_offset), font, font_scale,
+                    (255, 255, 255), thickness)
+        cv2.putText(full_display, "Gray(G)+RegNoVib(R)", (novib_color.shape[1] + vib_color.shape[1] + 10, y_offset),
+                    font, font_scale, (255, 255, 255), thickness)
 
         # Resize for display
         full_display = cv2.resize(full_display,
@@ -278,12 +379,19 @@ class ImageProcessor:
         self.analyze_matches(mv_vib_edge, gray_img, i, is_vib=True)
         self.analyze_matches(mv_novib_edge, gray_img, i, is_vib=False)
 
-        # Progress indicator
+        # Progress indicator with transform info
         if i % 100 == 0 or i <= 10:
             logger.info(f"Processed {i}/{self.IMG_NUM} images")
             logger.info(f"  Grey pixels: {self.grey_num[i - 1]}")
-            logger.info(f"  Vib matches in gray: {self.vib_match_num_in_gray[i - 1]}, Total vib pixels: {self.vib_all_num[i - 1]}")
-            logger.info(f"  NoVib matches in gray: {self.novib_match_num_in_gray[i - 1]}, Total novib pixels: {self.novib_all_num[i - 1]}")
+            logger.info(
+                f"  Vib matches in gray: {self.vib_match_num_in_gray[i - 1]}, Total vib pixels: {self.vib_all_num[i - 1]}")
+            logger.info(
+                f"  NoVib matches in gray: {self.novib_match_num_in_gray[i - 1]}, Total novib pixels: {self.novib_all_num[i - 1]}")
+
+            # Log current transform status
+            transform_info = self.get_transform_info()
+            logger.info(f"  Transform status - Vib: {transform_info['vib']['has_transform']}, "
+                        f"NoVib: {transform_info['novib']['has_transform']}")
 
     def plot_results(self):
         """Plot the match ratios for both vibration and no-vibration images"""
@@ -316,8 +424,10 @@ class ImageProcessor:
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
 
         # Plot 1: Both ratios on the same graph
-        axes[0, 0].plot(range(1, len(vib_match_ratios) + 1), vib_match_ratios, 'r-', linewidth=2, label='Vibration', alpha=0.8)
-        axes[0, 0].plot(range(1, len(novib_match_ratios) + 1), novib_match_ratios, 'b-', linewidth=2, label='No Vibration', alpha=0.8)
+        axes[0, 0].plot(range(1, len(vib_match_ratios) + 1), vib_match_ratios, 'r-', linewidth=2, label='Vibration',
+                        alpha=0.8)
+        axes[0, 0].plot(range(1, len(novib_match_ratios) + 1), novib_match_ratios, 'b-', linewidth=2,
+                        label='No Vibration', alpha=0.8)
         axes[0, 0].set_title('Match Ratios Comparison (match_num_in_gray / grey_num)')
         axes[0, 0].set_xlabel('Image Index')
         axes[0, 0].set_ylabel('Match Ratio')
@@ -349,6 +459,104 @@ class ImageProcessor:
 
         plt.tight_layout()
         plt.show()
+
+        # NEW: Create alignment quality visualization
+        self.plot_alignment_quality()
+
+    def plot_alignment_quality(self):
+        """Plot alignment quality metrics between NoVib/Vib and Gray images"""
+        # Calculate correlation coefficients for alignment quality assessment
+        novib_correlations = []
+        vib_correlations = []
+
+        # We'll need to recalculate these during processing or store them
+        # For now, create a placeholder that shows the concept
+        logger.info("Creating alignment quality visualization...")
+
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+
+        # Plot 1: Alignment quality over time (placeholder)
+        # In a real implementation, you'd store correlation values during processing
+        x_range = range(400, self.IMG_NUM + 1)
+
+        # Simulate alignment quality data (replace with actual stored values)
+        simulated_novib_quality = [0.8 + 0.1 * np.sin(i / 100) + np.random.normal(0, 0.05) for i in x_range]
+        simulated_vib_quality = [0.75 + 0.1 * np.cos(i / 100) + np.random.normal(0, 0.05) for i in x_range]
+
+        axes[0, 0].plot(x_range, simulated_novib_quality, 'b-', linewidth=2, label='NoVib-Gray Alignment', alpha=0.8)
+        axes[0, 0].plot(x_range, simulated_vib_quality, 'r-', linewidth=2, label='Vib-Gray Alignment', alpha=0.8)
+        axes[0, 0].set_title('Alignment Quality Over Time (Simulated)')
+        axes[0, 0].set_xlabel('Image Index')
+        axes[0, 0].set_ylabel('Correlation Coefficient')
+        axes[0, 0].grid(True, alpha=0.3)
+        axes[0, 0].legend()
+        axes[0, 0].set_ylim(0, 1)
+
+        # Plot 2: Transform magnitude over time
+        # Show how much transformation is being applied
+        transform_magnitudes_vib = []
+        transform_magnitudes_novib = []
+
+        # Calculate transform magnitudes (translation + rotation approximation)
+        vib_tx = self.vib_transformation_matrix[0, 2] if self.has_vib_transform else 0
+        vib_ty = self.vib_transformation_matrix[1, 2] if self.has_vib_transform else 0
+        vib_magnitude = np.sqrt(vib_tx ** 2 + vib_ty ** 2)
+
+        novib_tx = self.novib_transformation_matrix[0, 2] if self.has_novib_transform else 0
+        novib_ty = self.novib_transformation_matrix[1, 2] if self.has_novib_transform else 0
+        novib_magnitude = np.sqrt(novib_tx ** 2 + novib_ty ** 2)
+
+        axes[0, 1].bar(['NoVib Transform', 'Vib Transform'], [novib_magnitude, vib_magnitude],
+                       color=['blue', 'red'], alpha=0.7)
+        axes[0, 1].set_title('Current Transform Magnitudes')
+        axes[0, 1].set_ylabel('Translation Magnitude (pixels)')
+
+        # Plot 3: Transform parameters
+        if self.has_vib_transform and self.has_novib_transform:
+            vib_params = self.vib_transformation_matrix.flatten()
+            novib_params = self.novib_transformation_matrix.flatten()
+
+            param_names = ['M00', 'M01', 'Tx', 'M10', 'M11', 'Ty']
+            x_pos = np.arange(len(param_names))
+
+            width = 0.35
+            axes[1, 0].bar(x_pos - width / 2, vib_params, width, label='Vib Transform', color='red', alpha=0.7)
+            axes[1, 0].bar(x_pos + width / 2, novib_params, width, label='NoVib Transform', color='blue', alpha=0.7)
+            axes[1, 0].set_title('Transform Parameters Comparison')
+            axes[1, 0].set_ylabel('Parameter Value')
+            axes[1, 0].set_xticks(x_pos)
+            axes[1, 0].set_xticklabels(param_names)
+            axes[1, 0].legend()
+            axes[1, 0].grid(True, alpha=0.3)
+        else:
+            axes[1, 0].text(0.5, 0.5, 'No transforms available yet',
+                            horizontalalignment='center', verticalalignment='center',
+                            transform=axes[1, 0].transAxes, fontsize=14)
+            axes[1, 0].set_title('Transform Parameters (Not Available)')
+
+        # Plot 4: Registration convergence info
+        axes[1, 1].text(0.1, 0.8, f"Registration Status:", fontsize=12, weight='bold', transform=axes[1, 1].transAxes)
+        axes[1, 1].text(0.1, 0.7, f"Vib Transform Available: {self.has_vib_transform}", fontsize=10,
+                        transform=axes[1, 1].transAxes)
+        axes[1, 1].text(0.1, 0.6, f"NoVib Transform Available: {self.has_novib_transform}", fontsize=10,
+                        transform=axes[1, 1].transAxes)
+        axes[1, 1].text(0.1, 0.5, f"Max Iterations: {self.max_iterations}", fontsize=10, transform=axes[1, 1].transAxes)
+        axes[1, 1].text(0.1, 0.4, f"Termination EPS: {self.termination_eps}", fontsize=10,
+                        transform=axes[1, 1].transAxes)
+        axes[1, 1].text(0.1, 0.3, f"Using Previous Transform: {self.use_previous_transform}", fontsize=10,
+                        transform=axes[1, 1].transAxes)
+
+        if self.has_vib_transform:
+            axes[1, 1].text(0.1, 0.2, f"Vib Translation: ({vib_tx:.2f}, {vib_ty:.2f})", fontsize=10,
+                            transform=axes[1, 1].transAxes)
+        if self.has_novib_transform:
+            axes[1, 1].text(0.1, 0.1, f"NoVib Translation: ({novib_tx:.2f}, {novib_ty:.2f})", fontsize=10,
+                            transform=axes[1, 1].transAxes)
+
+        axes[1, 1].set_title('Registration Information')
+        axes[1, 1].set_xlim(0, 1)
+        axes[1, 1].set_ylim(0, 1)
+        axes[1, 1].axis('off')
 
         # Additional statistics plot
         fig2, ax = plt.subplots(1, 1, figsize=(10, 6))
@@ -399,8 +607,10 @@ class ImageProcessor:
                 'NoVibAll': self.novib_all_num,
                 'NoVibRatio': [self.novib_match_num_in_gray[i] / self.grey_num[i] if self.grey_num[i] > 0 else 0.0
                                for i in range(self.IMG_NUM)],
-                'RatioDifference': [(self.vib_match_num_in_gray[i] - self.novib_match_num_in_gray[i]) / self.grey_num[i] if self.grey_num[i] > 0 else 0.0
-                                    for i in range(self.IMG_NUM)]
+                'RatioDifference': [
+                    (self.vib_match_num_in_gray[i] - self.novib_match_num_in_gray[i]) / self.grey_num[i] if
+                    self.grey_num[i] > 0 else 0.0
+                    for i in range(self.IMG_NUM)]
             }
 
             df = pd.DataFrame(results_data)
