@@ -3,8 +3,8 @@
 // Based on Metavision SDK patterns
 //
 
-//#define STORE
-//#define BINARY
+#define STORE
+#define BINARY
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/algorithms/event_buffer_reslicer_algorithm.h>
@@ -82,14 +82,22 @@ int main(int argc, char *argv[]) {
 
     // create folder if not exists
 #ifdef BINARY
-    std::string output_images = params.params->output_folder + "/img_bin/";
+    std::string output_images =
+            params.params->output_folder + "img_bin_" + std::to_string(params.params->time_window_us) + "/";
 #else
-    std::string output_images = params.params->output_folder + "/img_gray/";
+    std::string output_images =
+            params.params->output_folder + "img_gray_" + std::to_string(params.params->time_window_us) + "/";
 #endif
     if (!std::filesystem::exists(output_images)) {
-        std::filesystem::create_directories(output_images);
+        if(std::filesystem::create_directories(output_images)) {
+            std::cout << "Output directory created: " << output_images << std::endl;
+        } else {
+            std::cerr << "Failed to create output directory: " << output_images << std::endl;
+            return -1;
+        }
     }
-
+    // print output folder
+    std::cout << "Output images will be saved in: " << output_images << std::endl;
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
 
@@ -121,7 +129,6 @@ int main(int argc, char *argv[]) {
     std::shared_ptr<HasteWrapper<Metavision::EventCD>> tracker;
 
 
-
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
 
@@ -146,7 +153,6 @@ int main(int argc, char *argv[]) {
         t_centre_y = y;
         std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
-
 
 
     bool osd = false; // On-screen display toggle
@@ -208,17 +214,17 @@ int main(int argc, char *argv[]) {
                 in_tracker = tracker->feed(event_to_build);
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
 //                    if(event_to_build.x > 320) {
-                        if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
-                            auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
-                            if (x_new < 0 || x_new >= width) {
-                                continue; // Skip if out of bounds
-                            }
-                            auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
-                            if (y_new < 0 || y_new >= height) {
-                                continue; // Skip if out of bounds
-                            }
-                            event_to_build.x = x_new;
-                            event_to_build.y = y_new;
+                    if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
+                        auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
+                        if (x_new < 0 || x_new >= width) {
+                            continue; // Skip if out of bounds
+                        }
+                        auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
+                        if (y_new < 0 || y_new >= height) {
+                            continue; // Skip if out of bounds
+                        }
+                        event_to_build.x = x_new;
+                        event_to_build.y = y_new;
 //                        }
                     }
                 } else {
@@ -245,7 +251,7 @@ int main(int argc, char *argv[]) {
             }
 
             // Feed events to frame generator and rate estimator
-            if (ev->t - slice_initial_time > 10000) { // 10 ms
+            if (ev->t - slice_initial_time > params.params->time_window_us) { // 10 ms
 #ifndef BINARY
                 output_image.convertTo(output_image, CV_8UC1);
                 cv::normalize(output_image, output_image, 0, 255, cv::NORM_MINMAX);
@@ -268,14 +274,14 @@ int main(int argc, char *argv[]) {
                 output_image.at<uchar>(event_to_build.y, event_to_build.x) = 255;
 #else
                 output_image = cv::Mat::zeros(cv::Size(width, height), CV_16UC1);
-                uint16_t& count_ref = output_image.at<uint16_t>(event_to_build.y, event_to_build.x);
+                uint16_t &count_ref = output_image.at<uint16_t>(event_to_build.y, event_to_build.x);
                 if (count_ref < 65535) count_ref++;
 #endif
             } else {
 #ifdef BINARY
                 output_image.at<uchar>(event_to_build.y, event_to_build.x) = 255;
 #else
-                uint16_t& count_ref = output_image.at<uint16_t>(event_to_build.y, event_to_build.x);
+                uint16_t &count_ref = output_image.at<uint16_t>(event_to_build.y, event_to_build.x);
                 if (count_ref < 65535) count_ref++;
 #endif
             }

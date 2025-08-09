@@ -37,6 +37,7 @@ namespace HARMEDA {
         int iekf_iterations = 1; // Number of iterations for IEKF fitting
         bool nocompensation = false; // Flag for no compensation
         int front_trackers = 0;
+        int time_window_us = 10000; // Time window for event accumulation in microseconds
     };
 
     class ParamsLoader {
@@ -80,7 +81,9 @@ namespace HARMEDA {
                     ("trackers-y", po::value<std::vector<int>>(&params->trackers_y)->multitoken(),
                      "List of Y positions for multiple trackers (optional, comma-separated).")
                     ("front-trackers", po::value<int>(&params->front_trackers)->default_value(0),
-                        "Number of front trackers (default: 0).");
+                     "Number of front trackers (default: 0).")
+                    ("time-window-us", po::value<int>(&params->time_window_us)->default_value(10000),
+                     "Time window for event accumulation in microseconds (default: 10000).");
 
             po::variables_map vm;
 
@@ -111,9 +114,9 @@ namespace HARMEDA {
                 throw std::runtime_error("Failed to initialize camera.");
             }
 
-            std::cout <<"size of trackers_x: " << params->trackers_x.size() << std::endl;
-            std::cout <<"size of trackers_y: " << params->trackers_y.size() << std::endl;
-            if(params->trackers_x.size() != params->trackers_y.size()) {
+            std::cout << "size of trackers_x: " << params->trackers_x.size() << std::endl;
+            std::cout << "size of trackers_y: " << params->trackers_y.size() << std::endl;
+            if (params->trackers_x.size() != params->trackers_y.size()) {
                 std::cerr << "Error: The number of tracker X and Y positions must match." << std::endl;
                 throw std::runtime_error("Tracker positions mismatch.");
             }

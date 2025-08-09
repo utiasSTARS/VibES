@@ -38,9 +38,9 @@ class ImageProcessor:
         self.novib_all_num = [0] * self.IMG_NUM
 
         # Update paths to match MATLAB structure
-        self.frame_gray_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/frames_amiev/"
-        self.frame_novib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/amiev/ev/img_gray/"
-        self.frame_vib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/amiev/harmeda/img_gray/"
+        self.frame_gray_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/"
+        self.frame_novib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/logo/ev/img_bin/"
+        self.frame_vib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/logo/harmeda/img_bin/"
 
         # Store separate transformation matrices for both registration types
         self.vib_transformation_matrix = np.eye(2, 3, dtype=np.float32)
@@ -152,7 +152,7 @@ class ImageProcessor:
             try:
                 # Perform registration with previous transform as initial guess
                 correlation_coeff, warp_matrix = cv2.findTransformECC(
-                    fixed_f, moving_f, warp_matrix, cv2.MOTION_AFFINE, criteria, gaussFiltSize=5)
+                    fixed_f, moving_f, warp_matrix, cv2.MOTION_AFFINE, criteria)
 
                 logger.info(f"ECC registration successful for {registration_type}, "
                             f"correlation: {correlation_coeff:.4f}")
@@ -198,11 +198,15 @@ class ImageProcessor:
     def process_gray_image(self, index: int) -> np.ndarray:
         """Process the gray reference image"""
         # Build filename with proper formatting
-        filename = f"image_{index}.jpg"
+        filename = "logo.jpg" # f"image_{index}.jpg"
         gray_path = os.path.join(self.frame_gray_path, filename)
 
         logger.info(f"Loading gray image: {gray_path}")
         gray_img = cv2.imread(gray_path, cv2.IMREAD_COLOR)
+        # reshape into (480, 640, 3) if needed
+        if gray_img is not None and gray_img.shape != (480, 640, 3):
+            gray_img = cv2.resize(gray_img, (640, 480))
+
 
         if gray_img is None:
             raise FileNotFoundError(f"Could not load gray image: {gray_path}")
@@ -285,6 +289,12 @@ class ImageProcessor:
 
         novib = cv2.imread(novib_path, cv2.IMREAD_COLOR)
         vib = cv2.imread(vib_path, cv2.IMREAD_COLOR)
+
+        if novib is not None and novib.shape != (480, 640, 3):
+            novib = cv2.resize(novib, (640, 480))
+
+        if vib is not None and vib.shape != (480, 640, 3):
+            vib = cv2.resize(vib, (640, 480))
 
         if novib is None or vib is None:
             logger.warning(f"Could not load images for index {i}")

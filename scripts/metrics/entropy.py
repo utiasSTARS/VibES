@@ -122,7 +122,7 @@ def compute_entropy_for_folder(folder_path, folder_name):
         # Ensure the image is in float format (0-255 range is fine for entropy)
         if frame.dtype != np.float64:
             frame = frame.astype(np.float64)
-
+        frame =  (frame > 0).astype(np.uint8)
         try:
             entropy_value = skimage.measure.shannon_entropy(frame)
             entropy.append(entropy_value)
@@ -154,12 +154,14 @@ if __name__ == "__main__":
     )
     parser.add_argument("type", type=str, choices=["bin", "gray"],
                         help="Type of images to process (bin or gray)")
+    parser.add_argument("us", type=int,
+                        help="Time window size in microseconds (e.g., 10000 for 10 ms)")
     args = parser.parse_args()
 
     # Construct paths to the two expected folders
     base_path = Path(args.base_path)
-    ev_path = base_path / f"ev/img_{args.type}"
-    harmeda_path = base_path / f"harmeda/img_{args.type}"
+    ev_path = base_path / f"ev/img_{args.type}_{args.us}"
+    harmeda_path = base_path / f"harmeda/img_{args.type}_{args.us}"
 
     # Check if both folders exist
     if not ev_path.exists():
@@ -229,7 +231,7 @@ if __name__ == "__main__":
         plt.legend()
         plt.tight_layout()
         plt.savefig(parent_dir / "entropy_comparison_original.png", dpi=300, bbox_inches='tight')
-        plt.show()
+        # plt.show()
         plt.close()
 
         # Plot 2: Windowed entropy comparison
@@ -283,7 +285,7 @@ if __name__ == "__main__":
         plt.legend()
         plt.tight_layout()
         plt.savefig(parent_dir / "entropy_comparison_windowed.png", dpi=300, bbox_inches='tight')
-        plt.show()
+        # plt.show()
         plt.close()
 
         # Plot 3: Combined view with both original and windowed
@@ -332,7 +334,7 @@ if __name__ == "__main__":
         plt.legend()
         plt.tight_layout()
         plt.savefig(parent_dir / "entropy_comparison_complete.png", dpi=300, bbox_inches='tight')
-        plt.show()
+        # plt.show()
         plt.close()
 
         # Print comparative statistics
