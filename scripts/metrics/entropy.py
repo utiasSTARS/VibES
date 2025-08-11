@@ -6,6 +6,7 @@ from scipy import ndimage
 import os
 import cv2
 from pathlib import Path
+import re
 
 import skimage.measure
 
@@ -35,7 +36,7 @@ class FrameLoader:
             raise ValueError(f"No image files found in directory: {self._fp}")
 
         # Sort files by name to ensure consistent ordering
-        self._image_files.sort()
+        self._image_files.sort(key=lambda p: int(re.search(r'\d+', p.stem).group()))
 
         # Read the first image to get dimensions (as grayscale)
         first_image = cv2.imread(str(self._image_files[0]), cv2.IMREAD_GRAYSCALE)
@@ -117,12 +118,10 @@ def compute_entropy_for_folder(folder_path, folder_name):
     # Use iterator to process frames one by one (memory efficient)
     for i, frame in enumerate(
             tqdm(frame_loader, desc=f"Computing entropy for {folder_name}", total=frame_loader.get_frame_count())):
-        # Frame is already grayscale from FrameLoader
-
         # Ensure the image is in float format (0-255 range is fine for entropy)
         if frame.dtype != np.float64:
             frame = frame.astype(np.float64)
-        frame =  (frame > 0).astype(np.uint8)
+        frame = (frame > 0).astype(np.uint8)
         try:
             entropy_value = skimage.measure.shannon_entropy(frame)
             entropy.append(entropy_value)
@@ -202,140 +201,64 @@ if __name__ == "__main__":
         frame_numbers1 = np.arange(len(entropy1))
         frame_numbers2 = np.arange(len(entropy2))
 
-        # Plot 1: Original entropy comparison
-        plt.figure(figsize=(15, 8))
-        plt.plot(
-            frame_numbers1,
-            entropy1,
-            linewidth=1.5,
-            marker="o",
-            markersize=3,
-            alpha=0.7,
-            color="blue",
-            label="EV (Original)"
-        )
-        plt.plot(
-            frame_numbers2,
-            entropy2,
-            linewidth=1.5,
-            marker="s",
-            markersize=3,
-            alpha=0.7,
-            color="green",
-            label="Harmeda (Original)"
-        )
-        plt.xlabel("Frame Number")
-        plt.ylabel("Entropy")
-        plt.title("Entropy Comparison: Original Data")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(parent_dir / "entropy_comparison_original.png", dpi=300, bbox_inches='tight')
-        # plt.show()
-        plt.close()
+        # get maximum length for x-axis
+        min_length = 2500  # min(len(frame_numbers1), len(frame_numbers2))
 
-        # Plot 2: Windowed entropy comparison
-        plt.figure(figsize=(15, 8))
-        plt.plot(
-            frame_numbers1,
-            entropy1_windowed,
-            linewidth=2,
-            marker="o",
-            markersize=2,
-            alpha=0.8,
-            color="red",
-            label=f"EV (Windowed, median={window_size})"
-        )
-        plt.plot(
-            frame_numbers2,
-            entropy2_windowed,
-            linewidth=2,
-            marker="s",
-            markersize=2,
-            alpha=0.8,
-            color="orange",
-            label=f"Harmeda (Windowed, median={window_size})"
-        )
+        # === LaTeX-compatible style ===
+        # width_pt = 237.136
+        # inches_per_pt = 1 / 72.27
+        # fig_width = width_pt * inches_per_pt
+        # fig_height = fig_width * 0.618  # golden ratio for aesthetics
 
-        # Add rolling min/max for both datasets
+        plt.rcParams.update({
+            "text.usetex": True,
+            "font.family": "serif",
+            "axes.labelsize": 10,
+            "font.size": 10,
+            "legend.fontsize": 10,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "text.latex.preamble": r"\usepackage{amsmath}"
+        })
+
+        # === Plot 2: Windowed entropy comparison ===
+
+        fig_width_in = 3.29  # inches (237.136 pt)
+        fig_height_in = 1.5 * fig_width_in
+
+        fig, ax = plt.subplots(figsize=(fig_width_in, fig_height_in))
+
+        ax.plot(frame_numbers1[:min_length], entropy1_windowed[:min_length],
+                linewidth=1.0, alpha=0.8,
+                color="red", label=fr"EV (Windowed, median={window_size})")
+        ax.plot(frame_numbers2[:min_length], entropy2_windowed[:min_length],
+                linewidth=1.0, alpha=0.8,
+                color="orange", label=fr"Ours (Windowed, median={window_size})")
+
         min_entropy1, max_entropy1 = rolling_min_max(entropy1, window_size)
         min_entropy2, max_entropy2 = rolling_min_max(entropy2, window_size)
 
-        plt.fill_between(
-            frame_numbers1,
-            min_entropy1,
-            max_entropy1,
-            color="lightblue",
-            alpha=0.3,
-            label="EV Range"
-        )
-        plt.fill_between(
-            frame_numbers2,
-            min_entropy2,
-            max_entropy2,
-            color="lightgreen",
-            alpha=0.3,
-            label="Harmeda Range"
-        )
+        ax.fill_between(frame_numbers1[:min_length],
+                        min_entropy1[:min_length], max_entropy1[:min_length],
+                        color="lightblue", alpha=0.3, label="EV Range")
+        ax.fill_between(frame_numbers2[:min_length],
+                        min_entropy2[:min_length], max_entropy2[:min_length],
+                        color="lightgreen", alpha=0.3, label="Ours Range")
 
-        plt.xlabel("Frame Number")
-        plt.ylabel("Entropy")
-        plt.title(f"Entropy Comparison: Windowed Data (Median over {window_size} frames)")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(parent_dir / "entropy_comparison_windowed.png", dpi=300, bbox_inches='tight')
-        # plt.show()
-        plt.close()
+        ax.set_xlabel(r"Frame Number", fontsize=10, labelpad=3)
+        ax.set_ylabel(r"Entropy", fontsize=10, labelpad=3)
 
-        # Plot 3: Combined view with both original and windowed
-        plt.figure(figsize=(15, 10))
+        ax.set_title(fr"\textbf{{Entropy Comparison}}", fontsize=10, pad=5)
 
-        # Original data (lighter colors)
-        plt.plot(
-            frame_numbers1,
-            entropy1,
-            linewidth=1,
-            alpha=0.4,
-            color="blue",
-            label="EV (Original)"
-        )
-        plt.plot(
-            frame_numbers2,
-            entropy2,
-            linewidth=1,
-            alpha=0.4,
-            color="green",
-            label="Harmeda (Original)"
-        )
+        ax.grid(True, alpha=0.3)
 
-        # Windowed data (bolder colors)
-        plt.plot(
-            frame_numbers1,
-            entropy1_windowed,
-            linewidth=3,
-            alpha=0.9,
-            color="darkblue",
-            label="EV (Windowed)"
-        )
-        plt.plot(
-            frame_numbers2,
-            entropy2_windowed,
-            linewidth=3,
-            alpha=0.9,
-            color="darkgreen",
-            label="Harmeda (Windowed)"
-        )
+        ax.legend(frameon=False, loc='upper center', bbox_to_anchor=(0.5, -0.3),
+                  ncol=2, borderaxespad=0, handlelength=1, fontsize=10, markerscale=0.7)
 
-        plt.xlabel("Frame Number")
-        plt.ylabel("Entropy")
-        plt.title(f"Complete Entropy Comparison: Original vs Windowed (window size={window_size})")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(parent_dir / "entropy_comparison_complete.png", dpi=300, bbox_inches='tight')
-        # plt.show()
-        plt.close()
+        fig.tight_layout(rect=[-0.2, 0, 1.2, 0.85])  # leave space for title and legend
+
+        fig.savefig(parent_dir / "entropy_comparison_windowed.pdf", bbox_inches='tight')
+        plt.close(fig)
 
         # Print comparative statistics
         print(f"\n=== COMPARATIVE STATISTICS ===")

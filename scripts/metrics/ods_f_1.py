@@ -4,6 +4,7 @@ Image Processing Pipeline - Python Version with Feature Matching
 Converted from C++ OpenCV code
 Created by viciopoli on 08/08/25
 Enhanced with feature matching registration and NoVib plotting
+Fixed indexing issues for configurable start/end range
 """
 
 import cv2
@@ -20,27 +21,28 @@ logger = logging.getLogger(__name__)
 
 
 class ImageProcessor:
-    def __init__(self):
-        self.START_INDEX = 700
-        self.IMG_NUM = 1500
+    def __init__(self, start_index: int = 700, end_index: int = 1500):
+        self.START_INDEX = start_index
+        self.END_INDEX = end_index
+        self.IMG_COUNT = end_index - start_index + 1  # Total number of images to process
         self.SEARCH_RADIUS = 2
 
-        # Initialize result arrays for vibration images
-        self.grey_num = [0] * (self.IMG_NUM-self.START_INDEX)
-        self.vib_match_num_in_gray = [0] * (self.IMG_NUM-self.START_INDEX)
-        self.vib_no_match_num = [0] * (self.IMG_NUM-self.START_INDEX)
-        self.vib_match_num = [0] * (self.IMG_NUM-self.START_INDEX)
-        self.vib_all_num = [0] * (self.IMG_NUM-self.START_INDEX)
+        # Initialize result arrays with correct size
+        self.grey_num = [0] * self.IMG_COUNT
+        self.vib_match_num_in_gray = [0] * self.IMG_COUNT
+        self.vib_no_match_num = [0] * self.IMG_COUNT
+        self.vib_match_num = [0] * self.IMG_COUNT
+        self.vib_all_num = [0] * self.IMG_COUNT
 
         # Initialize result arrays for no-vibration images
-        self.novib_match_num_in_gray = [0] * (self.IMG_NUM-self.START_INDEX)
-        self.novib_no_match_num = [0] * (self.IMG_NUM-self.START_INDEX)
-        self.novib_match_num = [0] * (self.IMG_NUM-self.START_INDEX)
-        self.novib_all_num = [0] * (self.IMG_NUM-self.START_INDEX)
+        self.novib_match_num_in_gray = [0] * self.IMG_COUNT
+        self.novib_no_match_num = [0] * self.IMG_COUNT
+        self.novib_match_num = [0] * self.IMG_COUNT
+        self.novib_all_num = [0] * self.IMG_COUNT
 
         # Update paths to match MATLAB structure
         self.frame_gray_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/"
-        self.frame_novib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/checkerpattern/ev/img_gray_10000/"
+        self.frame_novib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/checkerpattern/ev/img_bin_10000/"
         self.frame_vib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/checkerpattern/harmeda/img_gray_10000/"
 
         # Store separate transformation matrices for both registration types
@@ -58,6 +60,10 @@ class ImageProcessor:
         # Store registration quality metrics
         self.vib_registration_quality = []
         self.novib_registration_quality = []
+
+    def get_array_index(self, image_index: int) -> int:
+        """Convert image index to array index"""
+        return image_index - self.START_INDEX
 
     def apply_threshold(self, image: np.ndarray, thresh: float) -> np.ndarray:
         """Apply binary thresholding"""
@@ -153,8 +159,48 @@ class ImageProcessor:
             logger.error(f"Error in transform estimation: {e}")
             return None, 0
 
+    def register_images_ecc(self, fixed: np.ndarray, moving: np.ndarray) -> np.ndarray:
+        """
+        Register images using ECC algorithm with previous transformation as initial guess
+
+        Args:
+            fixed: Reference image (grayscale)
+            moving: Image to be registered (grayscale)
+            registration_type: Either 'vib' or 'novib' to track different transform matrices
+
+        Returns:
+            Registered image
+        """
+        try:
+            # Convert images to appropriate format
+            # Convert to float32
+            fixed_f = fixed.astype(np.float32)
+            moving_f = moving.astype(np.float32)
+
+            # --- Improve ECC stability ---
+            # 1. Normalize to [0,1]
+            fixed_f = cv2.normalize(fixed_f, None, 0, 1, cv2.NORM_MINMAX)
+            moving_f = cv2.normalize(moving_f, None, 0, 1, cv2.NORM_MINMAX)
+
+            # Set termination criteria
+            criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+                        500, 1e-5)
+            warp_matrix = np.eye(2,3, dtype=np.float32)  # Initialize warp matrix
+            # Perform registration with previous transform as initial guess
+            correlation_coeff, warp_matrix = cv2.findTransformECC(
+                fixed_f, moving_f, warp_matrix, cv2.MOTION_AFFINE, criteria)
+
+            # Apply transformation
+            registered = cv2.warpAffine(moving, warp_matrix,
+                                        (fixed.shape[1], fixed.shape[0]))
+
+            return registered
+        except Exception as e:
+            return moving.copy()
+
+
     def register_images(self, fixed: np.ndarray, moving: np.ndarray,
-                        registration_type: str = 'vib') -> np.ndarray:
+                        registration_type: str = 'vib') -> [np.ndarray, np.ndarray]:
         """
         Register images using feature matching with ORB features
 
@@ -212,7 +258,7 @@ class ImageProcessor:
                                                 (fixed.shape[1], fixed.shape[0]))
 
                     logger.info(f"Registration successful for {registration_type}, quality: {quality_score:.3f}")
-                    return registered
+                    return registered, transform_matrix
                 else:
                     # Use previous transform if available
                     if registration_type == 'vib' and self.has_vib_transform and self.use_previous_transform:
@@ -223,12 +269,12 @@ class ImageProcessor:
                         logger.info(f"Using previous no-vibration transform (quality: {quality_score:.3f})")
                     else:
                         logger.warning(f"No reliable transform found for {registration_type}")
-                        return moving.copy()
+                        return moving.copy(), []
 
                     # Apply previous transformation
                     registered = cv2.warpAffine(moving, warp_matrix,
                                                 (fixed.shape[1], fixed.shape[0]))
-                    return registered
+                    return registered, warp_matrix
 
             # Store quality even if registration failed
             if registration_type == 'vib':
@@ -236,11 +282,11 @@ class ImageProcessor:
             elif registration_type == 'novib':
                 self.novib_registration_quality.append(quality_score)
 
-            return moving.copy()
+            return moving.copy(), []
 
         except Exception as e:
             logger.error(f"Registration error for {registration_type}: {e}")
-            return moving.copy()
+            return moving.copy(), []
 
     def visualize_feature_matches(self, fixed: np.ndarray, moving: np.ndarray,
                                   registration_type: str = 'vib') -> Optional[np.ndarray]:
@@ -309,10 +355,10 @@ class ImageProcessor:
         logger.info(f"Loading gray image: {gray_path}")
         gray_img = cv2.imread(gray_path, cv2.IMREAD_COLOR)
 
-        gray_img = cv2.resize(gray_img, (gray_img.shape[1] // 2, gray_img.shape[0] // 2))
-
         if gray_img is None:
             raise FileNotFoundError(f"Could not load gray image: {gray_path}")
+
+        gray_img = cv2.resize(gray_img, (gray_img.shape[1] // 2, gray_img.shape[0] // 2))
 
         # Convert to grayscale
         gray = cv2.cvtColor(gray_img, cv2.COLOR_BGR2GRAY)
@@ -331,7 +377,7 @@ class ImageProcessor:
 
         return result
 
-    def analyze_matches(self, image: np.ndarray, gray_img: np.ndarray, i: int, is_vib: bool):
+    def analyze_matches(self, image: np.ndarray, gray_img: np.ndarray, image_index: int, is_vib: bool):
         """Analyze matches between an image and gray reference"""
         rows, cols = gray_img.shape
         image_tmp = image.copy()
@@ -361,27 +407,30 @@ class ImageProcessor:
         total_pixels = cv2.countNonZero(image)
         match_pixels = total_pixels - no_match_count
 
+        # Use array index instead of image index
+        array_idx = self.get_array_index(image_index)
+
         if is_vib:
-            self.vib_match_num_in_gray[i - 1] = match_count
-            self.vib_no_match_num[i - 1] = no_match_count
-            self.vib_match_num[i - 1] = match_pixels
-            self.vib_all_num[i - 1] = total_pixels
+            self.vib_match_num_in_gray[array_idx] = match_count
+            self.vib_no_match_num[array_idx] = no_match_count
+            self.vib_match_num[array_idx] = match_pixels
+            self.vib_all_num[array_idx] = total_pixels
         else:
-            self.novib_match_num_in_gray[i - 1] = match_count
-            self.novib_no_match_num[i - 1] = no_match_count
-            self.novib_match_num[i - 1] = match_pixels
-            self.novib_all_num[i - 1] = total_pixels
+            self.novib_match_num_in_gray[array_idx] = match_count
+            self.novib_no_match_num[array_idx] = no_match_count
+            self.novib_match_num[array_idx] = match_pixels
+            self.novib_all_num[array_idx] = total_pixels
 
     def proc_img(self, img, C):
         """Process input image to extract features"""
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
         # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        blurred = cv2.GaussianBlur(gray, (9, 9), 0)
 
         # Apply adaptive threshold to handle varying lighting
-        thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                       cv2.THRESH_BINARY, 11, C)
+        thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+                                       cv2.THRESH_BINARY, 13, C)
 
         # Invert so lines are white on black background
         thresh = cv2.bitwise_not(thresh)
@@ -391,24 +440,30 @@ class ImageProcessor:
 
         return thresh
 
-    def process_image_pair(self, i: int, gray_img: np.ndarray):
+    def process_image_pair(self, image_index: int, gray_img: np.ndarray):
         """Process a pair of vibration and no-vibration images"""
         # Build filenames
-        novib_path = os.path.join(self.frame_novib_path, f"{i}.png")
-        vib_path = os.path.join(self.frame_vib_path, f"{i}.png")
+        novib_path = os.path.join(self.frame_novib_path, f"{image_index}.png")
+        vib_path = os.path.join(self.frame_vib_path, f"{image_index}.png")
 
-        novib = cv2.imread(novib_path, cv2.IMREAD_COLOR)
+        novib = 255 - cv2.imread(novib_path, cv2.IMREAD_COLOR)
         vib = cv2.imread(vib_path, cv2.IMREAD_COLOR)
 
         if novib is None or vib is None:
-            logger.warning(f"Could not load images for index {i}")
+            logger.warning(f"Could not load images for index {image_index}")
             return
 
         # Half the size for faster processing
         novib = cv2.resize(novib, (novib.shape[1] // 2, novib.shape[0] // 2))
         vib = cv2.resize(vib, (vib.shape[1] // 2, vib.shape[0] // 2))
 
-        novib_edge = self.proc_img(novib, C=3)
+        # gaussian blur
+        novib = cv2.GaussianBlur(novib, (5, 5), 0)
+        novib = cv2.cvtColor(novib, cv2.COLOR_BGR2GRAY)
+        novib = cv2.threshold(novib,250, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+        novib = cv2.cvtColor(novib, cv2.COLOR_GRAY2BGR)
+
+        novib_edge = self.proc_img(novib, C=11)
         vib_edge = self.proc_img(vib, C=2)
 
         # Convert to grayscale
@@ -428,19 +483,23 @@ class ImageProcessor:
         # novib_edge = self.bwareaopen(novib_edge, 50)
 
         # Register both images to gray_img using feature matching
-        mv_vib_edge = self.register_images(gray_img, vib_edge, registration_type='vib')
-        mv_novib_edge = self.register_images(gray_img, novib_edge, registration_type='novib')
+        mv_vib_edge, T = self.register_images(gray_img, vib_edge, registration_type='vib')
+        if T==[]:
+            mv_vib_edge = self.register_images_ecc(gray_img, vib_edge)
+        mv_novib_edge, T = self.register_images(gray_img, novib_edge, registration_type='novib')
+        if T==[]:
+            mv_novib_edge = self.register_images_ecc(gray_img, novib_edge)
 
         # Visualize feature matches every 100 images for debugging
-        if i % 100 == 0:
+        if image_index % 100 == 0:
             vib_match_vis = self.visualize_feature_matches(gray_img, vib_edge, 'vib')
             novib_match_vis = self.visualize_feature_matches(gray_img, novib_edge, 'novib')
 
             if vib_match_vis is not None:
-                cv2.imshow(f"Vib Feature Matches - Frame {i}",
+                cv2.imshow(f"Vib Feature Matches - Frame {image_index}",
                            cv2.resize(vib_match_vis, (800, 300)))
             if novib_match_vis is not None:
-                cv2.imshow(f"NoVib Feature Matches - Frame {i}",
+                cv2.imshow(f"NoVib Feature Matches - Frame {image_index}",
                            cv2.resize(novib_match_vis, (800, 300)))
 
         # Create comprehensive visualizations
@@ -502,21 +561,22 @@ class ImageProcessor:
         cv2.imshow("Processing Results", full_display)
         cv2.waitKey(1)
 
-        # Count grey pixels (only once per iteration)
-        self.grey_num[i - 1] = cv2.countNonZero(gray_img)
+        # Count grey pixels (only once per iteration) - use array index
+        array_idx = self.get_array_index(image_index)
+        self.grey_num[array_idx] = cv2.countNonZero(gray_img)
 
         # Analyze matches for both vibration and no-vibration images
-        self.analyze_matches(mv_vib_edge, gray_img, i, is_vib=True)
-        self.analyze_matches(mv_novib_edge, gray_img, i, is_vib=False)
+        self.analyze_matches(mv_vib_edge, gray_img, image_index, is_vib=True)
+        self.analyze_matches(mv_novib_edge, gray_img, image_index, is_vib=False)
 
         # Progress indicator with transform info
-        if i % 100 == 0 or i <= 10:
-            logger.info(f"Processed {i}/{self.IMG_NUM} images")
-            logger.info(f"  Grey pixels: {self.grey_num[i - 1]}")
+        if image_index % 100 == 0 or image_index <= self.START_INDEX + 10:
+            logger.info(f"Processed {image_index}/{self.END_INDEX} images")
+            logger.info(f"  Grey pixels: {self.grey_num[array_idx]}")
             logger.info(
-                f"  Vib matches in gray: {self.vib_match_num_in_gray[i - 1]}, Total vib pixels: {self.vib_all_num[i - 1]}")
+                f"  Vib matches in gray: {self.vib_match_num_in_gray[array_idx]}, Total vib pixels: {self.vib_all_num[array_idx]}")
             logger.info(
-                f"  NoVib matches in gray: {self.novib_match_num_in_gray[i - 1]}, Total novib pixels: {self.novib_all_num[i - 1]}")
+                f"  NoVib matches in gray: {self.novib_match_num_in_gray[array_idx]}, Total novib pixels: {self.novib_all_num[array_idx]}")
 
             # Log current transform status and quality
             transform_info = self.get_transform_info()
@@ -529,14 +589,13 @@ class ImageProcessor:
             if len(self.novib_registration_quality) > 0:
                 logger.info(f"  Recent NoVib quality: {self.novib_registration_quality[-1]:.3f}")
 
-
     def plot_results(self):
         """Plot the match ratios for both vibration and no-vibration images"""
         # Calculate match ratios for vibration images
         vib_match_ratios = []
         novib_match_ratios = []
 
-        for i in range(self.IMG_NUM):
+        for i in range(self.IMG_COUNT):
             if self.grey_num[i] > 0:
                 vib_match_ratios.append(self.vib_match_num_in_gray[i] / self.grey_num[i])
                 novib_match_ratios.append(self.novib_match_num_in_gray[i] / self.grey_num[i])
@@ -560,11 +619,12 @@ class ImageProcessor:
         # Create comprehensive plots
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
 
+        # Create x-axis with actual image indices
+        x_indices = list(range(self.START_INDEX, self.END_INDEX + 1))
+
         # Plot 1: Both ratios on the same graph
-        axes[0, 0].plot(range(1, len(vib_match_ratios) + 1), vib_match_ratios, 'r-', linewidth=2, label='Vibration',
-                        alpha=0.8)
-        axes[0, 0].plot(range(1, len(novib_match_ratios) + 1), novib_match_ratios, 'b-', linewidth=2,
-                        label='No Vibration', alpha=0.8)
+        axes[0, 0].plot(x_indices, vib_match_ratios, 'r-', linewidth=2, label='Vibration', alpha=0.8)
+        axes[0, 0].plot(x_indices, novib_match_ratios, 'b-', linewidth=2, label='No Vibration', alpha=0.8)
         axes[0, 0].set_title('Match Ratios Comparison (match_num_in_gray / grey_num)')
         axes[0, 0].set_xlabel('Image Index')
         axes[0, 0].set_ylabel('Match Ratio')
@@ -572,14 +632,14 @@ class ImageProcessor:
         axes[0, 0].legend()
 
         # Plot 2: Vibration ratios only
-        axes[0, 1].plot(range(1, len(vib_match_ratios) + 1), vib_match_ratios, 'r-', linewidth=2)
+        axes[0, 1].plot(x_indices, vib_match_ratios, 'r-', linewidth=2)
         axes[0, 1].set_title('Vibration Match Ratios')
         axes[0, 1].set_xlabel('Image Index')
         axes[0, 1].set_ylabel('Match Ratio')
         axes[0, 1].grid(True, alpha=0.3)
 
         # Plot 3: No-vibration ratios only
-        axes[1, 0].plot(range(1, len(novib_match_ratios) + 1), novib_match_ratios, 'b-', linewidth=2)
+        axes[1, 0].plot(x_indices, novib_match_ratios, 'b-', linewidth=2)
         axes[1, 0].set_title('No-Vibration Match Ratios')
         axes[1, 0].set_xlabel('Image Index')
         axes[1, 0].set_ylabel('Match Ratio')
@@ -587,7 +647,7 @@ class ImageProcessor:
 
         # Plot 4: Difference between vibration and no-vibration ratios
         difference_ratios = [vib - novib for vib, novib in zip(vib_match_ratios, novib_match_ratios)]
-        axes[1, 1].plot(range(1, len(difference_ratios) + 1), difference_ratios, 'g-', linewidth=2)
+        axes[1, 1].plot(x_indices, difference_ratios, 'g-', linewidth=2)
         axes[1, 1].axhline(y=0, color='k', linestyle='--', alpha=0.5)
         axes[1, 1].set_title('Difference (Vibration - No-Vibration)')
         axes[1, 1].set_xlabel('Image Index')
@@ -612,19 +672,35 @@ class ImageProcessor:
 
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
 
-        # Plot 1: Alignment quality over time (placeholder)
-        # In a real implementation, you'd store correlation values during processing
-        x_range = range(self.START_INDEX, self.IMG_NUM + 1)
+        # Plot 1: Alignment quality over time (using actual registration quality if available)
+        x_range = list(range(self.START_INDEX, self.END_INDEX + 1))
 
-        # Simulate alignment quality data (replace with actual stored values)
-        simulated_novib_quality = [0.8 + 0.1 * np.sin(i / 100) + np.random.normal(0, 0.05) for i in x_range]
-        simulated_vib_quality = [0.75 + 0.1 * np.cos(i / 100) + np.random.normal(0, 0.05) for i in x_range]
+        # Use actual registration quality if available, otherwise simulate
+        if len(self.vib_registration_quality) > 0 and len(self.novib_registration_quality) > 0:
+            # Pad quality arrays to match image count if needed
+            vib_quality = self.vib_registration_quality[:self.IMG_COUNT]
+            novib_quality = self.novib_registration_quality[:self.IMG_COUNT]
 
-        axes[0, 0].plot(x_range, simulated_novib_quality, 'b-', linewidth=2, label='NoVib-Gray Alignment', alpha=0.8)
-        axes[0, 0].plot(x_range, simulated_vib_quality, 'r-', linewidth=2, label='Vib-Gray Alignment', alpha=0.8)
-        axes[0, 0].set_title('Alignment Quality Over Time (Simulated)')
+            # Extend with last value if arrays are shorter
+            while len(vib_quality) < self.IMG_COUNT:
+                vib_quality.append(vib_quality[-1] if vib_quality else 0.0)
+            while len(novib_quality) < self.IMG_COUNT:
+                novib_quality.append(novib_quality[-1] if novib_quality else 0.0)
+
+            axes[0, 0].plot(x_range, vib_quality, 'r-', linewidth=2, label='Vib-Gray Alignment', alpha=0.8)
+            axes[0, 0].plot(x_range, novib_quality, 'b-', linewidth=2, label='NoVib-Gray Alignment', alpha=0.8)
+            axes[0, 0].set_title('Registration Quality Over Time')
+        else:
+            # Simulate alignment quality data if no actual data available
+            simulated_novib_quality = [0.8 + 0.1 * np.sin(i / 100) + np.random.normal(0, 0.05) for i in range(self.IMG_COUNT)]
+            simulated_vib_quality = [0.75 + 0.1 * np.cos(i / 100) + np.random.normal(0, 0.05) for i in range(self.IMG_COUNT)]
+
+            axes[0, 0].plot(x_range, simulated_vib_quality, 'r-', linewidth=2, label='Vib-Gray Alignment', alpha=0.8)
+            axes[0, 0].plot(x_range, simulated_novib_quality, 'b-', linewidth=2, label='NoVib-Gray Alignment', alpha=0.8)
+            axes[0, 0].set_title('Alignment Quality Over Time (Simulated)')
+
         axes[0, 0].set_xlabel('Image Index')
-        axes[0, 0].set_ylabel('Correlation Coefficient')
+        axes[0, 0].set_ylabel('Quality Score')
         axes[0, 0].grid(True, alpha=0.3)
         axes[0, 0].legend()
         axes[0, 0].set_ylim(0, 1)
@@ -672,25 +748,28 @@ class ImageProcessor:
             axes[1, 0].set_title('Transform Parameters (Not Available)')
 
         # Plot 4: Registration convergence info
-        axes[1, 1].text(0.1, 0.8, f"Registration Status:", fontsize=12, weight='bold', transform=axes[1, 1].transAxes)
-        axes[1, 1].text(0.1, 0.7, f"Vib Transform Available: {self.has_vib_transform}", fontsize=10,
+        axes[1, 1].text(0.1, 0.9, f"Registration Status:", fontsize=12, weight='bold', transform=axes[1, 1].transAxes)
+        axes[1, 1].text(0.1, 0.8, f"Processing Range: {self.START_INDEX} to {self.END_INDEX}", fontsize=10,
                         transform=axes[1, 1].transAxes)
-        axes[1, 1].text(0.1, 0.6, f"NoVib Transform Available: {self.has_novib_transform}", fontsize=10,
+        axes[1, 1].text(0.1, 0.7, f"Total Images: {self.IMG_COUNT}", fontsize=10, transform=axes[1, 1].transAxes)
+        axes[1, 1].text(0.1, 0.6, f"Vib Transform Available: {self.has_vib_transform}", fontsize=10,
                         transform=axes[1, 1].transAxes)
-        axes[1, 1].text(0.1, 0.5, f"Max Iterations: {self.max_iterations}", fontsize=10, transform=axes[1, 1].transAxes)
-        axes[1, 1].text(0.1, 0.4, f"Termination EPS: {self.termination_eps}", fontsize=10,
+        axes[1, 1].text(0.1, 0.5, f"NoVib Transform Available: {self.has_novib_transform}", fontsize=10,
                         transform=axes[1, 1].transAxes)
-        axes[1, 1].text(0.1, 0.3, f"Using Previous Transform: {self.use_previous_transform}", fontsize=10,
+        axes[1, 1].text(0.1, 0.4, f"Max Iterations: {self.max_iterations}", fontsize=10, transform=axes[1, 1].transAxes)
+        axes[1, 1].text(0.1, 0.3, f"Termination EPS: {self.termination_eps}", fontsize=10,
+                        transform=axes[1, 1].transAxes)
+        axes[1, 1].text(0.1, 0.2, f"Using Previous Transform: {self.use_previous_transform}", fontsize=10,
                         transform=axes[1, 1].transAxes)
 
         if self.has_vib_transform:
-            axes[1, 1].text(0.1, 0.2, f"Vib Translation: ({vib_tx:.2f}, {vib_ty:.2f})", fontsize=10,
+            axes[1, 1].text(0.1, 0.1, f"Vib Translation: ({vib_tx:.2f}, {vib_ty:.2f})", fontsize=10,
                             transform=axes[1, 1].transAxes)
         if self.has_novib_transform:
-            axes[1, 1].text(0.1, 0.1, f"NoVib Translation: ({novib_tx:.2f}, {novib_ty:.2f})", fontsize=10,
+            axes[1, 1].text(0.1, 0.0, f"NoVib Translation: ({novib_tx:.2f}, {novib_ty:.2f})", fontsize=10,
                             transform=axes[1, 1].transAxes)
 
-        axes[1, 1].set_title('Registration Information')
+        axes[1, 1].set_title('Processing Information')
         axes[1, 1].set_xlim(0, 1)
         axes[1, 1].set_ylim(0, 1)
         axes[1, 1].axis('off')
@@ -712,15 +791,15 @@ class ImageProcessor:
 
     def run(self):
         """Run the complete image processing pipeline"""
-        logger.info("Starting image processing...")
+        logger.info(f"Starting image processing for range {self.START_INDEX} to {self.END_INDEX}...")
 
         try:
             # Process gray image (first loop in MATLAB)
-            gray_img = self.process_gray_image(1)
+            gray_img = self.process_gray_image(self.START_INDEX)
             logger.info("Gray image processed successfully")
 
             # Process all image pairs (second loop in MATLAB)
-            for i in range(self.START_INDEX, self.IMG_NUM + 1):
+            for i in range(self.START_INDEX, self.END_INDEX + 1):
                 self.process_image_pair(i, gray_img)
 
             # Plot results
@@ -730,40 +809,47 @@ class ImageProcessor:
 
             # Save results to file
             results_data = {
-                'Index': range(self.START_INDEX, self.IMG_NUM + 1),
+                'Index': list(range(self.START_INDEX, self.END_INDEX + 1)),
                 'GreyNum': self.grey_num,
                 'VibMatchInGray': self.vib_match_num_in_gray,
                 'VibNoMatch': self.vib_no_match_num,
                 'VibMatch': self.vib_match_num,
                 'VibAll': self.vib_all_num,
                 'VibRatio': [self.vib_match_num_in_gray[i] / self.grey_num[i] if self.grey_num[i] > 0 else 0.0
-                             for i in range(self.IMG_NUM)],
+                             for i in range(self.IMG_COUNT)],
                 'NoVibMatchInGray': self.novib_match_num_in_gray,
                 'NoVibNoMatch': self.novib_no_match_num,
                 'NoVibMatch': self.novib_match_num,
                 'NoVibAll': self.novib_all_num,
                 'NoVibRatio': [self.novib_match_num_in_gray[i] / self.grey_num[i] if self.grey_num[i] > 0 else 0.0
-                               for i in range(self.IMG_NUM)],
+                               for i in range(self.IMG_COUNT)],
                 'RatioDifference': [
                     (self.vib_match_num_in_gray[i] - self.novib_match_num_in_gray[i]) / self.grey_num[i] if
                     self.grey_num[i] > 0 else 0.0
-                    for i in range(self.IMG_NUM)]
+                    for i in range(self.IMG_COUNT)]
             }
 
             df = pd.DataFrame(results_data)
-            df.to_csv('evaluation_results_enhanced.csv', index=False)
+            output_filename = f'evaluation_results_{self.START_INDEX}_{self.END_INDEX}.csv'
+            df.to_csv(output_filename, index=False)
 
-            logger.info("Results saved to evaluation_results_enhanced.csv")
+            logger.info(f"Results saved to {output_filename}")
 
         except Exception as e:
             logger.error(f"Error during processing: {e}")
             raise
 
 
-def main():
-    """Main function"""
+def main(start_index: int = 700, end_index: int = 1500):
+    """
+    Main function with configurable start and end indices
+
+    Args:
+        start_index: First image index to process
+        end_index: Last image index to process
+    """
     try:
-        processor = ImageProcessor()
+        processor = ImageProcessor(start_index, end_index)
         processor.run()
     except Exception as e:
         logger.error(f"Error: {e}")
@@ -773,4 +859,17 @@ def main():
 
 
 if __name__ == "__main__":
-    exit(main())
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Image Processing Pipeline with configurable range')
+    parser.add_argument('--start', type=int, default=700, help='Start image index (default: 700)')
+    parser.add_argument('--end', type=int, default=1500, help='End image index (default: 1500)')
+
+    args = parser.parse_args()
+
+    if args.start >= args.end:
+        logger.error("Start index must be less than end index")
+        exit(1)
+
+    logger.info(f"Processing images from {args.start} to {args.end}")
+    exit(main(args.start, args.end))

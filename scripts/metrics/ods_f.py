@@ -39,8 +39,8 @@ class ImageProcessor:
 
         # Update paths to match MATLAB structure
         self.frame_gray_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/"
-        self.frame_novib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/logo/ev/img_bin/"
-        self.frame_vib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/logo/harmeda/img_bin/"
+        self.frame_novib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/checkerpattern/ev/img_gray_10000/"
+        self.frame_vib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/checkerpattern/harmeda/img_gray_10000/"
 
         # Store separate transformation matrices for both registration types
         self.vib_transformation_matrix = np.eye(2, 3, dtype=np.float32)
@@ -198,15 +198,13 @@ class ImageProcessor:
     def process_gray_image(self, index: int) -> np.ndarray:
         """Process the gray reference image"""
         # Build filename with proper formatting
-        filename = "logo.jpg" # f"image_{index}.jpg"
+        filename = "checkerpattern.png" # f"image_{index}.jpg"
         gray_path = os.path.join(self.frame_gray_path, filename)
 
         logger.info(f"Loading gray image: {gray_path}")
         gray_img = cv2.imread(gray_path, cv2.IMREAD_COLOR)
-        # reshape into (480, 640, 3) if needed
-        if gray_img is not None and gray_img.shape != (480, 640, 3):
-            gray_img = cv2.resize(gray_img, (640, 480))
 
+        gray_img = cv2.resize(gray_img, (gray_img.shape[1] // 2, gray_img.shape[0] // 2))
 
         if gray_img is None:
             raise FileNotFoundError(f"Could not load gray image: {gray_path}")
@@ -218,19 +216,25 @@ class ImageProcessor:
         gray_thresh = self.apply_otsu_threshold(gray)
 
         # Invert (~gray_edge in MATLAB)
-        gray_edge = cv2.bitwise_not(gray_thresh)
-
-        # Apply bwareaopen_large (remove large areas > 100000)
-        gray_edge = self.bwareaopen_large(gray_edge, 100000)
-
-        # Apply bwareaopen (remove small areas < 100)
-        gray_edge = self.bwareaopen(gray_edge, 100)
+        # gray_edge = cv2.bitwise_not(gray_thresh)
+        #
+        # # Apply bwareaopen_large (remove large areas > 100000)
+        # gray_edge = self.bwareaopen_large(gray_edge, 100000)
+        #
+        # # Apply bwareaopen (remove small areas < 100)
+        # gray_edge = self.bwareaopen(gray_edge, 100)
 
         # Apply edge detection
-        canny_edges = cv2.Canny(gray_edge, 50, 150)
+        canny_edges = cv2.Canny(gray_thresh, 50, 150)
 
         # Convert back to binary format for consistency
         _, result = cv2.threshold(canny_edges, 127, 255, cv2.THRESH_BINARY)
+
+        # zoom in the image for better visualization
+        # result = cv2.resize(result, (int(640 * 1.7), int(480 * 1.7)))
+        # # crop the center 640x480
+        # center_x, center_y = result.shape[1] // 2, result.shape[0] // 2
+        # result = result[center_y - 240:center_y + 240, center_x - 320:center_x + 320]
 
         # Show the processed gray image
         cv2.imshow("Processed Gray Image", result)
@@ -281,6 +285,24 @@ class ImageProcessor:
             self.novib_match_num[i - 1] = match_pixels
             self.novib_all_num[i - 1] = total_pixels
 
+    def proc_img(self, img):
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+        # Apply adaptive threshold to handle varying lighting
+        thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                       cv2.THRESH_BINARY, 11, 2)
+
+        # Invert so lines are white on black background
+        thresh = cv2.bitwise_not(thresh)
+
+        # binary to color
+        thresh = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
+
+        return thresh
+
     def process_image_pair(self, i: int, gray_img: np.ndarray):
         """Process a pair of vibration and no-vibration images"""
         # Build filenames
@@ -290,11 +312,12 @@ class ImageProcessor:
         novib = cv2.imread(novib_path, cv2.IMREAD_COLOR)
         vib = cv2.imread(vib_path, cv2.IMREAD_COLOR)
 
-        if novib is not None and novib.shape != (480, 640, 3):
-            novib = cv2.resize(novib, (640, 480))
+        # half the size for faster processing
+        novib = cv2.resize(novib, (novib.shape[1] // 2, novib.shape[0] // 2))
+        vib = cv2.resize(vib, (vib.shape[1] // 2, vib.shape[0] // 2))
 
-        if vib is not None and vib.shape != (480, 640, 3):
-            vib = cv2.resize(vib, (640, 480))
+        novib = self.proc_img(novib)
+        vib = self.proc_img(vib)
 
         if novib is None or vib is None:
             logger.warning(f"Could not load images for index {i}")
