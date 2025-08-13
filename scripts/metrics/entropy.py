@@ -7,6 +7,8 @@ import os
 import cv2
 from pathlib import Path
 import re
+import csv
+import pandas as pd
 
 import skimage.measure
 
@@ -145,6 +147,54 @@ def compute_entropy_for_folder(folder_path, folder_name):
         return np.array([])
 
 
+def save_entropy_to_csv(entropy1, entropy2, entropy1_windowed, entropy2_windowed,
+                        min_entropy1, max_entropy1, min_entropy2, max_entropy2,
+                        output_path, window_size):
+    """Save entropy data to CSV file."""
+    # Determine the maximum length to pad shorter arrays
+    max_length = max(len(entropy1), len(entropy2))
+
+    # Create a dictionary to store all data
+    data = {
+        'frame_number': list(range(max_length)),
+        'ev_entropy': list(entropy1) + [np.nan] * (max_length - len(entropy1)),
+        'harmeda_entropy': list(entropy2) + [np.nan] * (max_length - len(entropy2)),
+        'ev_entropy_windowed': list(entropy1_windowed) + [np.nan] * (max_length - len(entropy1_windowed)),
+        'harmeda_entropy_windowed': list(entropy2_windowed) + [np.nan] * (max_length - len(entropy2_windowed)),
+        'ev_entropy_min': list(min_entropy1) + [np.nan] * (max_length - len(min_entropy1)),
+        'ev_entropy_max': list(max_entropy1) + [np.nan] * (max_length - len(max_entropy1)),
+        'harmeda_entropy_min': list(min_entropy2) + [np.nan] * (max_length - len(min_entropy2)),
+        'harmeda_entropy_max': list(max_entropy2) + [np.nan] * (max_length - len(max_entropy2))
+    }
+
+    # Create DataFrame and save to CSV
+    df = pd.DataFrame(data)
+    csv_file = output_path / f"entropy_data_window_{window_size}.csv"
+    df.to_csv(csv_file, index=False)
+
+    print(f"Entropy data saved to: {csv_file}")
+
+    # Also save summary statistics
+    summary_data = {
+        'dataset': ['EV', 'Harmeda'],
+        'frame_count': [len(entropy1), len(entropy2)],
+        'mean_entropy': [np.mean(entropy1), np.mean(entropy2)],
+        'std_entropy': [np.std(entropy1), np.std(entropy2)],
+        'min_entropy': [np.min(entropy1), np.min(entropy2)],
+        'max_entropy': [np.max(entropy1), np.max(entropy2)],
+        'mean_entropy_windowed': [np.mean(entropy1_windowed), np.mean(entropy2_windowed)],
+        'std_entropy_windowed': [np.std(entropy1_windowed), np.std(entropy2_windowed)]
+    }
+
+    summary_df = pd.DataFrame(summary_data)
+    summary_csv_file = output_path / f"entropy_summary_window_{window_size}.csv"
+    summary_df.to_csv(summary_csv_file, index=False)
+
+    print(f"Summary statistics saved to: {summary_csv_file}")
+
+    return csv_file, summary_csv_file
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Run entropy metric on 'ev' and 'harmeda' folders within a given path.")
@@ -197,6 +247,17 @@ if __name__ == "__main__":
         else:
             entropy2_windowed = entropy2
 
+        # Calculate rolling min/max
+        min_entropy1, max_entropy1 = rolling_min_max(entropy1, window_size)
+        min_entropy2, max_entropy2 = rolling_min_max(entropy2, window_size)
+
+        # Save entropy data to CSV files
+        csv_file, summary_csv_file = save_entropy_to_csv(
+            entropy1, entropy2, entropy1_windowed, entropy2_windowed,
+            min_entropy1, max_entropy1, min_entropy2, max_entropy2,
+            parent_dir, window_size
+        )
+
         # Create frame numbers for each dataset
         frame_numbers1 = np.arange(len(entropy1))
         frame_numbers2 = np.arange(len(entropy2))
@@ -205,11 +266,6 @@ if __name__ == "__main__":
         min_length = 2500  # min(len(frame_numbers1), len(frame_numbers2))
 
         # === LaTeX-compatible style ===
-        # width_pt = 237.136
-        # inches_per_pt = 1 / 72.27
-        # fig_width = width_pt * inches_per_pt
-        # fig_height = fig_width * 0.618  # golden ratio for aesthetics
-
         plt.rcParams.update({
             "text.usetex": True,
             "font.family": "serif",
@@ -222,7 +278,6 @@ if __name__ == "__main__":
         })
 
         # === Plot 2: Windowed entropy comparison ===
-
         fig_width_in = 3.29  # inches (237.136 pt)
         fig_height_in = 1.5 * fig_width_in
 
@@ -281,6 +336,7 @@ if __name__ == "__main__":
         print(f"  Mean Windowed Entropy Difference: {np.mean(entropy1_windowed) - np.mean(entropy2_windowed):.4f}")
 
         print(f"\nGraphs saved to: {parent_dir}")
+        print(f"CSV files saved to: {parent_dir}")
 
     else:
         if len(entropy1) == 0:

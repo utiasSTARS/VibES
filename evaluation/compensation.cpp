@@ -3,8 +3,8 @@
 // Based on Metavision SDK patterns
 //
 //#define FANCY_VISUALIZATION
-//#define STORE
-#define TIMING
+#define STORE
+//#define TIMING
 
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>

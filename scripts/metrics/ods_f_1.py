@@ -470,7 +470,7 @@ class ImageProcessor:
             self.novib_all_num[array_idx] = total_pixels
 
     def proc_img(self, img, C):
-        """Process input image to extract features"""
+        """Process input image to extract features with Zhang-Suen thinning"""
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
         # Apply Gaussian blur to reduce noise
@@ -483,10 +483,111 @@ class ImageProcessor:
         # Invert so lines are white on black background
         thresh = cv2.bitwise_not(thresh)
 
-        # Convert binary to color for consistency
-        # thresh = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
+        # Apply Zhang-Suen thinning algorithm
 
         return thresh
+
+    def zhang_suen_thinning(self, image):
+        """
+        Apply Zhang-Suen thinning algorithm to binary image
+
+        Args:
+            image: Binary image (0 and 255 values)
+
+        Returns:
+            Thinned binary image
+        """
+        # Convert to binary (0 and 1)
+        binary = (image > 0).astype(np.uint8)
+
+        # Make a copy for processing
+        skeleton = binary.copy()
+
+        # Continue until no more changes
+        changed = True
+        while changed:
+            changed = False
+
+            # Step 1
+            to_remove = []
+            for i in range(1, skeleton.shape[0] - 1):
+                for j in range(1, skeleton.shape[1] - 1):
+                    if skeleton[i, j] == 1:
+                        # Get 8-neighborhood (clockwise from top)
+                        p = [skeleton[i-1, j], skeleton[i-1, j+1], skeleton[i, j+1],
+                             skeleton[i+1, j+1], skeleton[i+1, j], skeleton[i+1, j-1],
+                             skeleton[i, j-1], skeleton[i-1, j-1]]
+
+                        # Condition 1: 2 <= B(P1) <= 6
+                        B_P1 = sum(p)
+                        if not (2 <= B_P1 <= 6):
+                            continue
+
+                        # Condition 2: A(P1) = 1
+                        A_P1 = 0
+                        for k in range(8):
+                            if p[k] == 0 and p[(k + 1) % 8] == 1:
+                                A_P1 += 1
+                        if A_P1 != 1:
+                            continue
+
+                        # Condition 3: P2 * P4 * P6 = 0
+                        if p[0] * p[2] * p[4] != 0:
+                            continue
+
+                        # Condition 4: P4 * P6 * P8 = 0
+                        if p[2] * p[4] * p[6] != 0:
+                            continue
+
+                        # Mark for removal
+                        to_remove.append((i, j))
+
+            # Remove marked pixels
+            for (i, j) in to_remove:
+                skeleton[i, j] = 0
+                changed = True
+
+            # Step 2
+            to_remove = []
+            for i in range(1, skeleton.shape[0] - 1):
+                for j in range(1, skeleton.shape[1] - 1):
+                    if skeleton[i, j] == 1:
+                        # Get 8-neighborhood (clockwise from top)
+                        p = [skeleton[i-1, j], skeleton[i-1, j+1], skeleton[i, j+1],
+                             skeleton[i+1, j+1], skeleton[i+1, j], skeleton[i+1, j-1],
+                             skeleton[i, j-1], skeleton[i-1, j-1]]
+
+                        # Condition 1: 2 <= B(P1) <= 6
+                        B_P1 = sum(p)
+                        if not (2 <= B_P1 <= 6):
+                            continue
+
+                        # Condition 2: A(P1) = 1
+                        A_P1 = 0
+                        for k in range(8):
+                            if p[k] == 0 and p[(k + 1) % 8] == 1:
+                                A_P1 += 1
+                        if A_P1 != 1:
+                            continue
+
+                        # Condition 3: P2 * P4 * P8 = 0
+                        if p[0] * p[2] * p[6] != 0:
+                            continue
+
+                        # Condition 4: P2 * P6 * P8 = 0
+                        if p[0] * p[4] * p[6] != 0:
+                            continue
+
+                        # Mark for removal
+                        to_remove.append((i, j))
+
+            # Remove marked pixels
+            for (i, j) in to_remove:
+                skeleton[i, j] = 0
+                changed = True
+
+        # Convert back to 0-255 format
+        return (skeleton * 255).astype(np.uint8)
 
     def process_image_pair(self, image_index: int, gray_img: np.ndarray):
         """Process a pair of vibration and no-vibration images"""
@@ -533,14 +634,17 @@ class ImageProcessor:
         # vib_edge = self.bwareaopen(vib_edge, 100)
         # novib_edge = self.bwareaopen(novib_edge, 100)
 
-        cv2.imshow("novib_edge", novib_edge)
-        cv2.imshow("vib_edge", vib_edge)
-        cv2.waitKey(0)
+        # cv2.imshow("novib_edge", novib_edge)
+        # cv2.imshow("vib_edge", vib_edge)
+        # cv2.waitKey(0)
 
         # novib_edge = cv2.cvtColor(novib_edge, cv2.COLOR_GRAY2BGR)
         # vib_edge = cv2.cvtColor(vib_edge, cv2.COLOR_GRAY2BGR)
 
         novib_edge, _ = self.register_images_ecc_translation(vib_edge, novib_edge, [])
+
+        novib_edge = self.zhang_suen_thinning(novib_edge)
+        vib_edge = self.zhang_suen_thinning(vib_edge)
 
         # Register both images to gray_img using feature matching
         mv_vib_edge, T = self.register_images(gray_img, vib_edge, registration_type='vib')
