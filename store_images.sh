@@ -8,7 +8,7 @@ echo "Running image extraction at 100 Hz (10 ms)"
 python entropy.py ../../results/amiev/ bin 10000
 #
 ./cmake-build-release/compensation_store_imgs --time-window-us 10000 -i /home/viciopoli/datasets/event_harmeda/harmeda_dataset/logo_baseline.hdf5 -c /home/viciopoli/datasets/event_harmeda/intrinsics.json -o ../results/logo/ev/ --nocompensation
-./cmake-build-release/compensation_store_imgs --time-window-us 10000 -i /home/viciopoli/datasets/event_harmeda/harmeda_dataset/logo_harmeda.hdf5 -c /home/viciopoli/datasets/event_harmeda/intrinsics.json -o ../results/logo/harmeda/ --tracker-x 730 --tracker-y 187
+./cmake-build-release/compensation_store_imgs --time-window-us 10000 -i /home/viciopoli/datasets/event_harmeda/harmeda_dataset/logo_harmeda.hdf5 -c /home/viciopoli/datasets/event_harmeda/intrinsics.json -o ../results/logo/harmeda/ --tracker-x 557 --tracker-y 242
 #
 python entropy.py ../../results/logo/ bin 10000
 #

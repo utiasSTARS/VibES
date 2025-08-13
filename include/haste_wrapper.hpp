@@ -157,6 +157,9 @@ public:
     }
 
     bool getRelEstimate(Metavision::timestamp t_query, double t, double &x, double &y) {
+//#ifdef TIMING
+//        PROFILE_FUNCTION();
+//#endif
         if (!x_fitter_ || !y_fitter_) {
             return false;
         }
@@ -184,7 +187,8 @@ public:
         return true;
     }
 
-    std::tuple<haste::HypothesisPatchTracker::Scalar, haste::HypothesisPatchTracker::Scalar,haste::HypothesisPatchTracker::Scalar> getTrackerState() const {
+    std::tuple<haste::HypothesisPatchTracker::Scalar, haste::HypothesisPatchTracker::Scalar, haste::HypothesisPatchTracker::Scalar>
+    getTrackerState() const {
         if (tracker_) {
             return {tracker_->x(), tracker_->y(), tracker_->t()};
         }
@@ -308,6 +312,9 @@ public:
     }
 
     bool feed(const T &event) {
+//#ifdef TIMING
+//        PROFILE_FUNCTION();
+//#endif
         if (inTracker(event)) {
             return event_stack_.push(event);
         }

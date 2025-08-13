@@ -39,7 +39,7 @@ namespace HARMEDA {
             // Initialize scrolling parameters
             _current_time_column = 0;  // Start at leftmost column
             _last_scroll_time = 0;
-            _scroll_interval_us = 100; // Scroll every 0.1 seconds (100ms)
+            _scroll_interval_us = 200; // Scroll every 0.1 seconds (100ms)
         }
 
         void setAxis(int axis_value) {
@@ -96,7 +96,6 @@ namespace HARMEDA {
         }
 
         int time_value = 0; // Time value in the visualization
-        int time_scale = 10000; // Scale for time visualization, can be adjusted as needed
 
     private:
         void _processEvent(unsigned short x, unsigned short y, short p, Metavision::timestamp t) {

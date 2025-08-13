@@ -13,6 +13,10 @@
 #include <Eigen/Dense>
 #include "utils.hpp"  // Assumes definition of rad2Hz<T>(...) and similar utilities
 
+#ifdef TIMING
+#include "profiler.hpp"
+#endif
+
 // Custom deleter for finufft_opts
 struct FinufftOptsDeleter {
     void operator()(finufft_opts *opts) const {
@@ -346,6 +350,9 @@ private:
     }
 
     void compute_thr() {
+#ifdef TIMING
+        PROFILE_FUNCTION();
+#endif
         try {
             // Create local copies of data to avoid holding mutex during computation
             std::vector<double> local_x_data, local_y_data, local_t_data;

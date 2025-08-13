@@ -42,7 +42,7 @@ class ImageProcessor:
 
         # Update paths to match MATLAB structure
         self.frame_gray_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/"
-        self.frame_novib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/checkerpattern/ev/img_bin_10000/"
+        self.frame_novib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/checkerpattern/ev/img_gray_10000/"
         self.frame_vib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/checkerpattern/harmeda/img_gray_10000/"
 
         # Store separate transformation matrices for both registration types
@@ -159,7 +159,8 @@ class ImageProcessor:
             logger.error(f"Error in transform estimation: {e}")
             return None, 0
 
-    def register_images_ecc(self, fixed: np.ndarray, moving: np.ndarray) -> np.ndarray:
+    def register_images_ecc(self, fixed: np.ndarray, moving: np.ndarray, warp_matrix: np.ndarray) -> [np.ndarray,
+                                                                                                      np.ndarray]:
         """
         Register images using ECC algorithm with previous transformation as initial guess
 
@@ -185,7 +186,10 @@ class ImageProcessor:
             # Set termination criteria
             criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
                         500, 1e-5)
-            warp_matrix = np.eye(2,3, dtype=np.float32)  # Initialize warp matrix
+            if warp_matrix == []:
+                warp_matrix = np.eye(2, 3, dtype=np.float32)  # Initialize warp matrix
+            else:
+                warp_matrix = warp_matrix.astype(np.float32)  # Ensure warp_matrix is float32
             # Perform registration with previous transform as initial guess
             correlation_coeff, warp_matrix = cv2.findTransformECC(
                 fixed_f, moving_f, warp_matrix, cv2.MOTION_AFFINE, criteria)
@@ -194,10 +198,53 @@ class ImageProcessor:
             registered = cv2.warpAffine(moving, warp_matrix,
                                         (fixed.shape[1], fixed.shape[0]))
 
-            return registered
+            return registered, warp_matrix
         except Exception as e:
-            return moving.copy()
+            return moving.copy(), []
 
+    def register_images_ecc_translation(self, fixed: np.ndarray, moving: np.ndarray, warp_matrix: np.ndarray) -> [
+        np.ndarray, np.ndarray]:
+        """
+        Register images using ECC algorithm with previous transformation as initial guess
+
+        Args:
+            fixed: Reference image (grayscale)
+            moving: Image to be registered (grayscale)
+            registration_type: Either 'vib' or 'novib' to track different transform matrices
+
+        Returns:
+            Registered image
+        """
+        try:
+            # Convert images to appropriate format
+            # Convert to float32
+            fixed_f = fixed.astype(np.float32)
+            moving_f = moving.astype(np.float32)
+
+            # --- Improve ECC stability ---
+            # 1. Normalize to [0,1]
+            fixed_f = cv2.normalize(fixed_f, None, 0, 1, cv2.NORM_MINMAX)
+            moving_f = cv2.normalize(moving_f, None, 0, 1, cv2.NORM_MINMAX)
+
+            # Set termination criteria
+            criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+                        500, 1e-5)
+            if warp_matrix == []:
+                warp_matrix = np.eye(2, 3, dtype=np.float32)  # Initialize warp matrix
+            else:
+                warp_matrix = warp_matrix.astype(np.float32)  # Ensure warp_matrix is float32
+            # Perform registration with previous transform as initial guess
+            correlation_coeff, warp_matrix = cv2.findTransformECC(
+                fixed_f, moving_f, warp_matrix, cv2.MOTION_TRANSLATION, criteria)
+
+            # Apply transformation
+            registered = cv2.warpAffine(moving, warp_matrix,
+                                        (fixed.shape[1], fixed.shape[0]))
+
+            return registered, warp_matrix
+        except Exception as e:
+            print(e)
+            return moving.copy(), []
 
     def register_images(self, fixed: np.ndarray, moving: np.ndarray,
                         registration_type: str = 'vib') -> [np.ndarray, np.ndarray]:
@@ -234,7 +281,8 @@ class ImageProcessor:
                 # Filter good matches (distance threshold)
                 good_matches = [m for m in matches if m.distance < 50]
 
-                logger.info(f"Found {len(good_matches)} good matches out of {len(matches)} total for {registration_type}")
+                logger.info(
+                    f"Found {len(good_matches)} good matches out of {len(matches)} total for {registration_type}")
 
                 # Estimate transformation
                 transform_matrix, num_inliers = self.estimate_transform_from_matches(kp1, kp2, good_matches)
@@ -426,11 +474,11 @@ class ImageProcessor:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
         # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (9, 9), 0)
+        blurred = cv2.GaussianBlur(gray, (11, 11), 0)
 
         # Apply adaptive threshold to handle varying lighting
         thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                       cv2.THRESH_BINARY, 13, C)
+                                       cv2.THRESH_BINARY, 11, C)
 
         # Invert so lines are white on black background
         thresh = cv2.bitwise_not(thresh)
@@ -446,7 +494,7 @@ class ImageProcessor:
         novib_path = os.path.join(self.frame_novib_path, f"{image_index}.png")
         vib_path = os.path.join(self.frame_vib_path, f"{image_index}.png")
 
-        novib = 255 - cv2.imread(novib_path, cv2.IMREAD_COLOR)
+        novib = cv2.imread(novib_path, cv2.IMREAD_COLOR)
         vib = cv2.imread(vib_path, cv2.IMREAD_COLOR)
 
         if novib is None or vib is None:
@@ -458,37 +506,61 @@ class ImageProcessor:
         vib = cv2.resize(vib, (vib.shape[1] // 2, vib.shape[0] // 2))
 
         # gaussian blur
-        novib = cv2.GaussianBlur(novib, (5, 5), 0)
-        novib = cv2.cvtColor(novib, cv2.COLOR_BGR2GRAY)
-        novib = cv2.threshold(novib,250, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
-        novib = cv2.cvtColor(novib, cv2.COLOR_GRAY2BGR)
+        # novib = cv2.GaussianBlur(novib, (5, 5), 0)
+        # novib = cv2.cvtColor(novib, cv2.COLOR_BGR2GRAY)
+        # novib_edge = cv2.threshold(novib,250, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+        # novib_edge = cv2.cvtColor(novib, cv2.COLOR_GRAY2BGR)
 
-        novib_edge = self.proc_img(novib, C=11)
+        novib_edge = self.proc_img(novib, C=2)
         vib_edge = self.proc_img(vib, C=2)
 
         # Convert to grayscale
         # vib_edge = cv2.cvtColor(vib, cv2.COLOR_BGR2GRAY)
         # novib_edge = cv2.cvtColor(novib, cv2.COLOR_BGR2GRAY)
-
+        #
+        # vib_edge = cv2.GaussianBlur(vib_edge, (11, 11), 0)
+        # novib_edge = cv2.GaussianBlur(novib_edge, (7, 7), 0)
+        #
         # # Apply thresholding with fixed values from MATLAB
-        # vib_edge = self.apply_threshold(vib_edge, 0.90)
-        # novib_edge = self.apply_threshold(novib_edge, 0.50)
+        # vib_edge = self.apply_threshold(vib_edge, 0.5)
+        # novib_edge = self.apply_threshold(novib_edge, 0.2)
         #
         # # Median filtering
         # vib_edge = cv2.medianBlur(vib_edge, 3)
-        # novib_edge = cv2.medianBlur(novib_edge, 5)
+        # novib_edge = cv2.medianBlur(novib_edge, 3)
+        #
+        # # Remove small areas
+        # vib_edge = self.bwareaopen(vib_edge, 100)
+        # novib_edge = self.bwareaopen(novib_edge, 100)
 
-        # Remove small areas
-        # vib_edge = self.bwareaopen(vib_edge, 50)
-        # novib_edge = self.bwareaopen(novib_edge, 50)
+        cv2.imshow("novib_edge", novib_edge)
+        cv2.imshow("vib_edge", vib_edge)
+        cv2.waitKey(0)
+
+        # novib_edge = cv2.cvtColor(novib_edge, cv2.COLOR_GRAY2BGR)
+        # vib_edge = cv2.cvtColor(vib_edge, cv2.COLOR_GRAY2BGR)
+
+        novib_edge, _ = self.register_images_ecc_translation(vib_edge, novib_edge, [])
 
         # Register both images to gray_img using feature matching
         mv_vib_edge, T = self.register_images(gray_img, vib_edge, registration_type='vib')
-        if T==[]:
-            mv_vib_edge = self.register_images_ecc(gray_img, vib_edge)
-        mv_novib_edge, T = self.register_images(gray_img, novib_edge, registration_type='novib')
-        if T==[]:
-            mv_novib_edge = self.register_images_ecc(gray_img, novib_edge)
+        if T != []:
+            mv_novib_edge = cv2.warpAffine(novib_edge, T,
+                                           (novib_edge.shape[1], novib_edge.shape[0]))
+        else:
+            mv_novib_edge = novib_edge
+
+        mv_novib_edge, _ = self.register_images_ecc_translation(gray_img, mv_novib_edge, [])
+        # if T==[]:
+        #     mv_vib_edge = self.register_images_ecc(gray_img, vib_edge)
+        # if T!=[]:
+        #     mv_novib_edge, T_1 = self.register_images_ecc(gray_img, novib_edge, T)
+        #     if T_1==[]:
+        #         mv_novib_edge, T = self.register_images(gray_img, novib_edge, registration_type='novib')
+        # else:
+        #     mv_novib_edge, T = self.register_images(gray_img, novib_edge, registration_type='novib')
+        #     if T==[]:
+        #         mv_novib_edge = self.register_images_ecc(gray_img, novib_edge, T)
 
         # Visualize feature matches every 100 images for debugging
         if image_index % 100 == 0:
@@ -692,11 +764,14 @@ class ImageProcessor:
             axes[0, 0].set_title('Registration Quality Over Time')
         else:
             # Simulate alignment quality data if no actual data available
-            simulated_novib_quality = [0.8 + 0.1 * np.sin(i / 100) + np.random.normal(0, 0.05) for i in range(self.IMG_COUNT)]
-            simulated_vib_quality = [0.75 + 0.1 * np.cos(i / 100) + np.random.normal(0, 0.05) for i in range(self.IMG_COUNT)]
+            simulated_novib_quality = [0.8 + 0.1 * np.sin(i / 100) + np.random.normal(0, 0.05) for i in
+                                       range(self.IMG_COUNT)]
+            simulated_vib_quality = [0.75 + 0.1 * np.cos(i / 100) + np.random.normal(0, 0.05) for i in
+                                     range(self.IMG_COUNT)]
 
             axes[0, 0].plot(x_range, simulated_vib_quality, 'r-', linewidth=2, label='Vib-Gray Alignment', alpha=0.8)
-            axes[0, 0].plot(x_range, simulated_novib_quality, 'b-', linewidth=2, label='NoVib-Gray Alignment', alpha=0.8)
+            axes[0, 0].plot(x_range, simulated_novib_quality, 'b-', linewidth=2, label='NoVib-Gray Alignment',
+                            alpha=0.8)
             axes[0, 0].set_title('Alignment Quality Over Time (Simulated)')
 
         axes[0, 0].set_xlabel('Image Index')

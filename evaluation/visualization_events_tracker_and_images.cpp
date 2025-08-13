@@ -3,7 +3,7 @@
 // Based on Metavision SDK patterns
 //
 
-#define FANCY_VISUALIZATION
+//#define FANCY_VISUALIZATION
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
@@ -75,7 +75,7 @@ void updateSliceVisualizers(HARMEDA::SliceVisualizer &slice_x, HARMEDA::SliceVis
 void updateTrackerVisualization(HARMEDA::SliceVisualizer &slice_x, HARMEDA::SliceVisualizer &slice_y,
                                 std::shared_ptr<HasteWrapper<Metavision::EventCD>> &tracker) {
 
-    auto [x, y, t] = tracker->getTrackerState();
+//    auto [x, y, t] = tracker->getTrackerState();
 //    slice_x.editFrame([&](cv::Mat &frame) {
 //        cv::circle(frame, cv::Point(slice_x.time_value, int(x)),
 //                   1, cv::Scalar(0, 255, 255), -1);
@@ -124,7 +124,7 @@ int main(int argc, char *argv[]) {
     const auto height = params.camera.geometry().height();
 
     HARMEDA::SliceVisualizer slice_visualizer_x(height, width, int(height / 2), HARMEDA::X_AXIS, 30);
-    HARMEDA::SliceVisualizer slice_visualizer_y(height, width, 540, HARMEDA::Y_AXIS, 30);
+    HARMEDA::SliceVisualizer slice_visualizer_y(height, width, 357, HARMEDA::Y_AXIS, 30);
     cv::namedWindow("Slice X Visualizer", cv::WINDOW_NORMAL);
     cv::namedWindow("Slice Y Visualizer", cv::WINDOW_NORMAL);
 
@@ -135,7 +135,7 @@ int main(int argc, char *argv[]) {
     unsigned short t_centre_x = 0, t_centre_y = 0;
 
     // Initialize undistortion
-    Undistort undistort(params.params->calib_file);
+    Undistort undistort(params.params->calib_file, width, height);
 
     // Setup CD frame generator (similar to original)
     std::mutex cd_frame_mutex;
@@ -245,12 +245,12 @@ int main(int argc, char *argv[]) {
 
             // Process with tracker
             if (tracker) {
-                updateSliceVisualizers(slice_visualizer_x, slice_visualizer_y, tracker, current_t_sec);
+//                updateSliceVisualizers(slice_visualizer_x, slice_visualizer_y, tracker, current_t_sec);
 
                 in_tracker = tracker->feed(event_to_build);
-                if (in_tracker) {
-                    updateTrackerVisualization(slice_visualizer_x, slice_visualizer_y, tracker);
-                }
+//                if (in_tracker) {
+//                    updateTrackerVisualization(slice_visualizer_x, slice_visualizer_y, tracker);
+//                }
 
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
 #ifdef FANCY_VISUALIZATION
@@ -273,9 +273,9 @@ int main(int argc, char *argv[]) {
                         event_to_build.y = y_new;
 //                        event_to_build.p = 0;
 //                        slice_visualizer_x.feed(event_to_build.x, event_to_build.y, ev->p, ev->t);
-                        slice_visualizer_y.feed(event_to_build.x, event_to_build.y, ev->p, ev->t);
+//                        slice_visualizer_y.feed(event_to_build.x, event_to_build.y, ev->p, ev->t);
 
-                        continue;
+//                        continue;
                     }
 
                 } else {
@@ -299,11 +299,15 @@ int main(int argc, char *argv[]) {
                         NUFFT_ESTIMATION_DONE = nufft_estimator.done();
                     }
                 }
-            }else{
+            } else {
 //              slice_visualizer_x.feed(x_undistorted, y_undistorted, ev->p, ev->t);
 //                slice_visualizer_y.feed(x_undistorted, y_undistorted, ev->p, ev->t);
             }
-            slice_visualizer_y.feed(x_undistorted, y_undistorted, ev->p, ev->t);
+            slice_visualizer_y.feed(event_to_build.x, event_to_build.y, ev->p, ev->t);
+//            slice_visualizer_y.feed(x_undistorted, y_undistorted, ev->p, ev->t);
+            if (tracker) {
+                updateSliceVisualizers(slice_visualizer_x, slice_visualizer_y, tracker, current_t_sec);
+            }
 
         }
         // Feed events to frame generator and rate estimator
@@ -338,12 +342,12 @@ int main(int argc, char *argv[]) {
                     }
 
                     // Add on-screen display info
-                    std::string text = Metavision::getHumanReadableTime(cd_frame_ts);
-                    text += "     ";
-                    text += Metavision::getHumanReadableRate(avg_rate);
+//                    std::string text = Metavision::getHumanReadableTime(cd_frame_ts);
+//                    text += "     ";
+//                    text += Metavision::getHumanReadableRate(avg_rate);
 
-                    cv::putText(display_frame, text, cv::Point(10, 20),
-                                cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(108, 143, 255), 1, cv::LINE_AA);
+//                    cv::putText(display_frame, text, cv::Point(10, 20),
+//                                cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(108, 143, 255), 1, cv::LINE_AA);
 
                     // Add tracker info if available
 //                    if (tracker) {
