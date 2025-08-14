@@ -1,125 +1,173 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+"""
+Flexible Image Edge Analysis
+ - Configurable paths
+ - Adjustable edge detection parameters
+ - Continuity & PR metrics
+"""
 
-# Author: Igor Topcin <topcin@ime.usp.br>
-# PTC5892 Processamento de Imagens Medicas
-# POLI - University of Sao Paulo
-
-# Implementation of the 
-
-# References:
-# [1] W. K. Pratt, Digital Image Processing. New York: Wiley, 1977
-# [2] Y. Yu and S. T. Acton, Speckle Reducing Anisotropic Diffusion.
-# IEEE Transactions on Image Processing, Vol. 11, No. 11, 2002
-
+import cv2
+import os
+import argparse
 import numpy as np
-from scipy.ndimage import distance_transform_edt
-from sklearn.metrics import f1_score
-from glob import glob
-import cv2 as cv
-from tqdm import tqdm
+from typing import Optional
+import logging
+from utils import (
+    GTImageDataloader, ImageEdgeDataloader,
+    edge_connectivity_stats, summarize_continuity_stats,
+    evaluate_edges, plot_pr_curve
+)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Edge extraction and evaluation tool")
 
-DEFAULT_ALPHA = 1.0 / 9
+    # Paths
+    parser.add_argument("--path", required=True, help="Path to bin images folder before ev/harmeda")
+    parser.add_argument("--gt_path", required=True, help="Path to ground truth images folder")
 
-def fom(edges, edges_gt, alpha = DEFAULT_ALPHA):
-    """
-    Computes Pratt's Figure of Merit for the given image img, using a gold
-    standard image as source of the ideal edge pixels.
-    """
+    # Index range
+    parser.add_argument("--start_idx", type=int, default=0, help="Start index of images")
+    parser.add_argument("--end_idx", type=int, default=100, help="End index of images")
 
-    # To avoid oversmoothing, we apply canny edge detection with very low
-    # standard deviation of the Gaussian kernel (sigma = 0.1).
-    
-    # Compute the distance transform for the gold standard image.
-    # removes third dimension from each
-    #edges = edges[:,:,0]
-    #edges_gt = edges_gt[:,:,0]
-    dist = distance_transform_edt(np.invert(edges_gt))
+    # Resize factor
+    parser.add_argument("--resize", type=float, default=0.5, help="Resize factor for images")
 
-    fom = 1.0 / np.maximum(
-        np.count_nonzero(edges),
-        np.count_nonzero(edges_gt))
+    # Edge detection params
+    parser.add_argument("--adaptive_c", type=int, default=2, help="C value for adaptive threshold")
+    parser.add_argument("--canny_min", type=int, default=50, help="Min threshold for Canny")
+    parser.add_argument("--canny_max", type=int, default=150, help="Max threshold for Canny")
 
-    N, M = edges.shape
+    # Evaluation params
+    parser.add_argument("--tolerance", type=float, default=10.0, help="Pixel distance tolerance")
 
-    for i in range(0, N):
-        for j in range(0, M):
-            if edges[i, j]:
-                fom += 1.0 / ( 1.0 + dist[i, j] * dist[i, j] * alpha)
+    # Analysis mode
+    parser.add_argument(
+        "--analysis",
+        choices=["continuity", "pr", "both"],
+        default="both",
+        help="Type of edge analysis to perform"
+    )
 
-    fom /= np.maximum(
-        np.count_nonzero(edges),
-        np.count_nonzero(edges_gt))    
+    parser.add_argument("--visualize", action="store_true", help="Visualize results during analysis")
 
-    return fom
-
-def f_score(edges,edges_gt):
-    #edges = edges[:,:,0]
-    #edges_gt = edges_gt[:,:,0]
-    return f1_score(edges,edges_gt,average='micro')
-
-def calculate_dataset_metrics(gt_directory,
-                              pred_directory,
-                              metric = 'fom'):
-    """
-    Calculates desired metric over a dataset
-
-    Assumes the directories point to a directory with all the given GT/predicted edge images.
-
-    """
-    # loads and sorts GT images
-    gt_images = sorted(glob(gt_directory + '/*.png'))
-
-    # loads and sorts edge images
-    # pred_images = sorted(glob(pred_directory + '/*.png'))
-    pred_images = sorted(glob(pred_directory + '/*.png'),key=lambda x: int(x.split('/')[-1].split('.')[0]))
-
-    # "skips" intermediate edges if one is longer than the other
-    gt_len = len(gt_images)
-    pred_len = len(pred_images)
-    if gt_len != pred_len:
-        indices = np.linspace(start=0,stop=max(gt_len,pred_len)-1,num=min(gt_len,pred_len)).astype(int)
-    if gt_len < pred_len:
-        #pred_images = pred_images[indices]
-        pred_images = [pred_images[i] for i in indices]
-
-
-    elif pred_len < gt_len:
-        #gt_images = gt_images[indices]
-        gt_images = [gt_images[i] for i in indices]
-
-    
-
-    metric_average = 0
-    for gt_image_dir, pred_image_dir in tqdm(zip(gt_images,pred_images)):
-        # loads images
-        gt_image = cv.imread(gt_image_dir, cv.IMREAD_GRAYSCALE) > 100 
-        pred_image = cv.imread(pred_image_dir, cv.IMREAD_GRAYSCALE) > 100 
-        cv.imshow('Pred', pred_image.astype(np.uint8) * 255)
-        cv.waitKey(0)
-        metric_val = 0
-        if metric == 'fom':
-            metric_val += fom(pred_image,gt_image)
-        elif metric == 'f_score':
-            metric_val += f_score(pred_image,gt_image)
-        metric_average += metric_val
-    metric_average = metric_average/min(gt_len,pred_len)
-    return metric_average
+    return parser.parse_args()
 
 
 def main():
-    import argparse
+    args = parse_args()
 
-    parser = argparse.ArgumentParser(description='Calculate edge metrics for a dataset.')
-    parser.add_argument('gt_directory', type=str, help='Directory containing ground truth edge images.')
-    parser.add_argument('pred_directory', type=str, help='Directory containing predicted edge images.')
-    parser.add_argument('--metric', type=str, choices=['fom', 'f_score'], default='fom', help='Metric to calculate.')
+    vib_path = os.path.join(args.path, "harmeda/img_bin_10000/")
+    novib_path = os.path.join(args.path, "ev/img_bin_10000/")
 
-    args = parser.parse_args()
+    # Create dataloaders
+    vib_loader = ImageEdgeDataloader(
+        vib_path, start_index=args.start_idx, end_index=args.end_idx,
+        resize_factor=args.resize, adaptive_c=args.adaptive_c
+    )
+    novib_loader = ImageEdgeDataloader(
+        novib_path, start_index=args.start_idx, end_index=args.end_idx,
+        resize_factor=args.resize, adaptive_c=args.adaptive_c
+    )
+    gt_loader = GTImageDataloader(
+        args.gt_path, hz=100,
+        start_index=args.start_idx + 1, end_index=args.end_idx + 1,
+        resize_factor=args.resize,
+        canny_min=args.canny_min, canny_max=args.canny_max
+    )
 
-    metric_value = calculate_dataset_metrics(args.gt_directory, args.pred_directory, args.metric)
-    print(f'Metric ({args.metric}) value: {metric_value}')
+    logger.info(f"Vibration dataloader length: {len(vib_loader)}")
+    logger.info(f"No-vibration dataloader length: {len(novib_loader)}")
 
-if __name__ == '__main__':
+    vib_stats_all, novib_stats_all = [], []
+    precisions, recalls = [], []
+    precisions_nv, recalls_nv = [], []
+
+    def visualize(vib_orig, novib_orig, vib_edges, novib_edges):
+        cv2.imshow(f"VIB", vib_orig)
+        cv2.imshow(f"NO VIB", novib_orig)
+        cv2.imshow(f"Edges VIB", vib_edges)
+        cv2.imshow(f"Edges NO VIB", novib_edges)
+        cv2.waitKey(0)
+
+    def continuity_analysis(vib_edges, novib_edges):
+        vib_stats_all.append(edge_connectivity_stats(vib_edges))
+        novib_stats_all.append(edge_connectivity_stats(novib_edges))
+
+    def pr_analysis(vib_edges, novib_edges, gt_edges):
+        metrics_vib, overlay_vib = evaluate_edges(vib_edges, gt_edges, tolerance=args.tolerance)
+        metrics_nv, overlay_nv = evaluate_edges(novib_edges, gt_edges, tolerance=args.tolerance)
+
+        logger.info(f"VIB idx {vib_idx}: {metrics_vib}")
+        logger.info(f"NO VIB idx {novib_idx}: {metrics_nv}")
+
+        precisions.append(metrics_vib["Precision"])
+        recalls.append(metrics_vib["Recall"])
+        precisions_nv.append(metrics_nv["Precision"])
+        recalls_nv.append(metrics_nv["Recall"])
+
+        cv2.imshow("Overlay VIB", overlay_vib)
+        cv2.imshow("Overlay NO VIB", overlay_nv)
+
+    if args.analysis == "both":
+        logger.info("Performing both Continuity and Precision-Recall analysis")
+        for vib, novib, gt in zip(vib_loader, novib_loader, gt_loader):
+            vib_idx, vib_orig, vib_edges = vib
+            novib_idx, novib_orig, novib_edges = novib
+            _, gt_orig, gt_edges = gt
+            continuity_analysis(vib_edges, novib_edges)
+
+            pr_analysis(vib_edges, novib_edges, gt_edges)
+
+            if args.visualize:
+                visualize(vib_orig, novib_orig, vib_edges, novib_edges)
+
+
+    elif args.analysis == "continuity":
+        logger.info("Performing Continuity analysis")
+        for vib, novib in zip(vib_loader, novib_loader):
+            vib_idx, vib_orig, vib_edges = vib
+            novib_idx, novib_orig, novib_edges = novib
+
+            continuity_analysis(vib_edges, novib_edges)
+
+            if args.visualize:
+                visualize(vib_orig, novib_orig, vib_edges, novib_edges)
+
+    elif args.analysis == "pr":
+        logger.info("Performing Precision-Recall analysis")
+
+        for vib, novib, gt in zip(vib_loader, novib_loader, gt_loader):
+            vib_idx, vib_orig, vib_edges = vib
+            novib_idx, novib_orig, novib_edges = novib
+            _, gt_orig, gt_edges = gt
+
+            pr_analysis(vib_edges, novib_edges, gt_edges)
+
+            if args.visualize:
+                visualize(vib_orig, novib_orig, vib_edges, novib_edges)
+
+    else:
+        logger.error("Invalid analysis type specified. Use 'continuity', 'pr', or 'both'.")
+        return
+
+    # Summary
+    if args.analysis in ("continuity", "both"):
+        vib_summary = summarize_continuity_stats(vib_stats_all)
+        novib_summary = summarize_continuity_stats(novib_stats_all)
+        print("\n=== CONTINUITY SUMMARY ===")
+        print("VIB MODE:", vib_summary)
+        print("NO VIB MODE:", novib_summary)
+
+    if args.analysis in ("pr", "both"):
+        print("\n=== PRECISION/RECALL SUMMARY ===")
+        plot_pr_curve(precisions, recalls, precisions_nv, recalls_nv)
+
+    cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
     main()
