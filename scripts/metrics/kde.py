@@ -4,6 +4,7 @@ import h5py
 import argparse
 import matplotlib.pyplot as plt
 import logging
+import pickle
 import os
 
 from tqdm import tqdm
@@ -20,7 +21,7 @@ try:
     HAS_SKLEARN = True
 except ImportError:
     HAS_SKLEARN = False
-    print("Warning: sklearn not available, some KDE features will be limited")
+    logging.warning("sklearn not available, some KDE features will be limited")
 
 try:
     from scipy.stats import gaussian_kde
@@ -28,7 +29,7 @@ try:
     HAS_SCIPY = True
 except ImportError:
     HAS_SCIPY = False
-    print("Warning: scipy not available, using alternative methods")
+    logging.warning("Warning: scipy not available, using alternative methods")
 
 try:
     import seaborn as sns
@@ -36,7 +37,7 @@ try:
     HAS_SEABORN = True
 except ImportError:
     HAS_SEABORN = False
-    print("Warning: seaborn not available, using matplotlib for plotting")
+    logging.warning("Warning: seaborn not available, using matplotlib for plotting")
 
 
 class KDEMetrics:
@@ -62,7 +63,7 @@ class KDEMetrics:
             return kde(pts.T)
         else:
             # Fallback to histogram-based density estimation
-            print("Warning: Using histogram-based density estimation")
+            logging.warning("Using histogram-based density estimation")
             hist, x_edges, y_edges = np.histogram2d(pts[:, 0], pts[:, 1], bins=50)
 
             x_indices = np.clip(
@@ -134,7 +135,7 @@ class KDEMetrics:
         results = []
         all_densities = []
 
-        print(
+        logging.info(
             f"Processing time windows of {window_size_us} us with {overlap_us} us overlap..."
         )
 
@@ -170,7 +171,7 @@ class KDEMetrics:
             window_size_us: Size of time windows in microseconds
             max_events: Maximum number of events to collect from time windows
         """
-        print(
+        logging.info(
             f"Computing KDE densities for {self.name} using time-windowed approach..."
         )
 
@@ -218,7 +219,7 @@ class KDEMetrics:
             # print(f"{counter} Processed window {start_time}-{end_time}, collected {events_collected}/{max_events} events")
 
         if not all_densities:
-            print(f"Warning: No densities computed for {self.name}")
+            logging.warning(f"No densities computed for {self.name}")
             return np.array([])
 
         all_densities = np.array(all_densities)
@@ -233,24 +234,24 @@ class KDEMetrics:
         else:
             normalized_densities = np.zeros_like(all_densities)
 
-        print(
+        logging.info(
             f"Computed {len(normalized_densities)} normalized KDE densities for {self.name}"
         )
-        print(
+        logging.info(
             f"Time-windowed approach: collected events from {events_collected} total events"
         )
         return normalized_densities
 
     def point_distribution_full_data(self):
         """Compute and visualize point distribution for the entire dataset."""
-        print("Computing density visualization for entire dataset...")
+        logging.info("Computing density visualization for entire dataset...")
 
         df = self.event_loader.df
         pts = df[["x", "y"]].values.astype(float)
         pts[:, 0] /= self.cam_w
         pts[:, 1] /= self.cam_h
 
-        print(f"Processing {len(pts)} events...")
+        logging.info(f"Processing {len(pts)} events...")
 
         # Compute densities for histogram
         densities = self._compute_kde_densities(pts)
@@ -298,7 +299,7 @@ class KDEMetrics:
         )
 
         if not results:
-            print("No valid time windows found")
+            logging.error("No valid time windows found")
             return
 
         # Extract metrics
@@ -342,12 +343,14 @@ class KDEMetrics:
         plt.show()
 
         # Print summary statistics
-        print(f"\nSummary Statistics ({len(results)} windows):")
-        print(f"Mean KDE variance: {np.mean(variances):.6f} ± {np.std(variances):.6f}")
-        print(
+        logging.info(f"\nSummary Statistics ({len(results)} windows):")
+        logging.info(
+            f"Mean KDE variance: {np.mean(variances):.6f} ± {np.std(variances):.6f}"
+        )
+        logging.info(
             f"Mean density: {np.mean(mean_densities):.6f} ± {np.std(mean_densities):.6f}"
         )
-        print(
+        logging.info(
             f"Mean events per window: {np.mean(num_events):.1f} ± {np.std(num_events):.1f}"
         )
 
@@ -383,7 +386,9 @@ def compare_kde_densities(
         )
 
         if len(normalized_densities) == 0:
-            print(f"Warning: No densities computed for {kde_metrics.name}, skipping...")
+            logging.warning(
+                f"No densities computed for {kde_metrics.name}, skipping..."
+            )
             continue
 
         all_densities.append(normalized_densities)
@@ -456,16 +461,16 @@ def load_folder_datasets(folder_path):
         events_file = subfolder_path / "events.hdf5"
 
         if not events_file.exists():
-            print(f"Warning: {events_file} not found, skipping {subfolder}")
+            logging.warning(f"{events_file} not found, skipping {subfolder}")
             continue
 
-        print(f"\nLoading {subfolder} dataset from {events_file}")
+        logging.info(f"\nLoading {subfolder} dataset from {events_file}")
         try:
             event_loader = choose_event_reader(str(events_file))
             kde_metrics = KDEMetrics(event_loader, name=subfolder.upper())
             kde_metrics_list.append(kde_metrics)
         except Exception as e:
-            print(f"Error loading {subfolder}: {e}")
+            logging.error(f"Error loading {subfolder}: {e}")
             continue
 
     if not kde_metrics_list:
@@ -532,6 +537,9 @@ def main():
         default="kde_comparison",
         help="Base name for output files (default: kde_comparison)",
     )
+    parser.add_argument(
+        "--save_results", action="store_true", help="Save KDE raw results to file"
+    )
 
     args = parser.parse_args()
 
@@ -544,46 +552,50 @@ def main():
             ev_file = input_path / "ev" / "events.hdf5"
 
             if harmeda_file.exists() or ev_file.exists():
-                print(f"Found folder structure, processing both datasets...")
+                logging.info(f"Found folder structure, processing both datasets...")
                 kde_metrics_list = load_folder_datasets(args.input_path)
 
                 if args.compare_folders or len(kde_metrics_list) > 1:
                     # Compare datasets using time-windowed approach
-                    print(
+                    logging.info(
                         f"\nComparing {len(kde_metrics_list)} datasets using time-windowed approach..."
                     )
-                    compare_kde_densities(
+                    densities = compare_kde_densities(
                         kde_metrics_list,
                         window_size_us=args.time_window_us,
                         max_events=args.max_events,
                         downsample_factor=args.downsample_factor,
                         output_name=args.output_name,
                     )
+
+                    if args.save_results:
+                        with open(f"{args.output_name}_densities.pkl", "wb") as f:
+                            pickle.dump(densities, f)
                 else:
                     # Process single dataset found
                     kde_metrics = kde_metrics_list[0]
-                    print(f"Processing single dataset: {kde_metrics.name}")
+                    logging.info(f"Processing single dataset: {kde_metrics.name}")
                     process_single_dataset(kde_metrics, args)
 
                 return 0
             else:
-                print(
+                logging.warning(
                     f"Folder {input_path} does not contain harmeda/ev structure, treating as single file path"
                 )
 
         # Process as single file
         if not input_path.exists():
-            print(f"Error: {input_path} does not exist")
+            logging.error(f"{input_path} does not exist")
             return 1
 
-        print(f"Processing single file: {args.input_path}")
+        logging.info(f"Processing single file: {args.input_path}")
         event_loader = choose_event_reader(str(args.input_path))
         kde_metrics = KDEMetrics(event_loader, name="Dataset")
 
         process_single_dataset(kde_metrics, args)
 
     except Exception as e:
-        print(f"Error: {e}")
+        logging.error(f"Error: {e}")
         return 1
 
     return 0
@@ -591,7 +603,7 @@ def main():
 
 def process_single_dataset(kde_metrics, args):
     """Process a single dataset based on command line arguments."""
-    print(
+    logging.info(
         f"Camera Geometry: {kde_metrics.event_loader.get_geom_height()}x{kde_metrics.event_loader.get_geom_width()}"
     )
 

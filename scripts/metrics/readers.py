@@ -72,7 +72,7 @@ def choose_event_reader(filepath, size_threshold_mb=2000, **kwargs):
             return BaseEventReader(filepath, **kwargs)
 
     except Exception as e:
-        logging.error(
+        logging.warning(
             f"Could not determine file size for '{filepath}': {e}. Defaulting to BaseEventReader."
         )
         return BaseEventReader(filepath, **kwargs)
