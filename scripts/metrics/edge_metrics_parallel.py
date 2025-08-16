@@ -4,7 +4,9 @@ import os
 import argparse
 import numpy as np
 import logging
-from typing import Tuple, Optional, Any
+import pandas as pd
+from datetime import datetime
+from typing import Tuple, Optional, Any, Dict, List
 
 from utils_batched import (
     GTImageDataloader, ImageEdgeDataloader
@@ -52,7 +54,9 @@ def parse_args():
         help="Type of edge analysis to perform"
     )
 
-    parser.add_argument("--visualize", action="store_true", help="Visualize results during analysis")
+    # Output options
+    parser.add_argument("--output_dir", default="./results", help="Directory to save CSV results")
+    parser.add_argument("--save_prefix", default="edge_analysis", help="Prefix for output CSV files")
 
     return parser.parse_args()
 
@@ -69,8 +73,17 @@ def safe_load_image(loader, target_idx: int) -> Tuple[Optional[int], Optional[np
         return None, None, None
 
 
-def process_image(idx: int, vib_path: str, novib_path: str, gt_path: Optional[str], args) -> Tuple[Any, Any, Any, Any]:
+def process_image(idx: int, vib_path: str, novib_path: str, gt_path: Optional[str], args) -> Dict[str, Any]:
     """Process a single image index and return statistics and metrics."""
+    result = {
+        'image_id': idx,
+        'vib_stats': None,
+        'novib_stats': None,
+        'vib_pr_metrics': None,
+        'novib_pr_metrics': None,
+        'success': False
+    }
+
     try:
         # Create loaders for single image
         vib_loader = ImageEdgeDataloader(
@@ -91,16 +104,13 @@ def process_image(idx: int, vib_path: str, novib_path: str, gt_path: Optional[st
         # Skip if either image failed to load
         if vib_edges is None or novib_edges is None:
             logger.warning(f"Skipping index {idx}: Failed to load images")
-            return None, None, None, None
-
-        stats_vib = stats_nv = None
-        pr_metrics_vib = pr_metrics_nv = None
+            return result
 
         # Continuity analysis
         if args.analysis in ("continuity", "both"):
             try:
-                stats_vib = edge_connectivity_stats(vib_edges)
-                stats_nv = edge_connectivity_stats(novib_edges)
+                result['vib_stats'] = edge_connectivity_stats(vib_edges)
+                result['novib_stats'] = edge_connectivity_stats(novib_edges)
             except Exception as e:
                 logger.warning(f"Error in continuity analysis for index {idx}: {e}")
 
@@ -117,26 +127,83 @@ def process_image(idx: int, vib_path: str, novib_path: str, gt_path: Optional[st
                 _, _, gt_edges = safe_load_image(gt_loader, gt_idx)
 
                 if gt_edges is not None:
-                    pr_metrics_vib, _ = evaluate_edges(vib_edges, gt_edges, tolerance=args.tolerance)
-                    pr_metrics_nv, _ = evaluate_edges(novib_edges, gt_edges, tolerance=args.tolerance)
+                    result['vib_pr_metrics'], _ = evaluate_edges(vib_edges, gt_edges, tolerance=args.tolerance)
+                    result['novib_pr_metrics'], _ = evaluate_edges(novib_edges, gt_edges, tolerance=args.tolerance)
                 else:
                     logger.warning(f"No ground truth image found for index {idx}")
             except Exception as e:
                 logger.warning(f"Error in PR analysis for index {idx}: {e}")
 
-        return stats_vib, stats_nv, pr_metrics_vib, pr_metrics_nv
+        result['success'] = True
+        return result
 
     except Exception as e:
         logger.error(f"Error processing image {idx}: {e}")
-        return None, None, None, None
+        return result
+
+
+def save_results_to_csv(results: List[Dict[str, Any]], args) -> None:
+    """Save analysis results to CSV files."""
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Prepare data for CSV
+    csv_rows = []
+
+    for result in results:
+        if not result['success']:
+            continue
+
+        row = {'image_id': result['image_id']}
+
+        # Add VIB statistics
+        if result['vib_stats']:
+            for key, value in result['vib_stats'].items():
+                row[f'vib_{key.lower().replace(" ", "_")}'] = value
+
+        # Add NoVIB statistics
+        if result['novib_stats']:
+            for key, value in result['novib_stats'].items():
+                row[f'novib_{key.lower().replace(" ", "_")}'] = value
+
+        # Add VIB PR metrics
+        if result['vib_pr_metrics']:
+            for key, value in result['vib_pr_metrics'].items():
+                row[f'vib_{key.lower()}'] = value
+
+        # Add NoVIB PR metrics
+        if result['novib_pr_metrics']:
+            for key, value in result['novib_pr_metrics'].items():
+                row[f'novib_{key.lower()}'] = value
+
+        csv_rows.append(row)
+
+    if csv_rows:
+        df = pd.DataFrame(csv_rows)
+        csv_filename = f"{args.save_prefix}_{args.analysis}_{timestamp}.csv"
+        csv_path = os.path.join(args.output_dir, csv_filename)
+        df.to_csv(csv_path, index=False)
+        logger.info(f"Results saved to: {csv_path}")
+
+        # Print column info for user reference
+        print(f"\nCSV saved with {len(csv_rows)} rows and the following columns:")
+        for col in sorted(df.columns):
+            print(f"  - {col}")
+
+        return csv_path
+    else:
+        logger.warning("No valid results to save to CSV")
+        return None
 
 
 def main():
     args = parse_args()
 
     # Construct paths
-    vib_path = os.path.join(args.path, "harmeda/img_gray_10000/")
-    novib_path = os.path.join(args.path, "ev/img_gray_10000/")
+    vib_path = os.path.join(args.path, "harmeda/img_gray_33333/")
+    novib_path = os.path.join(args.path, "ev/img_gray_33333/")
     gt_path = args.gt_path if args.analysis in ("pr", "both") else None
 
     # Validate paths
@@ -161,15 +228,16 @@ def main():
         args.end_idx = min(len(vib_files), len(novib_files))
 
     indices = range(args.start_idx, args.end_idx)
-    logger.info(f"Processing {len(indices)} images from index {args.start_idx} to {args.end_idx - 1}")
+    logger.info(f"Processing {len(indices)} images from index {args.start_idx} to {args.end_idx-1}")
 
     # Storage for results
+    results = []
     vib_stats_all, novib_stats_all = [], []
     precisions, recalls, precisions_nv, recalls_nv = [], [], [], []
 
     # Process images with multiprocessing
     try:
-        with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 10)) as executor:
+        with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 8)) as executor:
             futures = [
                 executor.submit(process_image, idx, vib_path, novib_path, gt_path, args)
                 for idx in indices
@@ -177,18 +245,21 @@ def main():
 
             for i, future in enumerate(futures):
                 try:
-                    stats_vib, stats_nv, pr_metrics_vib, pr_metrics_nv = future.result()
+                    result = future.result()
+                    results.append(result)
 
-                    if stats_vib:
-                        vib_stats_all.append(stats_vib)
-                    if stats_nv:
-                        novib_stats_all.append(stats_nv)
-                    if pr_metrics_vib:
-                        precisions.append(pr_metrics_vib["Precision"])
-                        recalls.append(pr_metrics_vib["Recall"])
-                    if pr_metrics_nv:
-                        precisions_nv.append(pr_metrics_nv["Precision"])
-                        recalls_nv.append(pr_metrics_nv["Recall"])
+                    if result['success']:
+                        # Extract data for summary statistics (backward compatibility)
+                        if result['vib_stats']:
+                            vib_stats_all.append(result['vib_stats'])
+                        if result['novib_stats']:
+                            novib_stats_all.append(result['novib_stats'])
+                        if result['vib_pr_metrics']:
+                            precisions.append(result['vib_pr_metrics']["Precision"])
+                            recalls.append(result['vib_pr_metrics']["Recall"])
+                        if result['novib_pr_metrics']:
+                            precisions_nv.append(result['novib_pr_metrics']["Precision"])
+                            recalls_nv.append(result['novib_pr_metrics']["Recall"])
 
                     if (i + 1) % 10 == 0:
                         logger.info(f"Processed {i + 1}/{len(indices)} images")
@@ -203,16 +274,20 @@ def main():
         logger.error(f"Error in multiprocessing: {e}")
         return
 
-    # Generate summaries
+    # Save results to CSV
+    logger.info("Saving results to CSV...")
+    save_results_to_csv(results, args)
+
+    # Generate summaries (existing functionality)
     logger.info("Generating analysis summaries...")
 
     if args.analysis in ("continuity", "both"):
         if vib_stats_all and novib_stats_all:
             vib_summary = summarize_continuity_stats(vib_stats_all)
             novib_summary = summarize_continuity_stats(novib_stats_all)
-            print("\n" + "=" * 50)
+            print("\n" + "="*50)
             print("CONTINUITY ANALYSIS SUMMARY")
-            print("=" * 50)
+            print("="*50)
             print(f"VIB MODE (n={len(vib_stats_all)}):")
             for key, value in vib_summary.items():
                 print(f"  {key}: {value}")
@@ -224,9 +299,9 @@ def main():
 
     if args.analysis in ("pr", "both"):
         if precisions and recalls and precisions_nv and recalls_nv:
-            print("\n" + "=" * 50)
+            print("\n" + "="*50)
             print("PRECISION/RECALL ANALYSIS SUMMARY")
-            print("=" * 50)
+            print("="*50)
             print(f"VIB MODE - Precision: {np.mean(precisions):.3f}±{np.std(precisions):.3f}, "
                   f"Recall: {np.mean(recalls):.3f}±{np.std(recalls):.3f}")
             print(f"NO VIB MODE - Precision: {np.mean(precisions_nv):.3f}±{np.std(precisions_nv):.3f}, "

@@ -77,10 +77,10 @@ public:
                 event_to_build.x = x_new;
                 event_to_build.y = y_new;
                 event_to_build.p = 0;
-                /*if (current_t_sec - time_ > 0.001) {
+                if (current_t_sec - time_ > 0.001) {
                     amplitudes.emplace_back(tracker->getAmplitude());
                     time_ = current_t_sec;
-                }*/
+                }
                 return;
             }
 
@@ -161,7 +161,7 @@ public:
         for (const auto &a: amplitudes) {
             accum += (a - mean) * (a - mean);
         }
-        return std::sqrt(accum / amplitudes.size());
+        return std::sqrt(accum / (amplitudes.size() + 1));
     }
 
     std::unique_ptr<HasteWrapper<Metavision::EventCD>> tracker;
@@ -329,12 +329,12 @@ double test_depth(int argc, char *argv[]) {
             avg_amplitudes_front.push_back(tracker->avgAmplitude());
             std_amplitudes_front.push_back(tracker->stdAmplitude());
 //            std::cout << "Tracker front amplitude avg (front): " << tracker->avgAmplitude() << std::endl;
-//            std::cout << "Tracker front amplitude std (front): " << tracker->stdAmplitude() << std::endl;
+            std::cout << "Tracker front amplitude std (front): " << tracker->stdAmplitude() << std::endl;
         } else {
             avg_amplitudes_back.push_back(tracker->avgAmplitude());
             std_amplitudes_back.push_back(tracker->stdAmplitude());
 //            std::cout << "Tracker front amplitude avg (back): " << tracker->avgAmplitude() << std::endl;
-//            std::cout << "Tracker front amplitude std (back): " << tracker->stdAmplitude() << std::endl;
+            std::cout << "Tracker front amplitude std (back): " << tracker->stdAmplitude() << std::endl;
         }
     }
 //    std::cout << "Back size: " << avg_amplitudes_back.size() << ", Front size: " << avg_amplitudes_front.size()
@@ -345,11 +345,11 @@ double test_depth(int argc, char *argv[]) {
     std::cout << "Average amplitude front: " << avg_front << " std: " << std_front << std::endl;
     std::cout << "Average amplitude back: " << avg_back << " std: " << std_back << std::endl;
     std::cout << "Amplitude ratio (back/front): " << avg_back / avg_front << std::endl;
-    // compute the error on the ratio
+    // compute the error on the ratio using proper error propagation
     double ratio_error = std::sqrt(std_front * std_front / (avg_front * avg_front) +
                                    std_back * std_back / (avg_back * avg_back)) *
                          (avg_back / avg_front);
-//    std::cout << "Amplitude ratio error: " << ratio_error << std::endl;
+    std::cout << "Amplitude ratio error: " << ratio_error << std::endl;
 
     return avg_back / avg_front;
 }
@@ -359,21 +359,22 @@ int main(int argc, char *argv[]) {
     std::signal(SIGINT, signal_handler);
     std::atexit(print_on_exit);
 
+    std::cout << "Starting depth estimation test..." << std::endl;
+
     std::vector<double> ratios;
     for (int i = 0; i < 10; ++i) {
         ratios.push_back(test_depth(argc, argv));
     }
 
-    // statistics
+    // Fixed statistics calculation with proper sample standard deviation
     double avg_ratio = std::accumulate(ratios.begin(), ratios.end(), 0.0) / ratios.size();
     double std_ratio = 0.0;
     for (const auto &ratio: ratios) {
         std_ratio += (ratio - avg_ratio) * (ratio - avg_ratio);
     }
-    std_ratio = std::sqrt(std_ratio / ratios.size());
+    std_ratio = std::sqrt(std_ratio / (ratios.size() - 1));
     std::cout << " ------ Statistics of ratios ------ " << std::endl << std::endl;
-    std::cout << "Average ratio (front/back): " << avg_ratio << std::endl;
-    std::cout << "3 Standard deviation of ratio (front/back): " << 3 * std_ratio << std::endl;
+    std::cout << "Average ratio (back/front): " << avg_ratio << "\\pm" << std_ratio << std::endl;
 
     return 0;
 }

@@ -88,7 +88,7 @@ int main(int argc, char *argv[]) {
     unsigned short t_centre_x = 0, t_centre_y = 0;
 
     // Initialize undistortion
-    Undistort undistort(params.params->calib_file, width, height);
+    Undistort undistort(params.params->calib_file); //, width, height);
 
     // Setup CD frame generator (similar to original)
     std::mutex cd_frame_mutex;
@@ -202,11 +202,18 @@ int main(int argc, char *argv[]) {
             for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
                 last_event_t = ev->t;
 
-                undistort(ev->x, ev->y, x_undistorted, y_undistorted, not_in_frame);
+//                undistort(ev->x, ev->y, x_undistorted, y_undistorted, not_in_frame);
 //             make sure the undistorted coordinates are within the image bounds
-                if (not_in_frame) {
+//                if (not_in_frame) {
+//                    continue; // Skip events that are out of bounds
+//                }
+                undistort(ev->x, ev->y, x_undistorted, y_undistorted);
+//             make sure the undistorted coordinates are within the image bounds
+                if (x_undistorted < 0 || x_undistorted >= width || y_undistorted < 0 || y_undistorted >= height) {
                     continue; // Skip events that are out of bounds
                 }
+
+
                 auto &event_to_build = compensated_events.emplace_back();
                 event_to_build.x = x_undistorted;
                 event_to_build.y = y_undistorted;

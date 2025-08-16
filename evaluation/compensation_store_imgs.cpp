@@ -3,8 +3,8 @@
 // Based on Metavision SDK patterns
 //
 
-#define STORE
-#define BINARY
+//#define STORE
+//#define BINARY
 
 #include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/algorithms/event_buffer_reslicer_algorithm.h>
@@ -83,18 +83,21 @@ int main(int argc, char *argv[]) {
     // create folder if not exists
 #ifdef BINARY
     std::string output_images =
-            params.params->output_folder + "img_bin_" + std::to_string(params.params->time_window_us) + "/";
+            params.params->output_folder + "img_bin_" + std::to_string(params.params->time_window_us);
 #else
     std::string output_images =
-            params.params->output_folder + "img_gray_" + std::to_string(params.params->time_window_us) + "/";
+            params.params->output_folder + "img_gray_" + std::to_string(params.params->time_window_us);
 #endif
     if (!std::filesystem::exists(output_images)) {
-        if(std::filesystem::create_directories(output_images)) {
+        if (std::filesystem::create_directories(output_images)) {
             std::cout << "Output directory created: " << output_images << std::endl;
         } else {
             std::cerr << "Failed to create output directory: " << output_images << std::endl;
             return -1;
         }
+    } else {
+        std::cout << "Output directory already exists: " << output_images << std::endl;
+//        return 0;
     }
     // print output folder
     std::cout << "Output images will be saved in: " << output_images << std::endl;
@@ -102,13 +105,12 @@ int main(int argc, char *argv[]) {
     const auto height = params.camera.geometry().height();
 
     const int size = haste::HypothesisPatchTracker::kPatchSize;
-    const int half_size = size / 2;
 
     const cv::Scalar color_tracker(0, 255, 0); // Green color for tracker visualization
     unsigned short t_centre_x = 0, t_centre_y = 0;
 
     // Initialize undistortion
-    Undistort undistort(params.params->calib_file);
+    Undistort undistort(params.params->calib_file); //, width, height);
 
     // Setup CD frame generator (similar to original)
     std::mutex cd_frame_mutex;
@@ -251,7 +253,7 @@ int main(int argc, char *argv[]) {
             }
 
             // Feed events to frame generator and rate estimator
-            if (ev->t - slice_initial_time > params.params->time_window_us) { // 10 ms
+            if (ev->t - slice_initial_time > params.params->time_window_us) {
 #ifndef BINARY
                 output_image.convertTo(output_image, CV_8UC1);
                 cv::normalize(output_image, output_image, 0, 255, cv::NORM_MINMAX);
@@ -259,7 +261,7 @@ int main(int argc, char *argv[]) {
                 output_image = 255 - output_image;
                 cv::applyColorMap(output_image, output_image, cv::COLORMAP_BONE);
 #endif
-                cv::imwrite(output_images + std::to_string(counter) + ".png",
+                cv::imwrite(output_images + "/" + std::to_string(counter) + ".png",
                             output_image);
 #ifdef BINARY
                 cv::imshow("img bin", output_image);
@@ -275,14 +277,14 @@ int main(int argc, char *argv[]) {
 #else
                 output_image = cv::Mat::zeros(cv::Size(width, height), CV_16UC1);
                 uint16_t &count_ref = output_image.at<uint16_t>(event_to_build.y, event_to_build.x);
-                if (count_ref < 65535) count_ref++;
+                if (count_ref < std::numeric_limits<uint16_t>::max()) count_ref++;
 #endif
             } else {
 #ifdef BINARY
                 output_image.at<uchar>(event_to_build.y, event_to_build.x) = 255;
 #else
                 uint16_t &count_ref = output_image.at<uint16_t>(event_to_build.y, event_to_build.x);
-                if (count_ref < 65535) count_ref++;
+                if (count_ref < std::numeric_limits<uint16_t>::max()) count_ref++;
 #endif
             }
         }
@@ -300,7 +302,7 @@ int main(int argc, char *argv[]) {
 
     end_time = std::chrono::steady_clock::now();
     // Print final results
-    cv::imwrite(output_images + std::to_string(counter) + ".png",
+    cv::imwrite(output_images + "/" + std::to_string(counter) + ".png",
                 output_image);
 
     // Cleanup

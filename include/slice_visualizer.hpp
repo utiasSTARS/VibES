@@ -21,12 +21,12 @@ namespace HARMEDA {
         SliceVisualizer(int h, int w, int axis_value, Axis axis = X_AXIS, int margin = 3) : _axis(axis),
                                                                                             _margin(margin) {
             // Initialize the visualizer with the specified axis
-            _frame = cv::Mat::zeros(h, w, CV_8UC3);
+            _frame = cv::Mat::ones(h, w, CV_8UC3);
             const int max_time_width = 1920;
             if (axis == X_AXIS) {
-                _frame_side = cv::Mat::zeros(w, max_time_width, CV_8UC3);
+                _frame_side = cv::Mat::ones(w, max_time_width, CV_8UC3);
             } else {
-                _frame_side = cv::Mat::zeros(h, max_time_width, CV_8UC3);
+                _frame_side = cv::Mat::ones(h, max_time_width, CV_8UC3);
             }
 
             // Add reference lines at regular intervals (every 0.1 seconds)
@@ -75,7 +75,7 @@ namespace HARMEDA {
             cv::Mat frame_copy;
             _frame.copyTo(frame_copy);
             // reset the frame to black
-            _frame.setTo(cv::Scalar(0, 0, 0));
+            _frame.setTo(cv::Scalar(255, 255, 255));
             return frame_copy;
         }
 
@@ -105,7 +105,7 @@ namespace HARMEDA {
                 _last_scroll_time = t;
             }
 
-            auto color = (p == 0) ? cv::Vec3b(255, 0, 0) : cv::Vec3b(0, 0, 255); // Blue for p=0, Red for p=1
+            auto color = (p == 0) ? cv::Vec3b(200, 126, 64) : cv::Vec3b(0, 0, 0); // Blue for p=0, Red for p=1
 
             // Update the main frame (spatial view)
 //            if (_axis == X_AXIS && x >= _lower_bound && x <= _upper_bound) {
@@ -137,7 +137,7 @@ namespace HARMEDA {
                 // Shift all pixels in this row one position to the right
                 std::memmove(row_ptr + 1, row_ptr, (_frame_side.cols - 1) * sizeof(cv::Vec3b));
                 // Clear the first pixel in the row (where new data will go)
-                row_ptr[0] = cv::Vec3b(0, 0, 0);
+                row_ptr[0] = cv::Vec3b(255, 255, 255);
             }
 
             // Update current time column to point to the leftmost column
@@ -155,7 +155,7 @@ namespace HARMEDA {
             for (int col = line_interval; col < _frame_side.cols; col += line_interval) {
                 // Only draw on every 10th row to make lines less intrusive
                 for (int row = 0; row < _frame_side.rows; row += 10) {
-                    if (_frame_side.at<cv::Vec3b>(row, col) == cv::Vec3b(0, 0, 0)) {
+                    if (_frame_side.at<cv::Vec3b>(row, col) == cv::Vec3b(255, 255, 255)) {
                         _frame_side.at<cv::Vec3b>(row, col) = line_color;
                     }
                 }

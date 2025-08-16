@@ -46,30 +46,30 @@ void updateSliceVisualizers(HARMEDA::SliceVisualizer &slice_x, HARMEDA::SliceVis
                             std::shared_ptr<HasteWrapper<Metavision::EventCD>> &tracker,
                             double current_time) {
 
-//    if (auto pair = tracker->getEstimate(current_time); pair.has_value()) {
-//        auto [x_pred, y_pred] = *pair;
-//
-//        slice_y.editFrame([&](cv::Mat &frame) {
-//            cv::circle(frame, cv::Point(slice_y.time_value, static_cast<int>(y_pred)), 1, cv::Scalar(125, 255, 0), -1);
-//        });
-//
-////        slice_x.editFrame([&](cv::Mat &frame) {
-////            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(x_pred)), 1, cv::Scalar(125, 255, 0), -1);
-////        });
-//    }
-    if (auto pair = tracker->getShift(); pair.has_value()) {
+    if (auto pair = tracker->getEstimate(current_time); pair.has_value()) {
         auto [x_pred, y_pred] = *pair;
 
         slice_y.editFrame([&](cv::Mat &frame) {
-            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(y_pred)), 1, cv::Scalar(255, 209, 100),
-                       -1);
+            cv::circle(frame, cv::Point(slice_y.time_value, static_cast<int>(y_pred)), 1, cv::Scalar(125, 255, 0), -1);
         });
 
 //        slice_x.editFrame([&](cv::Mat &frame) {
-//            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(x_pred)), 1, cv::Scalar(255, 255, 255),
-//                       -1);
+//            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(x_pred)), 1, cv::Scalar(125, 255, 0), -1);
 //        });
     }
+//    if (auto pair = tracker->getShift(); pair.has_value()) {
+//        auto [x_pred, y_pred] = *pair;
+//
+//        slice_y.editFrame([&](cv::Mat &frame) {
+//            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(y_pred)), 1, cv::Scalar(225, 37, 229),
+//                       -1);
+//        });
+//
+////        slice_x.editFrame([&](cv::Mat &frame) {
+////            cv::circle(frame, cv::Point(slice_x.time_value, static_cast<int>(x_pred)), 1, cv::Scalar(255, 255, 255),
+////                       -1);
+////        });
+//    }
 }
 
 void updateTrackerVisualization(HARMEDA::SliceVisualizer &slice_x, HARMEDA::SliceVisualizer &slice_y,
@@ -135,7 +135,7 @@ int main(int argc, char *argv[]) {
     unsigned short t_centre_x = 0, t_centre_y = 0;
 
     // Initialize undistortion
-    Undistort undistort(params.params->calib_file, width, height);
+    Undistort undistort(params.params->calib_file); // , width, height);
 
     // Setup CD frame generator (similar to original)
     std::mutex cd_frame_mutex;
@@ -303,8 +303,8 @@ int main(int argc, char *argv[]) {
 //              slice_visualizer_x.feed(x_undistorted, y_undistorted, ev->p, ev->t);
 //                slice_visualizer_y.feed(x_undistorted, y_undistorted, ev->p, ev->t);
             }
-            slice_visualizer_y.feed(event_to_build.x, event_to_build.y, ev->p, ev->t);
-//            slice_visualizer_y.feed(x_undistorted, y_undistorted, ev->p, ev->t);
+//            slice_visualizer_y.feed(event_to_build.x, event_to_build.y, ev->p, ev->t);
+            slice_visualizer_y.feed(x_undistorted, y_undistorted, ev->p, ev->t);
             if (tracker) {
                 updateSliceVisualizers(slice_visualizer_x, slice_visualizer_y, tracker, current_t_sec);
             }
