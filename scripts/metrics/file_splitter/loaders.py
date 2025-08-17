@@ -1,0 +1,803 @@
+import pandas as pd
+import zipfile
+from os.path import splitext
+import numpy as np
+import tqdm
+from .timers import Timer
+import h5py
+import pandas as pd
+import os
+
+
+def get_optimal_duration_event_reader(
+        path_to_event_file,
+        duration_ms=50.0,
+        start_index=0,
+        x_min=0,
+        y_min=0,
+        x_max=None,
+        y_max=None,
+        chunk_size=30000000,
+):
+    """
+    Automatically selects between FixedDurationEventReader and FixedDurationChunkEventReader
+    based on the file size of the HDF5 file.
+
+    For files < 2GB: Uses FixedDurationEventReader (loads all events into memory)
+    For files >= 2GB: Uses FixedDurationChunkEventReader (memory-efficient chunked reading)
+
+    Args:
+        path_to_event_file: Path to the event file
+        duration_ms: Duration of each event window in milliseconds
+        start_index: Starting index to skip initial events
+        x_min, y_min, x_max, y_max: Coordinate filtering bounds
+        chunk_size: Number of events per chunk (only used for chunked reader)
+
+    Returns:
+        Event reader instance (either FixedDurationEventReader or FixedDurationChunkEventReader)
+    """
+    file_extension = splitext(path_to_event_file)[1]
+
+    # For non-HDF5 files, always use FixedDurationEventReader
+    if file_extension not in [".hdf5", ".h5"]:
+        print("Non-HDF5 file detected, using FixedDurationEventReader")
+        return FixedDurationEventReader(
+            path_to_event_file=path_to_event_file,
+            duration_ms=duration_ms,
+            start_index=start_index,
+            x_min=x_min,
+            y_min=y_min,
+            x_max=x_max,
+            y_max=y_max,
+        )
+
+    # Check file size for HDF5 files
+    file_size_bytes = os.path.getsize(path_to_event_file)
+    file_size_gb = file_size_bytes / (1024**3)  # Convert to GB
+    size_threshold_gb = 2.0
+
+    print(f"HDF5 file size: {file_size_gb:.2f} GB")
+
+    if file_size_gb < size_threshold_gb:
+        print(
+            f"File size < {size_threshold_gb} GB, using FixedDurationEventReader (loads all events into memory)"
+        )
+        return FixedDurationEventReader(
+            path_to_event_file=path_to_event_file,
+            duration_ms=duration_ms,
+            start_index=start_index,
+            x_min=x_min,
+            y_min=y_min,
+            x_max=x_max,
+            y_max=y_max,
+        )
+    else:
+        print(
+            f"File size >= {size_threshold_gb} GB, using FixedDurationChunkEventReader (memory-efficient chunked reading)"
+        )
+        return FixedDurationChunkEventReader(
+            path_to_event_file=path_to_event_file,
+            duration_ms=duration_ms,
+            start_index=start_index,
+            x_min=x_min,
+            y_min=y_min,
+            x_max=x_max,
+            y_max=y_max,
+            chunk_size=chunk_size,
+        )
+
+
+class FixedSizeEventReader:
+    """
+    Reads events from a '.txt', '.zip', or '.hdf5' file, and packages the events into
+    non-overlapping event windows, each containing a fixed number of events.
+    """
+
+    def __init__(
+            self,
+            path_to_event_file,
+            num_events=10000,
+            start_index=0,
+            x_min=0,
+            y_min=0,
+            x_max=None,
+            y_max=None,
+    ):
+        print("Will use fixed size event windows with {} events".format(num_events))
+        print("Output frame rate: variable")
+
+        file_extension = splitext(path_to_event_file)[1]
+        assert file_extension in [".txt", ".zip", ".hdf5", ".h5"]
+
+        self.is_hdf5_file = file_extension in [".hdf5", ".h5"]
+        self.num_events = num_events
+        self.start_index = start_index
+        self.path_to_event_file = path_to_event_file
+
+        # Coordinate bounds for filtering (optional)
+        self.x_min = x_min
+        self.y_min = y_min
+        self.x_max = x_max
+        self.y_max = y_max
+
+        if self.is_hdf5_file:
+            # For HDF5, just open the file and get dataset info
+            self._init_hdf5()
+            self.current_event_index = start_index
+            self._hdf5_buffer = []  # Buffer for filtered events
+            self._buffer_start_idx = 0  # Starting index of current buffer in file
+        else:
+            # For text/zip files, use pandas chunked reading (original implementation)
+            self.iterator = pd.read_csv(
+                path_to_event_file,
+                delim_whitespace=True,
+                header=None,
+                names=["t", "x", "y", "pol"],
+                dtype={"t": np.float64, "x": np.int16, "y": np.int16, "pol": np.int16},
+                engine="c",
+                skiprows=start_index + 1,
+                chunksize=num_events,
+                nrows=None,
+                memory_map=True,
+            )
+
+    def _init_hdf5(self):
+        """Initialize HDF5 file reading without loading all data"""
+        print("Initializing HDF5 reader...")
+        self._hdf5_file = h5py.File(self.path_to_event_file, "r")
+        self._hdf5_dataset = self._hdf5_file["CD/events"]
+        self._total_events = len(self._hdf5_dataset)
+        print(f"HDF5 file contains {self._total_events} total events")
+
+        # Determine chunk size for efficient reading (balance memory vs I/O)
+        # Read larger chunks to minimize I/O overhead, but not too large to consume memory
+        self._chunk_size = max(self.num_events * 2, 50000)
+
+    def _read_hdf5_chunk(self, start_idx, chunk_size):
+        """Read a chunk of events from HDF5 file and apply filtering"""
+        end_idx = min(start_idx + chunk_size, self._total_events)
+        if start_idx >= self._total_events:
+            return np.array([])
+
+        # Read chunk from HDF5
+        raw_chunk = self._hdf5_dataset[start_idx:end_idx]
+
+        # Apply filtering and format conversion
+        filtered_events = []
+        for e in raw_chunk:
+            x, y, p, ts = e
+
+            # Apply coordinate filtering if specified
+            if self.x_max is not None and self.y_max is not None:
+                if (
+                        x < self.x_min
+                        or y < self.y_min
+                        or x >= self.x_max
+                        or y >= self.y_max
+                ):
+                    continue
+
+            # Store as [timestamp_in_seconds, x_adjusted, y_adjusted, polarity]
+            filtered_events.append(
+                [
+                    ts,
+                    x - self.x_min,  # Adjust x coordinate
+                    y - self.y_min,  # Adjust y coordinate
+                    p,
+                    ]
+            )
+
+        if filtered_events:
+            events_array = np.array(filtered_events, dtype=np.float64)
+            # Convert x, y, pol columns to int16 to match pandas reader behavior
+            events_array[:, 1] = events_array[:, 1].astype(np.int16)  # x
+            events_array[:, 2] = events_array[:, 2].astype(np.int16)  # y
+            events_array[:, 3] = events_array[:, 3].astype(np.int16)  # pol
+            return events_array
+        else:
+            return np.array([])
+
+    def _ensure_buffer_has_events(self, required_events):
+        """Ensure buffer has at least required_events available"""
+        while len(self._hdf5_buffer) < required_events:
+            # Calculate where to read from in the file
+            file_idx = self._buffer_start_idx + len(self._hdf5_buffer)
+
+            if file_idx >= self._total_events:
+                # No more events in file
+                break
+
+            # Read next chunk
+            chunk = self._read_hdf5_chunk(file_idx, self._chunk_size)
+
+            if len(chunk) == 0:
+                # No events after filtering in this chunk, try next chunk
+                self._buffer_start_idx = file_idx + self._chunk_size
+                continue
+
+            # Add to buffer
+            if len(self._hdf5_buffer) == 0:
+                self._hdf5_buffer = chunk.tolist()
+            else:
+                self._hdf5_buffer.extend(chunk.tolist())
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.is_hdf5_file:
+            return self._next_hdf5_window()
+        else:
+            return self._next_text_window()
+
+    def _next_hdf5_window(self):
+        """Get next fixed-size event window from HDF5 data"""
+        # Skip to start_index if this is the first call
+        if hasattr(self, "_first_call"):
+            pass
+        else:
+            self._first_call = False
+            # Fast-forward to start_index by updating buffer position
+            if self.start_index > 0:
+                self._buffer_start_idx = self.start_index
+
+        # Ensure we have enough events in buffer
+        self._ensure_buffer_has_events(self.num_events)
+
+        # Check if we have enough events for a full window
+        if len(self._hdf5_buffer) < self.num_events:
+            # Clean up and raise StopIteration
+            self._hdf5_file.close()
+            raise StopIteration
+
+        # Extract the event window
+        event_window = np.array(self._hdf5_buffer[: self.num_events], dtype=np.float64)
+
+        # Remove used events from buffer
+        self._hdf5_buffer = self._hdf5_buffer[self.num_events :]
+        self._buffer_start_idx += self.num_events
+
+        # Ensure proper data types
+        event_window[:, 1] = event_window[:, 1].astype(np.int16)  # x
+        event_window[:, 2] = event_window[:, 2].astype(np.int16)  # y
+        event_window[:, 3] = event_window[:, 3].astype(np.int16)  # pol
+
+        return event_window
+
+    def _next_text_window(self):
+        """Get next fixed-size event window from text/zip file (original implementation)"""
+        with Timer("Reading event window from file"):
+            event_window = self.iterator.__next__().values
+        return event_window
+
+    def __del__(self):
+        """Clean up HDF5 file handle"""
+        if self.is_hdf5_file and hasattr(self, "_hdf5_file"):
+            try:
+                self._hdf5_file.close()
+            except:
+                pass
+
+
+class FixedDurationEventReader:
+    """
+    Reads events from a '.txt', '.zip', or '.hdf5' file, and packages the events into
+    non-overlapping event windows, each of a fixed duration.
+
+    **Note**: HDF5 files are now read efficiently using pandas DataFrame approach.
+              Text/zip files maintain the original line-by-line reading for memory efficiency.
+    """
+
+    def __init__(
+            self,
+            path_to_event_file,
+            duration_ms=50.0,
+            start_index=0,
+            x_min=0,
+            y_min=0,
+            x_max=None,
+            y_max=None,
+    ):
+        print(
+            "Will use fixed duration event windows of size {:.2f} ms".format(
+                duration_ms
+            )
+        )
+        print("Output frame rate: {:.1f} Hz".format(1000.0 / duration_ms))
+
+        file_extension = splitext(path_to_event_file)[1]
+        assert file_extension in [".txt", ".zip", ".hdf5", ".h5"]
+
+        self.is_zip_file = file_extension == ".zip"
+        self.is_hdf5_file = file_extension in [".hdf5", ".h5"]
+        self.path_to_event_file = path_to_event_file
+
+        # Coordinate bounds for filtering (optional)
+        self.x_min = x_min
+        self.y_min = y_min
+        self.x_max = x_max
+        self.y_max = y_max
+
+        self.duration_s = duration_ms / 1000.0
+        self.duration_us = duration_ms * 1000.0  # For HDF5 microsecond timestamps
+        self.last_stamp = None
+        self.start_index = start_index
+
+        if self.is_hdf5_file:
+            # Use efficient pandas-based loading for HDF5
+            self._load_hdf5_events_efficient2()
+            self.current_index = 0
+            self.timestamps_in_seconds = None
+        else:
+            # Initialize file readers for txt/zip files
+            if self.is_zip_file:  # '.zip'
+                self.zip_file = zipfile.ZipFile(path_to_event_file)
+                files_in_archive = self.zip_file.namelist()
+                assert (
+                        len(files_in_archive) == 1
+                )  # make sure there is only one text file in the archive
+                self.event_file = self.zip_file.open(files_in_archive[0], "r")
+            else:
+                self.event_file = open(path_to_event_file, "r")
+
+            # ignore header + the first start_index lines
+            for i in range(1 + start_index):
+                self.event_file.readline()
+
+    def _load_hdf5_events_efficient(self):
+        """Load HDF5 events efficiently with random subsampling and optional ROI filtering"""
+        with h5py.File(self.path_to_event_file, "r") as f:
+            if "CD/events" not in f:
+                raise ValueError("Dataset 'CD/events' not found in HDF5 file")
+
+            events_dataset = f["CD/events"]
+            total = len(events_dataset)
+            print(f"Total events in file: {total}")
+
+            events = events_dataset[5 * total // 6 :]
+            print("Finished reading raw event data into structured array")
+
+        # Convert to DataFrame directly (no field-by-field split)
+        df = pd.DataFrame.from_records(events)
+
+        # Rename to standard column names
+        df.rename(columns={"t": "timestamp", "p": "polarity"}, inplace=True)
+
+        # Coordinate filtering (if requested)
+        if self.x_max is not None and self.y_max is not None:
+            mask = (
+                    (df["x"] >= self.x_min)
+                    & (df["x"] < self.x_max)
+                    & (df["y"] >= self.y_min)
+                    & (df["y"] < self.y_max)
+            )
+            df = df[mask].reset_index(drop=True)
+            print(f"After coordinate filtering: {len(df)} events")
+
+        # Offset coordinates
+        df["x"] -= self.x_min
+        df["y"] -= self.y_min
+
+        # Apply start index
+        if self.start_index > 0:
+            df = df.iloc[self.start_index :].reset_index(drop=True)
+            print(f"After start_index filtering: {len(df)} events")
+
+        # Sort by time for consistent iteration
+        df = df.sort_values("timestamp").reset_index(drop=True)
+
+        self.df = df
+        print(f"Loaded {len(self.df)} events into memory.")
+        if len(df) > 0:
+            print(f"Time range: {df['timestamp'].min()} to {df['timestamp'].max()}")
+
+    def _load_hdf5_events_efficient2(self):
+        """Load HDF5 events efficiently with random subsampling and optional ROI filtering"""
+        df = pd.read_hdf(self.path_to_event_file, key="CD/events")
+
+        # Rename to standard column names
+        df.rename(columns={"t": "timestamp", "p": "polarity"}, inplace=True)
+
+        # Coordinate filtering (if requested)
+        if self.x_max is not None and self.y_max is not None:
+            mask = (
+                    (df["x"] >= self.x_min)
+                    & (df["x"] < self.x_max)
+                    & (df["y"] >= self.y_min)
+                    & (df["y"] < self.y_max)
+            )
+            df = df[mask].reset_index(drop=True)
+            print(f"After coordinate filtering: {len(df)} events")
+
+        # Offset coordinates
+        df["x"] -= self.x_min
+        df["y"] -= self.y_min
+
+        # Apply start index
+        if self.start_index > 0:
+            df = df.iloc[self.start_index :].reset_index(drop=True)
+            print(f"After start_index filtering: {len(df)} events")
+
+        # Sort by time for consistent iteration
+        df = df.sort_values("timestamp").reset_index(drop=True)
+
+        self.df = df
+        print(f"Loaded {len(self.df)} events into memory.")
+        if len(df) > 0:
+            print(f"Time range: {df['timestamp'].min()} to {df['timestamp'].max()}")
+
+    def _parse_events_structure(self, all_events):
+        """Parse the structure of events data (structured vs regular array)."""
+        if hasattr(all_events.dtype, "names") and all_events.dtype.names:
+            # Structured array with named fields
+            print(f"Event fields: {all_events.dtype.names}")
+            return {field: all_events[field] for field in all_events.dtype.names}
+        else:
+            # Regular array - assume columns are [x, y, p, t] or [t, x, y, p]
+            print("Events are in regular array format")
+            if all_events.shape[1] >= 4:
+                # Try to detect timestamp column (usually much larger values)
+                col_means = np.mean(all_events, axis=0)
+                timestamp_col = np.argmax(
+                    col_means
+                )  # Timestamp usually has largest values
+
+                if timestamp_col == 0:  # [t, x, y, p]
+                    return {
+                        "t": all_events[:, 0],
+                        "x": all_events[:, 1],
+                        "y": all_events[:, 2],
+                        "p": all_events[:, 3],
+                    }
+                else:  # [x, y, p, t]
+                    return {
+                        "x": all_events[:, 0],
+                        "y": all_events[:, 1],
+                        "p": all_events[:, 2],
+                        "t": all_events[:, 3],
+                    }
+            else:
+                raise ValueError(f"Unexpected event array shape: {all_events.shape}")
+
+    def _create_standardized_dataframe(self, df_dict):
+        """Create DataFrame with standardized column names."""
+        field_mapping = {
+            "t": "timestamp",
+            "time": "timestamp",
+            "ts": "timestamp",
+            "x": "x",
+            "y": "y",
+            "p": "polarity",
+            "pol": "polarity",
+            "polarity": "polarity",
+        }
+
+        standardized_dict = {}
+        for field, data in df_dict.items():
+            standard_name = field_mapping.get(field, field)
+            standardized_dict[standard_name] = data
+
+        df = pd.DataFrame(standardized_dict)
+
+        # Validate required columns
+        if "timestamp" not in df.columns:
+            raise ValueError("No timestamp column found in event data")
+        if "x" not in df.columns or "y" not in df.columns:
+            raise ValueError("No x,y coordinate columns found in event data")
+
+        return df
+
+    def __iter__(self):
+        return self
+
+    def __del__(self):
+        if hasattr(self, "zip_file") and self.is_zip_file:
+            self.zip_file.close()
+
+        if hasattr(self, "event_file") and not self.is_hdf5_file:
+            self.event_file.close()
+
+    def __next__(self):
+        if self.is_hdf5_file:
+            return self._next_hdf5_window_efficient()
+        else:
+            return self._next_text_window()
+
+    def _next_hdf5_window_efficient(self):
+        """Get next event window from HDF5 data using efficient pandas operations"""
+        if len(self.df) == 0:
+            raise StopIteration
+
+        # Initialize last_stamp on first call - HDF5 timestamps are in microseconds
+        if self.last_stamp is None:
+            # Convert first timestamp from microseconds to seconds
+            self.last_stamp = self.df["timestamp"].iloc[0] / 1e6
+            # Pre-convert all timestamps to seconds for efficiency
+            self.timestamps_in_seconds = self.df["timestamp"].values / 1e6
+            self.current_index = 0
+
+        if self.current_index >= len(self.df):
+            raise StopIteration
+
+        # Collect events within the duration window
+        event_list = []
+        window_end = self.last_stamp + self.duration_s
+
+        while self.current_index < len(self.df):
+            event_timestamp = self.timestamps_in_seconds[self.current_index]
+
+            if event_timestamp > window_end:
+                # This event starts the next window
+                self.last_stamp = event_timestamp
+                break
+
+            # Add event to current window
+            row = self.df.iloc[self.current_index]
+            x_coord = row["x"]
+            y_coord = row["y"]
+            polarity = row.get("polarity", 1)  # Default to 1 if no polarity
+
+            event_list.append([event_timestamp, x_coord, y_coord, polarity])
+            self.current_index += 1
+
+        if not event_list:
+            raise StopIteration
+
+        return np.array(event_list)
+
+    def _next_text_window(self):
+        """Get next event window from text/zip file (original implementation)"""
+        event_list = []
+        for line in self.event_file:
+            if self.is_zip_file:
+                line = line.decode("utf-8")
+            t, x, y, pol = line.split(" ")
+            t, x, y, pol = float(t), int(x), int(y), int(pol)
+
+            # Apply coordinate filtering
+            if self.x_max is not None and self.y_max is not None:
+                if (
+                        x < self.x_min
+                        or y < self.y_min
+                        or x >= self.x_max
+                        or y >= self.y_max
+                ):
+                    continue
+
+            # Adjust coordinates by offset
+            x_adj = x - self.x_min
+            y_adj = y - self.y_min
+
+            event_list.append([t, x_adj, y_adj, pol])
+
+            if self.last_stamp is None:
+                self.last_stamp = t
+            if t > self.last_stamp + self.duration_s:
+                self.last_stamp = t
+                event_window = np.array(event_list)
+                return event_window
+
+        raise StopIteration
+
+
+class FixedDurationChunkEventReader:
+    """
+    Reads events from a '.hdf5' file in chunks, and packages the events into
+    non-overlapping event windows, each of a fixed duration.
+
+    This reader is memory-efficient for very large HDF5 files as it reads
+    events in configurable chunks rather than loading the entire file into memory.
+    """
+
+    def __init__(
+            self,
+            path_to_event_file,
+            duration_ms=50.0,
+            start_index=0,
+            x_min=0,
+            y_min=0,
+            x_max=None,
+            y_max=None,
+            chunk_size=300000000,  # Default 300 million events per chunk
+    ):
+        print(
+            "Will use fixed duration event windows of size {:.2f} ms".format(
+                duration_ms
+            )
+        )
+        print("Output frame rate: {:.1f} Hz".format(1000.0 / duration_ms))
+        print(f"Using chunk size: {chunk_size} events")
+
+        file_extension = splitext(path_to_event_file)[1]
+        assert file_extension in [
+            ".hdf5",
+            ".h5",
+        ], "FixedDurationChunkEventReader only supports HDF5 files"
+
+        self.path_to_event_file = path_to_event_file
+        self.chunk_size = chunk_size
+
+        # Coordinate bounds for filtering (optional)
+        self.x_min = x_min
+        self.y_min = y_min
+        self.x_max = x_max
+        self.y_max = y_max
+
+        self.duration_s = duration_ms / 1000.0
+        self.last_stamp = None
+        self.start_index = start_index
+
+        # Initialize HDF5 file and chunk reading
+        self._init_hdf5_chunked()
+
+        # State for chunk-based processing
+        self._current_chunk_index = 0
+        self._current_chunk_data = None
+        self._current_chunk_position = 0
+        self._event_buffer = []  # Buffer for events that span chunk boundaries
+        self._finished = False
+
+    def _init_hdf5_chunked(self):
+        """Initialize HDF5 file for chunked reading"""
+        self._hdf5_file = h5py.File(self.path_to_event_file, "r")
+        if "CD/events" not in self._hdf5_file:
+            raise ValueError("Dataset 'CD/events' not found in HDF5 file")
+
+        self._events_dataset = self._hdf5_file["CD/events"]
+        self._total_events = len(self._events_dataset)
+        print(f"Total events in HDF5 file: {self._total_events}")
+
+        # Calculate starting position considering start_index
+        self._file_position = self.start_index
+        if self._file_position >= self._total_events:
+            print("Warning: start_index exceeds total events in file")
+            self._finished = True
+
+    def _load_next_chunk(self):
+        """Load the next chunk of events from HDF5 file"""
+        if self._file_position >= self._total_events:
+            self._current_chunk_data = None
+            return False
+
+        # Calculate chunk boundaries
+        chunk_start = self._file_position
+        chunk_end = min(chunk_start + self.chunk_size, self._total_events)
+
+        print(f"Loading chunk: events {chunk_start} to {chunk_end-1}")
+
+        # Read chunk from HDF5
+        raw_chunk = self._events_dataset[chunk_start:chunk_end]
+
+        # Convert to DataFrame with standard column names
+        df = pd.DataFrame.from_records(raw_chunk)
+        df.rename(columns={"t": "timestamp", "p": "polarity"}, inplace=True)
+
+        # Apply coordinate filtering if specified
+        if self.x_max is not None and self.y_max is not None:
+            mask = (
+                    (df["x"] >= self.x_min)
+                    & (df["x"] < self.x_max)
+                    & (df["y"] >= self.y_min)
+                    & (df["y"] < self.y_max)
+            )
+            df = df[mask].reset_index(drop=True)
+
+        # Offset coordinates
+        df["x"] -= self.x_min
+        df["y"] -= self.y_min
+
+        # Sort by timestamp to ensure proper temporal order
+        df = df.sort_values("timestamp").reset_index(drop=True)
+
+        # Convert timestamps to seconds for consistency with other readers
+        df["timestamp"] = df["timestamp"] / 1e6
+
+        self._current_chunk_data = df
+        self._current_chunk_position = 0
+        self._file_position = chunk_end
+
+        print(f"Loaded chunk with {len(df)} events after filtering")
+        if len(df) > 0:
+            print(
+                f"Chunk time range: {df['timestamp'].min():.6f} to {df['timestamp'].max():.6f} seconds"
+            )
+
+        return len(df) > 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        """Get next fixed-duration event window"""
+        if self._finished:
+            raise StopIteration
+
+        # Collect events for the current time window
+        event_list = []
+
+        # Add any buffered events from previous window processing
+        event_list.extend(self._event_buffer)
+        self._event_buffer = []
+
+        # Initialize last_stamp if this is the first window
+        if self.last_stamp is None:
+            # Need to find the first event timestamp
+            while True:
+                if (
+                        self._current_chunk_data is None
+                        or self._current_chunk_position >= len(self._current_chunk_data)
+                ):
+                    if not self._load_next_chunk():
+                        # No more data
+                        if event_list:
+                            return np.array(event_list)
+                        else:
+                            raise StopIteration
+
+                if len(self._current_chunk_data) > 0:
+                    self.last_stamp = self._current_chunk_data["timestamp"].iloc[
+                        self._current_chunk_position
+                    ]
+                    break
+
+        window_end = self.last_stamp + self.duration_s
+
+        while True:
+            # Check if we need to load a new chunk
+            if self._current_chunk_data is None or self._current_chunk_position >= len(
+                    self._current_chunk_data
+            ):
+                if not self._load_next_chunk():
+                    # No more chunks available
+                    if event_list:
+                        # Update last_stamp for next window (if any)
+                        if event_list:
+                            self.last_stamp = event_list[-1][0] + self.duration_s
+                        return np.array(event_list)
+                    else:
+                        self._finished = True
+                        raise StopIteration
+
+            # Process events in current chunk
+            while self._current_chunk_position < len(self._current_chunk_data):
+                row = self._current_chunk_data.iloc[self._current_chunk_position]
+                event_timestamp = row["timestamp"]
+
+                if event_timestamp > window_end:
+                    # This event belongs to the next window
+                    if event_list:
+                        # Store this event for the next window
+                        x_coord = int(row["x"])
+                        y_coord = int(row["y"])
+                        polarity = int(row.get("polarity", 1))
+                        self._event_buffer.append(
+                            [event_timestamp, x_coord, y_coord, polarity]
+                        )
+
+                        # Start next window from this event's timestamp
+                        self.last_stamp = event_timestamp
+                        return np.array(event_list)
+                    else:
+                        # Start the window from this event
+                        self.last_stamp = event_timestamp
+                        window_end = self.last_stamp + self.duration_s
+
+                # Add event to current window
+                x_coord = int(row["x"])
+                y_coord = int(row["y"])
+                polarity = int(row.get("polarity", 1))
+                event_list.append([event_timestamp, x_coord, y_coord, polarity])
+
+                self._current_chunk_position += 1
+
+            # If we've processed all events in current chunk but haven't filled the window,
+            # continue to next chunk
+            continue
+
+    def __del__(self):
+        """Clean up HDF5 file handle"""
+        if hasattr(self, "_hdf5_file"):
+            try:
+                self._hdf5_file.close()
+            except:
+                pass
