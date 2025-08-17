@@ -86,7 +86,6 @@ int main(int argc, char *argv[]) {
             e_tmp.y = ev->y;
             e_tmp.p = ev->p;
             e_tmp.t = ev->t;
-            window_buf.push_back(e_tmp);
             if (ev->t - slice_initial_time > 10000) {
 
                 std::string out_path = output_images + "/events_" +
@@ -100,6 +99,7 @@ int main(int argc, char *argv[]) {
                 slice_initial_time = ev->t; // Reset slice start time
                 window_buf.clear(); // Clear the buffer for the next slice
             }
+            window_buf.push_back(e_tmp);
 
         }
     });
