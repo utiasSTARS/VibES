@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 
 
-
 def get_hdf5_file_size(filepath, unit="MB"):
     """
     Get the file size of an HDF5 file.
@@ -94,6 +93,43 @@ class BaseEventReader:
             logging.info(f"Downsampled from {total_events} to {len(events_df)} events")
             return events_df
 
+    def _extract_camera_geometry(self):
+        """Extract camera geometry from HDF5 file or estimate from data."""
+        try:
+            with h5py.File(self._fp, 'r') as f:
+                # Try to get geometry from metadata first
+                if 'geometry' in f.attrs:
+                    self._cam_w = f.attrs['geometry'][0]
+                    self._cam_h = f.attrs['geometry'][1]
+                elif 'width' in f.attrs and 'height' in f.attrs:
+                    self._cam_w = f.attrs['width']
+                    self._cam_h = f.attrs['height']
+                else:
+                    # Fallback: estimate from data
+                    dataset = f['CD/events']
+                    sample_size = min(10000, dataset.shape[0])
+                    sample_data = dataset[:sample_size]
+                    self._cam_w = int(np.max(sample_data[:, 0])) + 1  # x column
+                    self._cam_h = int(np.max(sample_data[:, 1])) + 1  # y column
+        except Exception as e:
+            logging.warning(f"Could not extract camera geometry: {e}")
+            self._cam_w = 640  # default fallback
+            self._cam_h = 480
+
+    def get_geom_width(self):
+        return self._cam_w
+
+    def get_geom_height(self):
+        return self._cam_h
+
+    @property
+    def df(self):
+        """For ChunkedBaseEventReader, this should return current chunk or full data."""
+        if hasattr(self, '_events_df'):
+            return self._events_df
+        else:
+            return self._current_chunk if self._current_chunk is not None else pd.DataFrame()
+
 
 class ChunkedBaseEventReader:
     """
@@ -148,6 +184,16 @@ class ChunkedBaseEventReader:
             logging.error(f"Failed to initialize h5py chunked reader: {e}")
             raise
 
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        raise NotImplementedError("Subclasses must implement __next__() method")
+
+    def __del__(self):
+        """Clean up resources"""
+        pass
+
     def _load_next_chunk(self):
         """Load the next chunk of events with downsampling applied."""
         if self._downsample_factor > 1:
@@ -189,6 +235,14 @@ class ChunkedBaseEventReader:
             self._current_chunk = pd.DataFrame(columns=["x", "y", "p", "t"])
             return False
 
+    def get_max_time(self):
+        """Get maximum timestamp from current chunk."""
+        if self._current_chunk is None or len(self._current_chunk) == 0:
+            return None
+        return self._current_chunk["t"].max()
+
+    def _parse_hdf5_geom_string(self, geom_str):
+        """Parse geometry string from HDF5 attributes."""
         try:
             with h5py.File(self._fp, "r") as f:
                 dataset = f["CD/events"]
@@ -224,7 +278,97 @@ class ChunkedBaseEventReader:
         else:
             return self._current_index < self._total_events
 
-    # ... rest of the methods remain the same ...
+
+    def _extract_camera_geometry(self):
+        """Extract camera geometry from HDF5 file or estimate from data."""
+        try:
+            with h5py.File(self._fp, 'r') as f:
+                # Try to get geometry from metadata first
+                if 'geometry' in f.attrs:
+                    self._cam_w = f.attrs['geometry'][0]
+                    self._cam_h = f.attrs['geometry'][1]
+                elif 'width' in f.attrs and 'height' in f.attrs:
+                    self._cam_w = f.attrs['width']
+                    self._cam_h = f.attrs['height']
+                else:
+                    # Fallback: estimate from data
+                    dataset = f['CD/events']
+                    sample_size = min(10000, dataset.shape[0])
+                    sample_data = dataset[:sample_size]
+                    self._cam_w = int(np.max(sample_data[:, 0])) + 1  # x column
+                    self._cam_h = int(np.max(sample_data[:, 1])) + 1  # y column
+        except Exception as e:
+            logging.warning(f"Could not extract camera geometry: {e}")
+            self._cam_w = 640  # default fallback
+            self._cam_h = 480
+
+    def df(self):
+        """Return the current chunk DataFrame."""
+        return self._current_chunk
+
+    def get_geom_width(self):
+        return self._cam_w
+
+    def get_geom_height(self):
+        return self._cam_h
+
+    def get_min_time(self):
+        """Get minimum timestamp from current chunk."""
+        if self._current_chunk is None or len(self._current_chunk) == 0:
+            return None
+        return self._current_chunk["t"].min()
+
+
+    def get_max_time(self):
+        return self._max_time
+
+    def get_time_windows(
+            self,
+            window_size_us,
+            overlap_us=0,
+            default_event_start_time=10_000_000,
+            default_event_end_time=20_000_000,
+    ):
+        """Generator that yields time windows of specified size."""
+        start_time = (
+            self._min_time
+            if default_event_start_time is None
+            else default_event_start_time
+        )
+        end_time = (
+            self._max_time if default_event_end_time is None else default_event_end_time
+        )
+
+        # Start from 10 seconds into the data
+        current_start = start_time
+        if current_start > self._max_time:
+            current_start = self._min_time
+            logging.info("Starting from the beginning of the data")
+        if end_time > self._max_time:
+            end_time = self._max_time
+            logging.info(
+                f"Generating time windows from {current_start} to {end_time} with window size {window_size_us} us"
+            )
+        step_size = window_size_us - overlap_us
+
+        print(f"Generating time windows from {current_start} to {end_time}")
+        print(f"Window size: {window_size_us} us, overlap: {overlap_us} us")
+
+        counter = 0
+        while current_start < end_time:  # and counter < max_windows:
+            current_end = min(current_start + window_size_us, end_time)
+            window_data = self._get_time_slice(current_start, current_end)
+
+            print(
+                f"Yielding window {counter}: {current_start} to {current_end}, events: {len(window_data)}"
+            )
+            if len(window_data) > 0:  # Only yield non-empty windows
+                yield current_start, current_end, window_data
+                counter += 1
+
+            current_start += step_size
+
+
 
 
 def choose_event_reader(filepath, size_threshold_mb=2000, downsample_factor=1, **kwargs):
