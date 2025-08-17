@@ -318,10 +318,6 @@ class ChunkedBaseEventReader:
             return None
         return self._current_chunk["t"].min()
 
-
-    def get_max_time(self):
-        return self._max_time
-
     def get_time_windows(
             self,
             window_size_us,
