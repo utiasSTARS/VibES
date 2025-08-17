@@ -130,7 +130,6 @@ class BaseEventReader:
         else:
             return self._current_chunk if self._current_chunk is not None else pd.DataFrame()
 
-
 class ChunkedBaseEventReader:
     """
     Event reader that loads HDF5 data in chunks with native downsampling support.
@@ -147,6 +146,7 @@ class ChunkedBaseEventReader:
         self._current_index = 0
         self._total_events = None
         self._downsampled_indices = None  # Pre-computed indices for downsampling
+        self._events_df = None  # Will store complete dataset for compatibility
 
         # check file extension
         file_extension = os.path.splitext(self._fp)[1]
@@ -160,8 +160,43 @@ class ChunkedBaseEventReader:
         if extract_cam_geom:
             self._extract_camera_geometry()
 
-        # Load first chunk
-        self._load_next_chunk()
+        # Load complete dataset for compatibility with main script
+        self._load_complete_dataset()
+
+    def _extract_camera_geometry(self):
+        """Extract camera geometry from HDF5 file or estimate from data."""
+        try:
+            with h5py.File(self._fp, 'r') as f:
+                # Try to get geometry from metadata first
+                if 'geometry' in f.attrs:
+                    self._cam_w = f.attrs['geometry'][0]
+                    self._cam_h = f.attrs['geometry'][1]
+                    logging.info(f"Camera geometry from metadata: {self._cam_w}x{self._cam_h}")
+                elif 'width' in f.attrs and 'height' in f.attrs:
+                    self._cam_w = f.attrs['width']
+                    self._cam_h = f.attrs['height']
+                    logging.info(f"Camera geometry from attributes: {self._cam_w}x{self._cam_h}")
+                else:
+                    # Fallback: estimate from data sample
+                    dataset = f['CD/events']
+                    sample_size = min(10000, dataset.shape[0])
+                    sample_data = dataset[:sample_size]
+                    self._cam_w = int(np.max(sample_data[:, 0])) + 1  # x column
+                    self._cam_h = int(np.max(sample_data[:, 1])) + 1  # y column
+                    logging.info(f"Camera geometry estimated from data: {self._cam_w}x{self._cam_h}")
+        except Exception as e:
+            logging.warning(f"Could not extract camera geometry: {e}")
+            self._cam_w = 640  # default fallback
+            self._cam_h = 480
+            logging.info(f"Using default camera geometry: {self._cam_w}x{self._cam_h}")
+
+    def get_geom_width(self):
+        """Get camera width."""
+        return self._cam_w
+
+    def get_geom_height(self):
+        """Get camera height."""
+        return self._cam_h
 
     def _init_chunk_reader(self):
         """Initialize h5py-based chunked reading with downsampling."""
@@ -184,15 +219,69 @@ class ChunkedBaseEventReader:
             logging.error(f"Failed to initialize h5py chunked reader: {e}")
             raise
 
-    def __iter__(self):
-        return self
+    def _load_complete_dataset(self):
+        """Load the complete downsampled dataset for compatibility."""
+        logging.info("Loading complete downsampled dataset...")
 
-    def __next__(self):
-        raise NotImplementedError("Subclasses must implement __next__() method")
+        try:
+            with h5py.File(self._fp, "r") as f:
+                dataset = f["CD/events"]
 
-    def __del__(self):
-        """Clean up resources"""
-        pass
+                if self._downsample_factor > 1:
+                    # Load downsampled data
+                    downsampled_events = dataset[self._downsampled_indices]
+                    self._events_df = pd.DataFrame(downsampled_events, columns=["x", "y", "p", "t"])
+                    logging.info(f"Loaded {len(self._events_df)} downsampled events from {self._total_events} total")
+                else:
+                    # Load all data
+                    all_events = dataset[:]
+                    self._events_df = pd.DataFrame(all_events, columns=["x", "y", "p", "t"])
+                    logging.info(f"Loaded {len(self._events_df)} events")
+
+        except Exception as e:
+            logging.error(f"Error loading complete dataset: {e}")
+            self._events_df = pd.DataFrame(columns=["x", "y", "p", "t"])
+
+    @property
+    def df(self):
+        """Return the complete dataset as DataFrame."""
+        return self._events_df
+
+    def get_time_windows(self, window_size_us, overlap_us=0):
+        """
+        Generator that yields time windows from the dataset.
+
+        Args:
+            window_size_us: Size of each time window in microseconds
+            overlap_us: Overlap between consecutive windows in microseconds
+
+        Yields:
+            Tuple of (start_time, end_time, window_dataframe)
+        """
+        if len(self._events_df) == 0:
+            logging.warning("No events loaded, cannot generate time windows")
+            return
+
+        min_time = self._events_df['t'].min()
+        max_time = self._events_df['t'].max()
+
+        step_size = window_size_us - overlap_us
+        current_start = min_time
+
+        logging.info(f"Generating time windows: {window_size_us}μs windows, {overlap_us}μs overlap")
+        logging.info(f"Time range: {min_time} to {max_time} μs")
+
+        while current_start < max_time:
+            current_end = current_start + window_size_us
+
+            # Extract events in current time window
+            mask = (self._events_df['t'] >= current_start) & (self._events_df['t'] < current_end)
+            window_data = self._events_df[mask].copy()
+
+            if len(window_data) > 0:
+                yield current_start, current_end, window_data
+
+            current_start += step_size
 
     def _load_next_chunk(self):
         """Load the next chunk of events with downsampling applied."""
@@ -235,14 +324,6 @@ class ChunkedBaseEventReader:
             self._current_chunk = pd.DataFrame(columns=["x", "y", "p", "t"])
             return False
 
-    def get_max_time(self):
-        """Get maximum timestamp from current chunk."""
-        if self._current_chunk is None or len(self._current_chunk) == 0:
-            return None
-        return self._current_chunk["t"].max()
-
-    def _parse_hdf5_geom_string(self, geom_str):
-        """Parse geometry string from HDF5 attributes."""
         try:
             with h5py.File(self._fp, "r") as f:
                 dataset = f["CD/events"]
@@ -278,93 +359,19 @@ class ChunkedBaseEventReader:
         else:
             return self._current_index < self._total_events
 
+    def get_chunk_iterator(self):
+        """
+        Generator that yields data chunks.
+        Useful for processing very large datasets without loading everything into memory.
+        """
+        self._current_index = 0
+        self._iterator_exhausted = False
 
-    def _extract_camera_geometry(self):
-        """Extract camera geometry from HDF5 file or estimate from data."""
-        try:
-            with h5py.File(self._fp, 'r') as f:
-                # Try to get geometry from metadata first
-                if 'geometry' in f.attrs:
-                    self._cam_w = f.attrs['geometry'][0]
-                    self._cam_h = f.attrs['geometry'][1]
-                elif 'width' in f.attrs and 'height' in f.attrs:
-                    self._cam_w = f.attrs['width']
-                    self._cam_h = f.attrs['height']
-                else:
-                    # Fallback: estimate from data
-                    dataset = f['CD/events']
-                    sample_size = min(10000, dataset.shape[0])
-                    sample_data = dataset[:sample_size]
-                    self._cam_w = int(np.max(sample_data[:, 0])) + 1  # x column
-                    self._cam_h = int(np.max(sample_data[:, 1])) + 1  # y column
-        except Exception as e:
-            logging.warning(f"Could not extract camera geometry: {e}")
-            self._cam_w = 640  # default fallback
-            self._cam_h = 480
-
-    def df(self):
-        """Return the current chunk DataFrame."""
-        return self._current_chunk
-
-    def get_geom_width(self):
-        return self._cam_w
-
-    def get_geom_height(self):
-        return self._cam_h
-
-    def get_min_time(self):
-        """Get minimum timestamp from current chunk."""
-        if self._current_chunk is None or len(self._current_chunk) == 0:
-            return None
-        return self._current_chunk["t"].min()
-
-    def get_time_windows(
-            self,
-            window_size_us,
-            overlap_us=0,
-            default_event_start_time=10_000_000,
-            default_event_end_time=20_000_000,
-    ):
-        """Generator that yields time windows of specified size."""
-        start_time = (
-            self._min_time
-            if default_event_start_time is None
-            else default_event_start_time
-        )
-        end_time = (
-            self._max_time if default_event_end_time is None else default_event_end_time
-        )
-
-        # Start from 10 seconds into the data
-        current_start = start_time
-        if current_start > self._max_time:
-            current_start = self._min_time
-            logging.info("Starting from the beginning of the data")
-        if end_time > self._max_time:
-            end_time = self._max_time
-            logging.info(
-                f"Generating time windows from {current_start} to {end_time} with window size {window_size_us} us"
-            )
-        step_size = window_size_us - overlap_us
-
-        print(f"Generating time windows from {current_start} to {end_time}")
-        print(f"Window size: {window_size_us} us, overlap: {overlap_us} us")
-
-        counter = 0
-        while current_start < end_time:  # and counter < max_windows:
-            current_end = min(current_start + window_size_us, end_time)
-            window_data = self._get_time_slice(current_start, current_end)
-
-            print(
-                f"Yielding window {counter}: {current_start} to {current_end}, events: {len(window_data)}"
-            )
-            if len(window_data) > 0:  # Only yield non-empty windows
-                yield current_start, current_end, window_data
-                counter += 1
-
-            current_start += step_size
-
-
+        while not self._iterator_exhausted and self.has_more_chunks():
+            if self._load_next_chunk():
+                yield self._current_chunk
+            else:
+                break
 
 
 def choose_event_reader(filepath, size_threshold_mb=2000, downsample_factor=1, **kwargs):
