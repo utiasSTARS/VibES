@@ -50,7 +50,7 @@ void updateSliceVisualizers(HARMEDA::SliceVisualizer &slice_x, HARMEDA::SliceVis
         auto [x_pred, y_pred] = *pair;
 
         slice_y.editFrame([&](cv::Mat &frame) {
-            cv::circle(frame, cv::Point(slice_y.time_value, static_cast<int>(y_pred)), 1, cv::Scalar(125, 255, 0), -1);
+            cv::circle(frame, cv::Point(slice_y.time_value, static_cast<int>(y_pred)), 1, cv::Scalar(0, 0, 255), -1);
         });
 
 //        slice_x.editFrame([&](cv::Mat &frame) {

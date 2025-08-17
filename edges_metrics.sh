@@ -13,7 +13,7 @@ run_with_log () {
 }
 
 # Runs
-run_with_log "$prefix/logo/"          --analysis continuity --resize .5 --gaussian_kernel 5 --block_size 3 --start_idx 0 --end_idx -1
+run_with_log "$prefix/logo/"          --analysis continuity --resize .5 --gaussian_kernel 7 --block_size 3 --start_idx 0 --end_idx -1
 run_with_log "$prefix/amiev/"         --analysis continuity --resize 1. --gaussian_kernel 3 --block_size 5 --start_idx 0 --end_idx -1
 run_with_log "$prefix/checkerpattern/" --analysis continuity --resize .5 --gaussian_kernel 7 --block_size 3 --start_idx 0 --end_idx -1
 run_with_log "$prefix/pattern/"       --analysis continuity --resize .5 --gaussian_kernel 7 --block_size 3 --start_idx 0 --end_idx -1
