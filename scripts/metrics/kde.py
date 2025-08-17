@@ -166,11 +166,12 @@ class KDEMetrics:
         return results, all_densities
 
     def compute_kde_densities_for_comparison(
-            self, window_size_us=50000, max_events=50000, downsample_factor=1
+            self, window_size_us=50000, max_events=50000
     ):
         """
-        Compute KDE densities using time-windowed approach instead of random sampling.
+        Compute KDE densities using time-windowed approach.
         Returns normalized densities for comparison between datasets.
+        NOTE: Downsampling is now handled by the reader itself.
 
         Args:
             window_size_us: Size of time windows in microseconds
@@ -183,17 +184,10 @@ class KDEMetrics:
         all_densities = []
         events_collected = 0
 
-        counter = 0
         # Collect events from time windows until we reach max_events
         for start_time, end_time, window_data in self.event_loader.get_time_windows(
                 window_size_us, overlap_us=0
         ):
-            # if events_collected >= max_events:
-            #     break
-
-            # if counter>100:
-            #     break
-
             if len(window_data) < 10:  # Skip windows with too few events
                 continue
 
@@ -201,14 +195,6 @@ class KDEMetrics:
             pts = window_data[["x", "y"]].values.astype(float)
             pts[:, 0] /= self.cam_w
             pts[:, 1] /= self.cam_h
-
-            if downsample_factor > 1:
-                # Downsample points if needed
-                pre_downsample_shape = pts.shape
-                pts = pts[::downsample_factor]
-                logging.info(
-                    f"Downsampled points from shape: {pre_downsample_shape} to {pts.shape}"
-                )
 
             # Limit events from this window if needed
             remaining_capacity = max_events - events_collected
@@ -220,8 +206,9 @@ class KDEMetrics:
             all_densities.extend(window_densities)
             events_collected += len(pts)
 
-            # counter+=1
-            # print(f"{counter} Processed window {start_time}-{end_time}, collected {events_collected}/{max_events} events")
+            # Break if we have enough events
+            if events_collected >= max_events:
+                break
 
         if not all_densities:
             logging.warning(f"No densities computed for {self.name}")
@@ -377,11 +364,11 @@ def compare_kde_densities(
         bins=50,
         window_size_us=50000,
         max_events=50000,
-        downsample_factor=1,
         output_name="kde_comparison",
 ):
     """
     Compare KDE density distributions between multiple datasets using time-windowed approach.
+    NOTE: Downsampling is now handled by the readers themselves.
 
     Args:
         kde_metrics_list: List of KDEMetrics objects to compare
@@ -399,7 +386,6 @@ def compare_kde_densities(
         normalized_densities = kde_metrics.compute_kde_densities_for_comparison(
             window_size_us=window_size_us,
             max_events=max_events,
-            downsample_factor=downsample_factor,
         )
 
         if len(normalized_densities) == 0:
@@ -450,7 +436,6 @@ def compare_kde_densities(
     plt.tight_layout()
     plt.savefig(f"{output_name}.png")
     plt.close()
-    # plt.show()
 
     return all_densities
 
@@ -472,7 +457,7 @@ def get_hdf5_dataset_info(file_path):
     try:
         with h5py.File(file_path, 'r') as f:
             # Common event dataset names in event camera HDF5 files
-            possible_names = ['events', 'data', 'event_data', 'dvs_events']
+            possible_names = ['CD/events', 'events', 'data', 'event_data', 'dvs_events']
             event_count = None
 
             for name in possible_names:
@@ -561,6 +546,7 @@ def calculate_balance_factors(ev_file, harmeda_file):
 def load_balanced_datasets(ev_file, harmeda_file):
     """
     Load two datasets with pre-calculated downsample factors for balancing.
+    Now uses the readers' native downsampling capability.
 
     Args:
         ev_file: Path to EV dataset HDF5 file
@@ -574,23 +560,21 @@ def load_balanced_datasets(ev_file, harmeda_file):
         ev_file, harmeda_file
     )
 
-    # Now load the datasets (only once each)
-    logging.info("Loading datasets...")
-    ev_loader = choose_event_reader(str(ev_file))
-    harmeda_loader = choose_event_reader(str(harmeda_file))
+    # Now load the datasets with downsampling handled by readers
+    logging.info("Loading datasets with native reader downsampling...")
+    ev_loader = choose_event_reader(str(ev_file), downsample_factor=ev_downsample)
+    harmeda_loader = choose_event_reader(str(harmeda_file), downsample_factor=harmeda_downsample)
 
     # Verify our estimates were reasonable
     actual_ev_count = len(ev_loader.df)
     actual_harmeda_count = len(harmeda_loader.df)
 
-    logging.info(f"Actual counts - EV: {actual_ev_count:,}, HARMEDA: {actual_harmeda_count:,}")
+    logging.info(f"Actual loaded counts - EV: {actual_ev_count:,}, HARMEDA: {actual_harmeda_count:,}")
 
     # Update metadata with actual counts
     metadata.update({
-        'ev_actual_count': actual_ev_count,
-        'harmeda_actual_count': actual_harmeda_count,
-        'ev_actual_effective': actual_ev_count // ev_downsample,
-        'harmeda_actual_effective': actual_harmeda_count // harmeda_downsample,
+        'ev_actual_loaded': actual_ev_count,
+        'harmeda_actual_loaded': actual_harmeda_count,
     })
 
     # Create KDEMetrics objects
@@ -599,12 +583,14 @@ def load_balanced_datasets(ev_file, harmeda_file):
 
     return [ev_metrics, harmeda_metrics], [ev_downsample, harmeda_downsample], metadata
 
-def load_folder_datasets(folder_path):
+
+def load_folder_datasets(folder_path, downsample_factor=1):
     """
-    Load datasets from harmeda and ev subfolders.
+    Load datasets from harmeda and ev subfolders with downsampling support.
 
     Args:
         folder_path: Path to the main folder containing harmeda and ev subfolders
+        downsample_factor: Downsample factor to apply to all datasets
 
     Returns:
         List of KDEMetrics objects
@@ -625,9 +611,9 @@ def load_folder_datasets(folder_path):
             logging.warning(f"{events_file} not found, skipping {subfolder}")
             continue
 
-        logging.info(f"\nLoading {subfolder} dataset from {events_file}")
+        logging.info(f"\nLoading {subfolder} dataset from {events_file} with downsample factor {downsample_factor}")
         try:
-            event_loader = choose_event_reader(str(events_file))
+            event_loader = choose_event_reader(str(events_file), downsample_factor=downsample_factor)
             kde_metrics = KDEMetrics(event_loader, name=subfolder.upper())
             kde_metrics_list.append(kde_metrics)
         except Exception as e:
@@ -638,90 +624,6 @@ def load_folder_datasets(folder_path):
         raise ValueError("No valid datasets found in the specified folder")
 
     return kde_metrics_list
-
-
-def compare_kde_densities_balanced(
-        kde_metrics_list,
-        downsample_factors,
-        bins=50,
-        window_size_us=50000,
-        max_events=50000,
-        output_name="kde_comparison",
-):
-    """
-    Compare KDE density distributions between datasets using individual downsample factors.
-
-    Args:
-        kde_metrics_list: List of KDEMetrics objects to compare
-        downsample_factors: List of downsample factors for each dataset
-        bins: Number of histogram bins
-        window_size_us: Size of time windows in microseconds
-        max_events: Maximum number of events to collect per dataset
-    """
-    plt.figure(figsize=(12, 8))
-
-    colors = ["skyblue", "lightcoral", "lightgreen", "gold", "plum"]
-    all_densities = []
-
-    for i, (kde_metrics, downsample_factor) in enumerate(zip(kde_metrics_list, downsample_factors)):
-        # Compute normalized densities using time-windowed approach with individual downsample factor
-        normalized_densities = kde_metrics.compute_kde_densities_for_comparison(
-            window_size_us=window_size_us,
-            max_events=max_events,
-            downsample_factor=downsample_factor,
-        )
-
-        if len(normalized_densities) == 0:
-            logging.warning(
-                f"No densities computed for {kde_metrics.name}, skipping..."
-            )
-            continue
-
-        all_densities.append(normalized_densities)
-
-        # Plot histogram
-        color = colors[i % len(colors)]
-        plt.hist(
-            normalized_densities,
-            bins=bins,
-            alpha=0.6,
-            label=f"{kde_metrics.name} (ds={downsample_factor})",
-            color=color,
-            edgecolor="black",
-            density=True,
-        )
-
-    plt.xlabel("Normalized KDE Density (0-1)")
-    plt.ylabel("Density")
-    plt.title(
-        f"Comparison of Balanced KDE Density Distributions\n(Time-windowed approach: {window_size_us}μs windows)"
-    )
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-
-    # Add statistics text box
-    stats_text = "Statistics:\n"
-    for i, (kde_metrics, densities, ds_factor) in enumerate(zip(kde_metrics_list, all_densities, downsample_factors)):
-        stats_text += f"{kde_metrics.name} (ds={ds_factor}):\n"
-        stats_text += f"  Mean: {np.mean(densities):.3f}\n"
-        stats_text += f"  Std: {np.std(densities):.3f}\n"
-        stats_text += f"  Events: {len(densities)}\n"
-
-    plt.text(
-        0.02,
-        0.98,
-        stats_text,
-        transform=plt.gca().transAxes,
-        verticalalignment="top",
-        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
-    )
-
-    plt.tight_layout()
-    plt.savefig(f"{output_name}.png")
-    plt.close()
-    # plt.show()
-
-    return all_densities
 
 
 def save_single_dataset_results(results, densities, output_name, dataset_name):
@@ -799,11 +701,11 @@ Examples:
   # Compare two specific files with balanced event counts:
   python script.py --ev data/ev_events.hdf5 --harmeda data/harmeda_events.hdf5 --save_results
 
-  # Process single file:
-  python script.py data/events.hdf5 --full_data --save_results
+  # Process single file with downsampling:
+  python script.py data/events.hdf5 --full_data --downsample_factor 10 --save_results
   
-  # Process folder structure:
-  python script.py data/folder/ --compare_folders --save_results
+  # Process folder structure with downsampling:
+  python script.py data/folder/ --compare_folders --downsample_factor 5 --save_results
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -829,8 +731,8 @@ Examples:
         "--time_window_us",
         "-t",
         type=float,
-        default=50000.0,
-        help="Time window in microseconds for analysis (default: 50ms)",
+        default=10000.0,
+        help="Time window in microseconds for analysis (default: 10ms)",
     )
     parser.add_argument(
         "--overlap_us",
@@ -863,7 +765,7 @@ Examples:
         "--downsample_factor",
         type=int,
         default=1,
-        help="Downsample factor for event data (default: 1, no downsampling)",
+        help="Downsample factor for event data - now handled by readers (default: 1, no downsampling)",
     )
     parser.add_argument(
         "--output_name",
@@ -898,9 +800,8 @@ Examples:
 
             # Compare the balanced datasets
             logging.info(f"Comparing balanced datasets...")
-            densities = compare_kde_densities_balanced(
+            densities = compare_kde_densities(
                 kde_metrics_list,
-                downsample_factors,
                 window_size_us=args.time_window_us,
                 max_events=args.max_events,
                 output_name=args.output_name,
@@ -932,16 +833,14 @@ File Analysis:
 - EV File: {Path(args.ev).name}
   - File size: {balance_metadata['ev_original_size']:,} bytes
   - Estimated events: {balance_metadata['ev_original_count']:,}
-  - Actual events: {balance_metadata['ev_actual_count']:,}
+  - Actual loaded: {balance_metadata['ev_actual_loaded']:,}
   - Downsample factor: {downsample_factors[0]}
-  - Effective events: {balance_metadata['ev_actual_effective']:,}
 
 - HARMEDA File: {Path(args.harmeda).name}
   - File size: {balance_metadata['harmeda_original_size']:,} bytes  
   - Estimated events: {balance_metadata['harmeda_original_count']:,}
-  - Actual events: {balance_metadata['harmeda_actual_count']:,}
+  - Actual loaded: {balance_metadata['harmeda_actual_loaded']:,}
   - Downsample factor: {downsample_factors[1]}
-  - Effective events: {balance_metadata['harmeda_actual_effective']:,}
 
 Analysis Parameters:
 - Time window: {args.time_window_us} μs
@@ -949,7 +848,7 @@ Analysis Parameters:
 
 Results:
 - Total density points analyzed: {len(densities[0]) + len(densities[1]) if len(densities) >= 2 else 'N/A'}
-- Balance ratio: {balance_metadata['ev_actual_effective'] / max(balance_metadata['harmeda_actual_effective'], 1):.2f}:1
+- Balance ratio: {balance_metadata['ev_actual_loaded'] / max(balance_metadata['harmeda_actual_loaded'], 1):.2f}:1
 """
 
                 with open(f"{args.output_name}_summary.txt", "w") as f:
@@ -972,7 +871,7 @@ Results:
 
             if harmeda_file.exists() or ev_file.exists():
                 logging.info(f"Found folder structure, processing both datasets...")
-                kde_metrics_list = load_folder_datasets(args.input_path)
+                kde_metrics_list = load_folder_datasets(args.input_path, downsample_factor=args.downsample_factor)
 
                 if args.compare_folders or len(kde_metrics_list) > 1:
                     # Compare datasets using time-windowed approach
@@ -983,7 +882,6 @@ Results:
                         kde_metrics_list,
                         window_size_us=args.time_window_us,
                         max_events=args.max_events,
-                        downsample_factor=args.downsample_factor,
                         output_name=args.output_name,
                     )
 
@@ -1008,7 +906,7 @@ Results:
             return 1
 
         logging.info(f"Processing single file: {args.input_path}")
-        event_loader = choose_event_reader(str(args.input_path))
+        event_loader = choose_event_reader(str(args.input_path), downsample_factor=args.downsample_factor)
         kde_metrics = KDEMetrics(event_loader, name="Dataset")
 
         process_single_dataset(kde_metrics, args)
