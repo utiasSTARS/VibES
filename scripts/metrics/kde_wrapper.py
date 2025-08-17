@@ -43,18 +43,25 @@ def main():
     args = parser.parse_args()
 
     print(f"Loading densities from {args.folder}...")
-    densities = load_all_densities(args.folder)
+    all_densities = load_all_densities(args.folder)
 
-    print(f"Loaded {densities.shape[0]} density values from {args.folder}")
+    min_density = np.min(all_densities)
+    max_density = np.max(all_densities)
+    if max_density > min_density:
+        normalized_densities = (all_densities - min_density) / (
+                max_density - min_density
+        )
+
+    print(f"Loaded {normalized_densities.shape[0]} density values from {args.folder}")
 
     # Compute statistics
-    mean_val = np.mean(densities)
-    var_val = np.var(densities)
+    mean_val = np.mean(normalized_densities)
+    var_val = np.var(normalized_densities)
     print(f"Mean of distribution: {mean_val:.6f}")
     print(f"Variance of distribution: {var_val:.6f}")
 
     print("Plotting histogram...")
-    plot_histogram(densities, bins=args.bins, save_path=args.output)
+    plot_histogram(normalized_densities, bins=args.bins, save_path=args.output)
 
 
 if __name__ == "__main__":

@@ -6,13 +6,13 @@ SCRIPT_PATH=${2:-"/path/to/your/kde_script.py"}
 DOWNSAMPLE_RATE=${3:-60}  # Default downsample rate
 
 # Batch size
-BATCH_SIZE=50
+BATCH_SIZE=10
 count=0
 pids=()
 
 for file in "$DATASET_DIR"/events_*.hdf5; do
     echo "Launching KDE for $file ..."
-    python3 "$SCRIPT_PATH" "$file" --output "${file%.hdf5}_kde.pkl" --downsample "$DOWNSAMPLE_RATE" &
+    python3 "$SCRIPT_PATH" "$file" --output "${file%.hdf5}_kde.pkl" --downsample $DOWNSAMPLE_RATE &
 
     # Track background job
     pids+=($!)

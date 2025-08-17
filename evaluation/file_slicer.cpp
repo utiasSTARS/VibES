@@ -1,30 +1,19 @@
 //
 // Created by viciopoli on 17/08/25.
 //
-#include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
 #include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
 
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/imgproc.hpp>
 
 #include <mutex>
-#include <memory>
-#include <chrono>
-#include <iomanip>
 #include <sstream>
-#include <csignal>
 
 #include <metavision/sdk/driver/hdf5_event_file_writer.h>
 
 
-#include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
-#include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
-#include "event_frontend/undistort.hpp"
-#include "haste_wrapper.hpp"
 
 
 namespace {

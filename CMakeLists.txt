@@ -157,4 +157,4 @@ target_link_libraries(edges_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK
 
 
 add_executable(slicer evaluation/file_slicer.cpp)
-target_link_libraries(slicer PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(slicer PRIVATE ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
