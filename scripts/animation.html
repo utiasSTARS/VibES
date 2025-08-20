@@ -13,17 +13,38 @@
             display: block;
         }
 
-        #info {
+        #info, #legend {
             position: absolute;
-            top: 10px;
             left: 10px;
-            color: #fff;
             font-family: system-ui, sans-serif;
             background: rgba(0, 0, 0, .5);
+            color: #fff;
             padding: 6px 10px;
             border-radius: 6px;
         }
+
+        #info {
+            top: 10px;
+        }
+
+        #legend {
+            top: 50px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .legend-color {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
     </style>
+
     <!-- ES Module import map -->
     <script type="importmap">
         {
@@ -36,6 +57,25 @@
 </head>
 <body>
 <div id="info">drag = orbit • wheel = zoom • right-drag = pan</div>
+
+<div id="legend">
+    <div class="legend-item">
+        <div class="legend-color" style="background:#00ff88;"></div>
+        <span>Point A (-10)</span>
+    </div>
+    <div class="legend-item">
+        <div class="legend-color" style="background:#ffaa00;"></div>
+        <span>Point B (-2)</span>
+    </div>
+    <div class="legend-item">
+        <div class="legend-color" style="background:#3894ff;"></div>
+        <span>Moving Camera</span>
+    </div>
+    <div class="legend-item">
+        <div class="legend-color" style="background:#ff5555;"></div>
+        <span>Static Camera</span>
+    </div>
+</div>
 <script type="module">
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
