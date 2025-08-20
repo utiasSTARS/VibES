@@ -2,8 +2,8 @@
 // Enhanced Event-based Motion Tracking with Proper Visualization
 // Based on Metavision SDK patterns
 //
-//#define FANCY_VISUALIZATION
-#define STORE
+#define FANCY_VISUALIZATION
+//#define STORE
 //#define TIMING
 
 #include <metavision/sdk/core/utils/cd_frame_generator.h>

@@ -15,32 +15,6 @@
 
 #include "params_loader.hpp"
 
-
-namespace {
-    constexpr Metavision::timestamp kWindowUs = 10'000; // 10 ms in µs
-}
-
-// Small helper to write one window's buffer to a new HDF5 file
-static void write_window_to_file(const std::string &base_dir,
-                                 const std::vector<Metavision::EventCD> &buf,
-                                 Metavision::timestamp t_start,
-                                 Metavision::timestamp t_end,
-                                 const Metavision::Camera &camera) {
-    if (buf.empty()) return;
-
-    std::ostringstream name;
-    name << base_dir << "/events_" << t_start << "_" << t_end << ".hdf5";
-    std::filesystem::path out_path{name.str()};
-    if (!out_path.parent_path().empty() && !std::filesystem::exists(out_path.parent_path())) {
-        std::filesystem::create_directories(out_path.parent_path());
-    }
-
-    Metavision::HDF5EventFileWriter writer(out_path);
-    writer.add_metadata_map_from_camera(camera);
-    writer.add_events(buf.data(), buf.data() + buf.size());
-    writer.close();
-}
-
 static Metavision::timestamp first_event_t = 0, last_event_t = 0;
 
 int main(int argc, char *argv[]) {

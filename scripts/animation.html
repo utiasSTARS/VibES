@@ -80,6 +80,16 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+    const furthestPoint = new THREE.Vector3(0, 0, -7);
+    const movingCenter  = new THREE.Vector3(0, 0, 0);
+    const lookTarget    = furthestPoint.clone().lerp(movingCenter, 0.5); // mid point between them
+
+    // Camera positions
+    const camStart = new THREE.Vector3(0, 0, -12);   // behind both, aligned with Z
+    const camMid   = new THREE.Vector3(5, 3, -7);   // pulled up and sideways
+    const camEnd   = new THREE.Vector3(7, 3, 1);     // final oblique side view
+    let camProgress = 0;
+
     // ========== Setup Renderer, Scene, Camera ==========
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -253,7 +263,21 @@
             }
         });
 
+        if (camProgress < 1.0) {
+            camProgress += 0.002;
 
+            let newPos;
+            if (camProgress < 0.5) {
+                const t1 = camProgress / 0.5;
+                newPos = camStart.clone().lerp(camMid, t1);
+            } else {
+                const t2 = (camProgress - 0.5) / 0.5;
+                newPos = camMid.clone().lerp(camEnd, t2);
+            }
+
+            viewCam.position.copy(newPos);
+            viewCam.lookAt(lookTarget); // always look at line between far point & camera center
+        }
         renderer.render(scene, viewCam);
     }
 

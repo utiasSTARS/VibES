@@ -158,3 +158,6 @@ target_link_libraries(edges_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK
 
 add_executable(slicer evaluation/file_slicer.cpp)
 target_link_libraries(slicer PRIVATE ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+
+add_executable(variance_grad_metrics evaluation/variance_grad_metrics.cpp)
+target_link_libraries(variance_grad_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
