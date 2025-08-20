@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8"/>
-    <title>VibES</title>
+    <title>Camera Pyramid + Opaque Plane (Three.js)</title>
     <style>
         html, body {
             height: 100%;
@@ -61,11 +61,11 @@
 <div id="legend">
     <div class="legend-item">
         <div class="legend-color" style="background:#00ff88;"></div>
-        <span>Point A</span>
+        <span>Point A (-10)</span>
     </div>
     <div class="legend-item">
         <div class="legend-color" style="background:#ffaa00;"></div>
-        <span>Point B</span>
+        <span>Point B (-2)</span>
     </div>
     <div class="legend-item">
         <div class="legend-color" style="background:#3894ff;"></div>
@@ -146,51 +146,52 @@
     }
 
     // ========== Projected Point System ==========
-    function createAnimatedProjection(zPos, color) {
-        const pointPos = new THREE.Vector3(0,0,zPos);
+    function createProjectedPoint(zPos, color, movingCam, staticCamApex) {
+        const pointPos = new THREE.Vector3(0, 0, zPos);
 
-        // Point
+        // Point Mesh
         const pointMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(0.04,16,16),
+            new THREE.SphereGeometry(0.08, 16, 16),
             new THREE.MeshBasicMaterial({ color })
         );
         pointMesh.position.copy(pointPos);
         scene.add(pointMesh);
 
-        // Ray (dynamic growth)
-        const rayGeo = new THREE.BufferGeometry().setFromPoints([pointPos, pointPos.clone()]);
-        const rayLine = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color }));
-        scene.add(rayLine);
-
-        // Marker at plane intersection
-        const marker = new THREE.Mesh(
-            new THREE.SphereGeometry(0.02,16,16),
-            new THREE.MeshBasicMaterial({ color })
+        // Ray to static camera
+        const staticRay = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([pointPos, staticCamApex]),
+            new THREE.LineBasicMaterial({ color })
         );
-        marker.visible = false;
-        scene.add(marker);
+        scene.add(staticRay);
 
-        // Circle trace
+        // Circle Trace
         const circlePoints = [];
         const x = (-zPos - planeDist) * A_x / zPos;
         const y = (-zPos - planeDist) * A_y / zPos;
-        for (let i=0;i<=segments;i++) {
-            const theta = (i/segments)*Math.PI*2;
+
+        for (let i = 0; i <= segments; i++) {
+            const theta = (i / segments) * Math.PI * 2;
             circlePoints.push(new THREE.Vector3(
-                x*Math.sin(theta),
-                y*Math.sin(theta+phi),
+                x * Math.sin(theta),
+                y * Math.sin(theta + phi),
                 -planeDist
             ));
         }
-        const circleGeo = new THREE.BufferGeometry().setFromPoints(circlePoints);
-        circleGeo.setDrawRange(0,0);
-        const circle = new THREE.Line(circleGeo, new THREE.LineDashedMaterial({ color, dashSize:0.05, gapSize:0.05 }));
+
+        const circle = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(circlePoints),
+            new THREE.LineDashedMaterial({ color, dashSize: 0.05, gapSize: 0.05 })
+        );
         circle.computeLineDistances();
         scene.add(circle);
 
-        return { pointPos, rayGeo, rayLine, marker, circle, circleGeo, progress:0 };
-    }
+        // Ray to moving camera (updated each frame)
+        const movingRayGeo = new THREE.BufferGeometry().setFromPoints([pointPos, movingCam.position.clone()]);
+        const movingRay = new THREE.Line(movingRayGeo, new THREE.LineBasicMaterial({ color }));
+        scene.add(movingRay);
 
+        return { pointPos, movingRayGeo };
+    }
 
     // ========== Create Cameras ==========
     const movingCam = createPyramidCamera(0x3894ff);
@@ -202,16 +203,11 @@
     const staticCamApex = new THREE.Vector3(0, 0, 0);
 
     // ========== Points ==========
-    const projA = createAnimatedProjection(-7, 0x00ff88);
-    const projB = createAnimatedProjection(-2, 0xffaa00);
+    const point1 = createProjectedPoint(-10, 0x00ff88, movingCam, staticCamApex);
+    const point2 = createProjectedPoint(-2, 0xffaa00, movingCam, staticCamApex);
 
     // ========== Animation ==========
     const clock = new THREE.Clock();
-
-    // ========== Projected Point System ==========
-
-
-    // ========== Animation ==========
     function animate() {
         requestAnimationFrame(animate);
         const t = clock.getElapsedTime();
@@ -223,40 +219,12 @@
             0.01
         );
 
-        [projA, projB].forEach(p => {
-            // Target is the moving camera apex
-            const target = movingCam.position.clone();
-
-            // Intersection point with plane z = -planeDist
-            const dir = new THREE.Vector3().subVectors(target, p.pointPos).normalize();
-            const tPlane = (-planeDist - p.pointPos.z) / dir.z;
-            const hitPoint = p.pointPos.clone().addScaledVector(dir, tPlane);
-
-            // Animate progress
-            p.progress = Math.min(p.progress + 0.01, 2.0);
-
-            if (p.progress < 1.0) {
-                // Grow ray toward camera
-                const interp = p.pointPos.clone().lerp(target, p.progress);
-                p.rayGeo.setFromPoints([p.pointPos, interp]);
-            } else {
-                // Full ray to camera
-                p.rayGeo.setFromPoints([p.pointPos, target]);
-
-                // Show marker on plane
-                p.marker.position.copy(hitPoint);
-                p.marker.visible = true;
-
-                // Reveal circle
-                const circleFrac = Math.min((p.progress-1.0)*segments, segments);
-                p.circleGeo.setDrawRange(0, circleFrac);
-            }
-        });
-
+        // Update rays
+        point1.movingRayGeo.setFromPoints([point1.pointPos, movingCam.position.clone()]);
+        point2.movingRayGeo.setFromPoints([point2.pointPos, movingCam.position.clone()]);
 
         renderer.render(scene, viewCam);
     }
-
     animate();
 </script>
 
