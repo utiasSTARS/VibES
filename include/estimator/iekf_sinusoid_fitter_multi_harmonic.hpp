@@ -26,12 +26,8 @@ public:
             throw std::invalid_argument("HarmonicEstimate vector cannot be empty");
         }
 
-        if (A.size() > 2) {
-            throw std::invalid_argument("Maximum of 2 harmonics supported");
-        }
-
         if (A.size() > 1) {
-            throw std::runtime_error("Only one sinusoid supported...");
+            throw std::invalid_argument("Maximum of 1 harmoni supported");
         }
 
         // Better theta init from atan2(B, A)
