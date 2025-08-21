@@ -76,6 +76,8 @@ protected:
     std::ofstream file_centroid_;
 #endif
 
+    bool NUFFT_not_init = true;
+
 public:
     HasteWrapperBase(int x, int y, double tracker_rate, Metavision::timestamp init_time,
                      const std::string &output_folder, std::unique_ptr<IEKFSinusoidFitter> x_fitter_ptr = nullptr,
@@ -263,12 +265,12 @@ protected:
         // Add to centroid queue with size limit
         {
             std::lock_guard<std::mutex> lock(centroids_mutex_);
-            // TODO we do not need this after the NUFFT has been estimated
-            centroids_queue_.emplace(t, x, y);
-
-            // Maintain queue size limit
-            while (centroids_queue_.size() > MAX_CENTROIDS_QUEUE) {
-                centroids_queue_.pop();
+            if (NUFFT_not_init) {
+                centroids_queue_.emplace(t, x, y);
+                // Maintain queue size limit
+                while (centroids_queue_.size() > MAX_CENTROIDS_QUEUE) {
+                    centroids_queue_.pop();
+                }
             }
 
             // Update fitters
@@ -280,8 +282,8 @@ protected:
 //                                                                amplitude * 1000 / static_cast<double>(MAX_AMPLITUDE) *
 //                                                                255.0))),
 //                             std::memory_order_relaxed);
-                color_.store(static_cast<int>(amplitude * 1000),
-                             std::memory_order_relaxed);
+//                color_.store(static_cast<int>(amplitude * 1000),
+//                             std::memory_order_relaxed);
                 last_x_.store(x_fitter_->getShift(), std::memory_order_relaxed);
             }
             if (y_fitter_) {
@@ -354,6 +356,10 @@ public:
         double dx = event.x - x;
         double dy = event.y - y;
         return (dx * dx + dy * dy) <= TRACKER_MARGIN_SQ;
+    }
+
+    void setNUFFTInitialized() {
+        NUFFT_not_init = false;
     }
 
 private:

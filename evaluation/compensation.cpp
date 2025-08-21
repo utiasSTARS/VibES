@@ -2,8 +2,8 @@
 // Enhanced Event-based Motion Tracking with Proper Visualization
 // Based on Metavision SDK patterns
 //
-#define FANCY_VISUALIZATION
-//#define STORE
+//#define FANCY_VISUALIZATION
+#define STORE
 //#define TIMING
 
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
@@ -23,7 +23,9 @@
 #include <csignal>
 
 #ifdef STORE
+
 #include <metavision/sdk/driver/hdf5_event_file_writer.h>
+
 #endif
 
 #include "estimator/nufft_multiharmonics.hpp"
@@ -183,96 +185,97 @@ int main(int argc, char *argv[]) {
         {
             PROFILE_SCOPE("Event_Callback");
 #endif
-            std::call_once(init_flag, [&]() {
-                start_time = std::chrono::steady_clock::now();
-                first_event_t = begin->t;
+        std::call_once(init_flag, [&]() {
+            start_time = std::chrono::steady_clock::now();
+            first_event_t = begin->t;
 
-                if (!params.params->nocompensation && params.params->tracker_x != 0 && params.params->tracker_y != 0) {
-                    tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(params.params->tracker_x,
-                                                                                  params.params->tracker_y,
-                                                                                  TRACKER_RATE, first_event_t);
-                    t_centre_x = params.params->tracker_x;
-                    t_centre_y = params.params->tracker_y;
-                    std::cout << "Tracker initialized at (" << t_centre_x << ", " << t_centre_y << ")" << std::endl;
-                }
+            if (!params.params->nocompensation && params.params->tracker_x != 0 && params.params->tracker_y != 0) {
+                tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(params.params->tracker_x,
+                                                                              params.params->tracker_y,
+                                                                              TRACKER_RATE, first_event_t);
+                t_centre_x = params.params->tracker_x;
+                t_centre_y = params.params->tracker_y;
+                std::cout << "Tracker initialized at (" << t_centre_x << ", " << t_centre_y << ")" << std::endl;
+            }
 
-            });
-            compensated_events.clear();
-            compensated_events.reserve(std::distance(begin, end));
-            for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
-                last_event_t = ev->t;
+        });
+        compensated_events.clear();
+        compensated_events.reserve(std::distance(begin, end));
+        for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
+            last_event_t = ev->t;
 
 //                undistort(ev->x, ev->y, x_undistorted, y_undistorted, not_in_frame);
 //             make sure the undistorted coordinates are within the image bounds
 //                if (not_in_frame) {
 //                    continue; // Skip events that are out of bounds
 //                }
-                undistort(ev->x, ev->y, x_undistorted, y_undistorted);
-//             make sure the undistorted coordinates are within the image bounds
-                if (x_undistorted < 0 || x_undistorted >= width || y_undistorted < 0 || y_undistorted >= height) {
-                    continue; // Skip events that are out of bounds
-                }
+            undistort(ev->x, ev->y, x_undistorted, y_undistorted);
+//              make sure the undistorted coordinates are within the image bounds
+            if (x_undistorted < 0 || x_undistorted >= width || y_undistorted < 0 || y_undistorted >= height) {
+                continue; // Skip events that are out of bounds
+            }
 
 
-                auto &event_to_build = compensated_events.emplace_back();
-                event_to_build.x = x_undistorted;
-                event_to_build.y = y_undistorted;
-                event_to_build.t = ev->t;
-                event_to_build.p = ev->p;
+            auto &event_to_build = compensated_events.emplace_back();
+            event_to_build.x = x_undistorted;
+            event_to_build.y = y_undistorted;
+            event_to_build.t = ev->t;
+            event_to_build.p = ev->p;
 
-                const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6f;
+            const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6f;
 
-                // Process with tracker
-                if (tracker) {
-                    in_tracker = tracker->feed(event_to_build);
+            // Process with tracker
+            if (tracker) {
+                in_tracker = tracker->feed(event_to_build);
 
-                    if (NUFFT_ESTIMATION_DONE) [[likely]] {
+                if (NUFFT_ESTIMATION_DONE) [[likely]] {
 #ifdef FANCY_VISUALIZATION
-                        // if the event is in the left half of the image skip
-                        if (event_to_build.x < visualization_cut_off) {
-                            continue;
-                        }
+                    // if the event is in the left half of the image skip
+                    if (event_to_build.x < visualization_cut_off) {
+                        continue;
+                    }
 #endif
-                        if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
-                            auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
-                            if (x_new < 0 || x_new >= width) {
-                                continue; // Skip if out of bounds
-                            }
-                            auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
-                            if (y_new < 0 || y_new >= height) {
-                                continue; // Skip if out of bounds
-                            }
-                            event_to_build.x = x_new;
-                            event_to_build.y = y_new;
+                    if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
+                        auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
+                        if (x_new < 0 || x_new >= width) {
+                            continue; // Skip if out of bounds
+                        }
+                        auto y_new = static_cast<unsigned short>(y_undistorted - y_pred);
+                        if (y_new < 0 || y_new >= height) {
+                            continue; // Skip if out of bounds
+                        }
+                        event_to_build.x = x_new;
+                        event_to_build.y = y_new;
 //                        event_to_build.p = 0;
-                            continue;
-                        }
-                    } else {
-                        if (in_tracker && nufft_estimator.feed(std::move(tracker->getCentroids()))) {
-                            nufft_estimator.printResults();
-                            NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator.getHarmonics(), Ax, Ay, Bx,
-                                                                           By,
-                                                                           omegas, offsets);
+                        continue;
+                    }
+                } else {
+                    if (in_tracker && nufft_estimator.feed(std::move(tracker->getCentroids()))) {
+                        nufft_estimator.printResults();
+                        NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator.getHarmonics(), Ax, Ay, Bx,
+                                                                       By,
+                                                                       omegas, offsets);
 
-                            if (!Ax.empty()) {
-                                std::cout << "\033[1;34mTracker initialized with parameters:\033[0m" << std::endl;
-                                std::cout << "Ax: " << Ax[0] << ", Ay: " << Ay[0]
-                                          << ", Bx: " << Bx[0] << ", By: " << By[0]
-                                          << ", omega: " << omegas[0] << ", offset_x: " << offsets[0]
-                                          << ", offset_y: " << offsets[1] << std::endl;
-                                tracker->addFitters(
-                                        std::make_unique<IEKFSinusoidFitter>(
-                                                IEKFSinusoidFitter::createFromHarmonicEstimates(Ax, Bx, omegas,
-                                                                                                offsets)),
-                                        std::make_unique<IEKFSinusoidFitter>(
-                                                IEKFSinusoidFitter::createFromHarmonicEstimates(Ay, By, omegas,
-                                                                                                offsets)));
-                            }
-                            NUFFT_ESTIMATION_DONE = nufft_estimator.done();
+                        if (!Ax.empty()) {
+                            std::cout << "\033[1;34mTracker initialized with parameters:\033[0m" << std::endl;
+                            std::cout << "Ax: " << Ax[0] << ", Ay: " << Ay[0]
+                                      << ", Bx: " << Bx[0] << ", By: " << By[0]
+                                      << ", omega: " << omegas[0] << ", offset_x: " << offsets[0]
+                                      << ", offset_y: " << offsets[1] << std::endl;
+                            tracker->addFitters(
+                                    std::make_unique<IEKFSinusoidFitter>(
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ax, Bx, omegas,
+                                                                                            offsets)),
+                                    std::make_unique<IEKFSinusoidFitter>(
+                                            IEKFSinusoidFitter::createFromHarmonicEstimates(Ay, By, omegas,
+                                                                                            offsets)));
                         }
+                        NUFFT_ESTIMATION_DONE = nufft_estimator.done();
+                        tracker->setNUFFTInitialized();
                     }
                 }
             }
+        }
 #ifdef TIMING
         }
 #endif
