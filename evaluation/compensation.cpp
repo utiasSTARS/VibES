@@ -2,8 +2,8 @@
 // Enhanced Event-based Motion Tracking with Proper Visualization
 // Based on Metavision SDK patterns
 //
-//#define FANCY_VISUALIZATION
-#define STORE
+#define FANCY_VISUALIZATION
+//#define STORE
 //#define TIMING
 
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
@@ -262,13 +262,16 @@ int main(int argc, char *argv[]) {
                                       << ", Bx: " << Bx[0] << ", By: " << By[0]
                                       << ", omega: " << omegas[0] << ", offset_x: " << offsets[0]
                                       << ", offset_y: " << offsets[1] << std::endl;
+                            auto [x, y, t] = tracker->getTrackerState();
+                            std::vector<double> offsets_x = {x};
+                            std::vector<double> offsets_y = {y};
                             tracker->addFitters(
                                     std::make_unique<IEKFSinusoidFitter>(
                                             IEKFSinusoidFitter::createFromHarmonicEstimates(Ax, Bx, omegas,
-                                                                                            offsets)),
+                                                                                            offsets_x)),
                                     std::make_unique<IEKFSinusoidFitter>(
                                             IEKFSinusoidFitter::createFromHarmonicEstimates(Ay, By, omegas,
-                                                                                            offsets)));
+                                                                                            offsets_y)));
                         }
                         NUFFT_ESTIMATION_DONE = nufft_estimator.done();
                         tracker->setNUFFTInitialized();

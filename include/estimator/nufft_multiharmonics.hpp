@@ -588,7 +588,7 @@ private:
         }
 
         Eigen::Vector3d solution = S.ldlt().solve(rhs);
-        return {solution(0), solution(1), solution(2)};
+        return {solution(0), solution(1), solution(2)+mean_val};
     }
 };
 
