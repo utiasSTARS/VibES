@@ -108,6 +108,10 @@ target_link_libraries(haste_comp PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::b
 add_executable(compensation evaluation/compensation.cpp)
 target_link_libraries(compensation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
 
+add_executable(compensation_video evaluation/compensation_video.cpp)
+target_link_libraries(compensation_video PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+
+
 add_executable(visualization_events_tracker_and_images evaluation/visualization_events_tracker_and_images.cpp)
 target_link_libraries(visualization_events_tracker_and_images PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
 

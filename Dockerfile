@@ -17,25 +17,25 @@ RUN apt-get update && apt-get install -y \
     software-properties-common
 
 # Create working directory
-RUN mkdir -p /HARMEDA
-WORKDIR /HARMEDA
+RUN mkdir -p /VibES
+WORKDIR /VibES
 
 # Install dependencies
 COPY scripts/install_deps.sh /tmp/install_deps.sh
 RUN chmod +x /tmp/install_deps.sh
 RUN bash /tmp/install_deps.sh
 
-# Install HARMEDA
-COPY cmake /HARMEDA/cmake
-COPY include /HARMEDA/include
-COPY demo_old /HARMEDA/demo
-COPY CMakeLists.txt /HARMEDA/CMakeLists.txt
-COPY camera /HARMEDA/camera
-COPY tests /HARMEDA/tests
+# Install VibES
+COPY cmake /VibES/cmake
+COPY include /VibES/include
+COPY demo_old /VibES/demo
+COPY CMakeLists.txt /VibES/CMakeLists.txt
+COPY camera /VibES/camera
+COPY tests /VibES/tests
 
-# Build HARMEDA
-RUN mkdir -p /HARMEDA/build
-WORKDIR /HARMEDA/build
+# Build VibES
+RUN mkdir -p /VibES/build
+WORKDIR /VibES/build
 RUN cmake .. -DCMAKE_BUILD_TYPE=Release && make -j4
 
 # Run demo_old
