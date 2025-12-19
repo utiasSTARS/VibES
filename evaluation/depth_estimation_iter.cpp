@@ -1,20 +1,8 @@
-//
-// Enhanced Event-based Motion Tracking with Proper Visualization
-// Based on Metavision SDK patterns
-//
-
-#define FANCY_VISUALIZATION
-//#define STORE
-
-#include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
-#include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
 #include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
 
-
-#include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include <mutex>
@@ -23,10 +11,6 @@
 #include <iomanip>
 #include <sstream>
 #include <csignal>
-
-#ifdef STORE
-#include <metavision/sdk/driver/hdf5_event_file_writer.h>
-#endif
 
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
@@ -91,11 +75,6 @@ public:
                                                                omegas, offsets);
 
                 if (!Ax.empty()) {
-//                    std::cout << "\033[1;34mTracker initialized with parameters:\033[0m" << std::endl;
-//                    std::cout << "Ax: " << Ax[0] << ", Ay: " << Ay[0]
-//                              << ", Bx: " << Bx[0] << ", By: " << By[0]
-//                              << ", omega: " << omegas[0] << ", offset_x: " << offsets[0]
-//                              << ", offset_y: " << offsets[1] << std::endl;
                     auto a_x = nufft_estimator->getHarmonics()[0].amplitude_x;
                     auto a_y = nufft_estimator->getHarmonics()[0].amplitude_y;
                     amplitudes.emplace_back(std::sqrt(std::pow(a_x, 2) + std::pow(a_y, 2)));
@@ -224,32 +203,22 @@ double test_depth(int argc, char *argv[]) {
     HARMEDA::ParamsLoader params(argc, argv);
     std::cout << params;
 
-//    params.camera.biases().set_from_file("/home/viciopoli/Documents/metavision/biases/biases_filtered.bias");
-
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
-
-    const int size = haste::HypothesisPatchTracker::kPatchSize;
-    const int half_size = size / 2;
 
     // Initialize undistortion
     Undistort undistort(params.params->calib_file);
 
-    // Setup CD frame generator (similar to original)
-    std::mutex cd_frame_mutex;
+    // Setup CD frame generator
     cv::Mat cd_frame;
-    Metavision::timestamp cd_frame_ts{0};
 
     // Initialize fitters and estimator
-
     std::mutex processing_mutex;
 
     std::vector<std::pair<unsigned short, unsigned short>> tracker_centers;
 
     std::vector<std::shared_ptr<MultipleNUFFT>> trackers;
     for (int i = 0; i < params.params->trackers_x.size(); i++) {
-//        std::cout << "Initializing tracker with params from command line: "
-//                  << params.params->trackers_x[i] << ", " << params.params->trackers_y[i] << std::endl;
         tracker_centers.emplace_back(params.params->trackers_x[i],
                                      params.params->trackers_y[i]);
         trackers.push_back(
@@ -259,10 +228,8 @@ double test_depth(int argc, char *argv[]) {
                                                 i < params.params->front_trackers));
     }
 
-//    std::cout << "All trackers initialized." << std::endl;
-
     Metavision::Stage::EventBuffer compensated_events;
-    unsigned short x_undistorted, y_undistorted, t_centre_x, t_centre_y;
+    unsigned short x_undistorted, y_undistorted;
 
 
     std::once_flag init_flag;
@@ -281,7 +248,7 @@ double test_depth(int argc, char *argv[]) {
             last_event_t = ev->t;
 
             undistort(ev->x, ev->y, x_undistorted, y_undistorted);
-//             make sure the undistorted coordinates are within the image bounds
+            // Make sure the undistorted coordinates are within the image bounds
             if (x_undistorted < 0 || x_undistorted >= width || y_undistorted < 0 || y_undistorted >= height) {
                 continue; // Skip events that are out of bounds
             }
@@ -304,7 +271,6 @@ double test_depth(int argc, char *argv[]) {
     params.camera.start();
     start_time = std::chrono::steady_clock::now();
 
-    std::string front_init_string = "Click to init front tracker";
     // Main processing loop (similar to original)
     while (params.camera.is_running()) {
         // Display frame with thread safety
@@ -319,26 +285,19 @@ double test_depth(int argc, char *argv[]) {
         params.camera.stop();
     }
 
-//    for (auto tracker: trackers) {
-//        tracker->tracker->printFittersStatus();
-//    }
-
     std::vector<double> avg_amplitudes_front, avg_amplitudes_back, std_amplitudes_front, std_amplitudes_back;
     for (const auto &tracker: trackers) {
         if (tracker->isFront()) {
             avg_amplitudes_front.push_back(tracker->avgAmplitude());
             std_amplitudes_front.push_back(tracker->stdAmplitude());
-//            std::cout << "Tracker front amplitude avg (front): " << tracker->avgAmplitude() << std::endl;
             std::cout << "Tracker front amplitude std (front): " << tracker->stdAmplitude() << std::endl;
         } else {
             avg_amplitudes_back.push_back(tracker->avgAmplitude());
             std_amplitudes_back.push_back(tracker->stdAmplitude());
-//            std::cout << "Tracker front amplitude avg (back): " << tracker->avgAmplitude() << std::endl;
             std::cout << "Tracker front amplitude std (back): " << tracker->stdAmplitude() << std::endl;
         }
     }
-//    std::cout << "Back size: " << avg_amplitudes_back.size() << ", Front size: " << avg_amplitudes_front.size()
-//              << std::endl;
+
     // compute the average amplitude across all trackers
     auto [avg_front, std_front] = stats_fusion(avg_amplitudes_front, std_amplitudes_front);
     auto [avg_back, std_back] = stats_fusion(avg_amplitudes_back, std_amplitudes_back);

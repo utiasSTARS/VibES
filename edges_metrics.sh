@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # prefix
-prefix="/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results"
+prefix="results/"
 echo "Running edges eval..."
 
 # Function to run and log
@@ -9,7 +9,7 @@ run_with_log () {
     path="$1"
     shift
     log_file="${path%/}/run_connectivity.log"
-    python3 scripts/metrics/edge_metrics_parallel.py --path "$path" "$@" > "$log_file" 2>&1
+    python3 scripts/metrics/edge_metrics.py --path "$path" "$@" > "$log_file" 2>&1
 }
 
 # Runs

@@ -4,8 +4,8 @@
 datasets=("amiev" "pattern" "logo" "checkerpattern")
 
 # Base paths
-base_input_path="/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results"
-executable="./cmake-build-release/variance_grad_metrics"
+base_input_path="results"
+executable="./build/variance_grad_metrics"
 
 # Time window parameter
 time_window="10000"
@@ -41,14 +41,14 @@ for dataset in "${datasets[@]}"; do
     output_dir="$base_input_path/$dataset/ev/und/"
     run_variance_grad "$dataset" "$input_file" "$output_dir"
 
-    # 2. Harmeda no compensation
-    input_file="$base_input_path/$dataset/harmeda/compensated_events/harmeda_nocomp.hdf5"
-    output_dir="$base_input_path/$dataset/harmeda/nocomp/"
+    # 2. VibES no compensation
+    input_file="$base_input_path/$dataset/VibES/compensated_events/VibES_nocomp.hdf5"
+    output_dir="$base_input_path/$dataset/VibES/nocomp/"
     run_variance_grad "$dataset" "$input_file" "$output_dir"
 
-    # 3. Harmeda compensated
-    input_file="$base_input_path/$dataset/harmeda/compensated_events/harmeda_compensated.hdf5"
-    output_dir="$base_input_path/$dataset/harmeda/comp/"
+    # 3. VibES compensated
+    input_file="$base_input_path/$dataset/VibES/compensated_events/VibES_compensated.hdf5"
+    output_dir="$base_input_path/$dataset/VibES/comp/"
     run_variance_grad "$dataset" "$input_file" "$output_dir"
 
     echo "=== Completed dataset: $dataset ==="

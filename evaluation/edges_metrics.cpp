@@ -5,12 +5,9 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
-#include <opencv2/features2d.hpp>
-#include <opencv2/calib3d.hpp>
 #include <iostream>
 #include <vector>
 #include <string>
-#include <filesystem>
 #include <fstream>
 
 using namespace cv;
@@ -28,13 +25,12 @@ private:
     vector<int> vib_all_num;
 
     // Update paths to match MATLAB structure
-    string frame_gray_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/frames_amiev/";
-    string frame_novib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/amiev/ev/img_bin/";
-    string frame_vib_path = "/home/viciopoli/datasets/event_harmeda/harmeda_dataset/results/amiev/harmeda/img_gray/";
+    string frame_gray_path = "PATH_TO_AMIEV_FRAMES/";
+    string frame_novib_path = "PATH_TO_AMIEV_GRAY_NO_VIB/";
+    string frame_vib_path = "PATH_TO_AMIEV_GRAY_VIB/";
 
     // Store the transformation matrix for registration
     Mat transformation_matrix;
-    bool has_initial_transform = false;
 
 public:
     ImageProcessor() {

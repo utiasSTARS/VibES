@@ -7,7 +7,7 @@
 Run the following command to install the dependencies:
 
 ```bash
-./scripts/install_deps.sh
+apt-get install -y libfftw3-dev
 ```
 
 ### Build

@@ -1,15 +1,6 @@
-[submodule "thirdparty/VecKM_flow_cpp"]
-	path = thirdparty/VecKM_flow_cpp
-	url = https://github.com/dhyuan99/VecKM_flow_cpp.git
-[submodule "thirdparty/deep_ev_tracker"]
-	path = thirdparty/deep_ev_tracker
-	url = https://github.com/uzh-rpg/deep_ev_tracker.git
 [submodule "thirdparty/haste"]
 	path = thirdparty/haste
 	url = https://github.com/viciopoli01/haste.git
 [submodule "thirdparty/rpg_e2vid"]
 	path = thirdparty/rpg_e2vid
 	url = git@github.com:uzh-rpg/rpg_e2vid.git
-[submodule "scripts/metrics/niqe"]
-	path = scripts/metrics/niqe
-	url = git@github.com:Stepheny755/niqe.git

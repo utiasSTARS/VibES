@@ -21,9 +21,7 @@ RUN mkdir -p /VibES
 WORKDIR /VibES
 
 # Install dependencies
-COPY scripts/install_deps.sh /tmp/install_deps.sh
-RUN chmod +x /tmp/install_deps.sh
-RUN bash /tmp/install_deps.sh
+RUN apt-get install -y libfftw3-dev
 
 # Install VibES
 COPY cmake /VibES/cmake

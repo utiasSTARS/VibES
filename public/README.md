@@ -38,7 +38,6 @@ C++ library for applying motion compensation to induced vibrational motion.
         <ul><a href="#requirements">Requirements</a></ul>
         <ul><a href="#installation">Installation</a></ul>
         <ul><a href="#docker">Docker</a></ul>
-        <ul><a href="#interface">Interface</a></ul>
         <ul><a href="#demo">Demo</a></ul>
     <li><a href="datasets">Datasets</a></li>
     <li><a href="#license">License</a></li>
@@ -146,50 +145,7 @@ In the case `PATH_TO_FILE` is not specified the code looks for available cameras
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-### Interface
-
-The x Library accepts as input various sensors' measurements, that are then fused together in the IEKF.
-To use the library in your project add in your `CMakeLists.txt`:
-
-```Cmake
-find_package(x 1.2.3 REQUIRED)
-
-# ...
-
-include_directories(
-        OTHER_INCLUDES
-        ${x_INCLUDE_DIRS}
-)
-
-# ...
-
-target_link_libraries(${PROJECT_NAME}
-        OTHER_LIBRARIES
-        ${x_LIBRARIES}
-)
-```
-
-Usage example:
-
-- Initialization
-
-```c++
-#include <x/vio.h>
-#include <ctime>
-
-VIO vio;
-
-const auto params = vio.loadParamsFromYaml("PATH_TO_A_YAML_FILE");
-
-vio.setUp(params);
-
-time_t now = time(0);
-vio_.initAtTime((double)now);
-```
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-### Demo
+### Demos
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

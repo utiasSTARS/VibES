@@ -1,16 +1,8 @@
-//
-// Enhanced Event-based Motion Tracking with Proper Visualization
-// Based on Metavision SDK patterns
-//
-
-
-#include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
 #include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
-
 
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -18,15 +10,11 @@
 #include <mutex>
 #include <memory>
 #include <chrono>
-#include <iomanip>
 #include <sstream>
 #include <csignal>
-#include <thread>
 
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
-//#include "estimator/iekf_sinusoid_fitter.hpp"
-#include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
 #include "haste_wrapper.hpp"
 #include "profiler.hpp"
@@ -50,7 +38,7 @@ void print_on_exit() {
     std::cout << "\033[1;33mTotal processing time: " << elapsed_time << " ms\033[0m" << std::endl;
     std::cout << "\033[1;33mTotal events time: " << static_cast<double>(last_event_t - first_event_t) / 1e3
               << " ms\033[0m" << std::endl;
-    std::cout << "\033[1;34mExiting HARMEDA demo...\033[0m" << std::endl;
+    std::cout << "\033[1;34mExiting VibES demo...\033[0m" << std::endl;
 }
 
 void signal_handler(int signal) {
@@ -134,9 +122,6 @@ int main(int argc, char *argv[]) {
     cv::setMouseCallback(window_name, receiveMouseEvent, &mouse_callback);
 
     bool osd = false; // On-screen display toggle
-    bool in_tracker = true, tracker_enable = true;
-
-    double x_pred = 0, y_pred = 0;
 
     Metavision::Stage::EventBuffer compensated_events;
     unsigned short x_undistorted, y_undistorted, t_centre_x, t_centre_y;
@@ -158,7 +143,7 @@ int main(int argc, char *argv[]) {
             last_event_t = ev->t;
 
             undistort(ev->x, ev->y, x_undistorted, y_undistorted);
-//             make sure the undistorted coordinates are within the image bounds
+            // make sure the undistorted coordinates are within the image bounds
             if (x_undistorted < 0 || x_undistorted >= width || y_undistorted < 0 || y_undistorted >= height) {
                 continue; // Skip events that are out of bounds
             }
@@ -167,8 +152,6 @@ int main(int argc, char *argv[]) {
             event_to_build.y = y_undistorted;
             event_to_build.t = ev->t;
             event_to_build.p = ev->p;
-
-            const float current_t_sec = static_cast<float>(ev->t - first_event_t) / 1e6f;
 
             // Process with tracker
             if (!NUFFT_ESTIMATION_DONE && tracker->feed(event_to_build) &&
