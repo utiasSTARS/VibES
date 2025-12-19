@@ -115,7 +115,7 @@ int main(int argc, char *argv[]) {
             return;
         }
         tracker_centers.emplace_back(x, y);
-        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(810, 490, TRACKER_RATE, first_event_t);
+        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(557, 242, TRACKER_RATE, first_event_t);
         NUFFT_ESTIMATION_DONE = false;
     };
 

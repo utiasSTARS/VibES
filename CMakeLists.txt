@@ -40,19 +40,19 @@ include_directories(thirdparty/haste/include)
 add_executable(compensation demo/compensation.cpp)
 target_link_libraries(compensation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
-add_executable(depth_estimation_iter evaluation/depth_estimation_iter.cpp)
-target_link_libraries(depth_estimation_iter PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
-
 add_executable(multi_tracker demo/multi_tracker.cpp)
 target_link_libraries(multi_tracker PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
-add_executable(amiev_visualization evaluation/amiev_visualization.cpp)
-target_link_libraries(amiev_visualization PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
-
-add_executable(frequency_estimation evaluation/frequency_estimation.cpp)
+add_executable(frequency_estimation demo/frequency_estimation.cpp)
 target_link_libraries(frequency_estimation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 if (BUILD_METRICS)
+
+    add_executable(depth_estimation_iter evaluation/depth_estimation_iter.cpp)
+    target_link_libraries(depth_estimation_iter PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
+
+    add_executable(amiev_visualization evaluation/amiev_visualization.cpp)
+    target_link_libraries(amiev_visualization PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
     add_executable(edges_metrics evaluation/edges_metrics.cpp)
     target_link_libraries(edges_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
