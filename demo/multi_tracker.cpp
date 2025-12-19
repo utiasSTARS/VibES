@@ -32,34 +32,9 @@
 namespace {
     constexpr double DEFAULT_FPS = 100.0;
     constexpr std::uint32_t DEFAULT_ACCUMULATION = 5000;
-    constexpr double DEFAULT_MEASUREMENT_NOISE = 0.5;
     constexpr int ESC_KEY = 27;
     constexpr int POLL_TIMEOUT_MS = 10;
     bool NUFFT_ESTIMATION_DONE = false;
-}
-
-// UI processing function similar to original
-int processUI(int delay_ms) {
-    auto then = std::chrono::high_resolution_clock::now();
-    int key = cv::waitKey(delay_ms);
-    auto now = std::chrono::high_resolution_clock::now();
-
-    // Ensure consistent timing
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - then).count();
-    if (elapsed < delay_ms) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms - elapsed));
-    }
-
-    return key;
-}
-
-// Mouse callback for tracker selection
-void receiveMouseEvent(int event, int x, int y, int flags, void *userdata) {
-    auto *callback = reinterpret_cast<std::function<void(int, int)> *>(userdata);
-
-    if (event == cv::EVENT_LBUTTONDOWN && callback) {
-        (*callback)(x, y);
-    }
 }
 
 /**

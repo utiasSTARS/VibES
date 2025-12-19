@@ -42,21 +42,6 @@ namespace {
     constexpr int POLL_TIMEOUT_MS = 10;
 }
 
-// UI processing function similar to original
-int processUI(int delay_ms) {
-    auto then = std::chrono::high_resolution_clock::now();
-    int key = cv::waitKey(delay_ms);
-    auto now = std::chrono::high_resolution_clock::now();
-
-    // Ensure consistent timing
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - then).count();
-    if (elapsed < delay_ms) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms - elapsed));
-    }
-
-    return key;
-}
-
 
 int main(int argc, char *argv[]) {
     // Initialize parameters and camera

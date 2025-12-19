@@ -22,14 +22,13 @@ CPMAddPackage(
 )
 set(CMAKE_INSTALL_RPATH "/usr/local/lib")
 
-# find_package(TBB REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Open3D REQUIRED)
 find_package(Boost 1.74 REQUIRED COMPONENTS filesystem system program_options)
 find_package(MetavisionSDK COMPONENTS base cv driver ui REQUIRED analytics)
-
+find_package(TIFF REQUIRED)
 
 include_directories(${EIGEN3_INCLUDE_DIR} ${TORCH_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR}/include)
@@ -40,15 +39,12 @@ find_package(glog REQUIRED)
 add_subdirectory(thirdparty/haste/thirdparty/quickgui)
 include_directories(thirdparty/haste/include)
 
-
+# Executables
 add_executable(compensation demo/compensation.cpp)
-target_link_libraries(compensation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(compensation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 add_executable(depth_estimation_iter evaluation/depth_estimation_iter.cpp)
 target_link_libraries(depth_estimation_iter PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
-
-add_executable(depth_estimation evaluation/depth_estimation.cpp)
-target_link_libraries(depth_estimation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
 
 add_executable(multi_tracker demo/multi_tracker.cpp)
 target_link_libraries(multi_tracker PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
