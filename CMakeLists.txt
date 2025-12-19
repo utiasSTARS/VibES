@@ -21,8 +21,7 @@ CPMAddPackage(
         SYSTEM
 )
 
-#find_package(OpenMP REQUIRED)
-#find_package(OpenCV 4.5 REQUIRED)
+find_package(OpenCV 4.5 REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Boost 1.74 REQUIRED COMPONENTS filesystem system program_options)
 find_package(MetavisionSDK COMPONENTS base cv driver ui REQUIRED analytics)
@@ -50,12 +49,8 @@ target_link_libraries(multi_tracker PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK
 add_executable(amiev_visualization evaluation/amiev_visualization.cpp)
 target_link_libraries(amiev_visualization PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
-add_executable(frequency_estimation_visualizer evaluation/frequency_estimation_visualizer.cpp)
-target_link_libraries(frequency_estimation_visualizer PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
-
 add_executable(frequency_estimation evaluation/frequency_estimation.cpp)
 target_link_libraries(frequency_estimation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
-
 
 if (BUILD_METRICS)
 
