@@ -20,7 +20,6 @@
 #include <metavision/sdk/driver/camera.h>
 #include <metavision/sdk/base/events/event_cd.h>
 #include <boost/program_options.hpp>
-#include <open3d/Open3D.h>
 #include <opencv2/opencv.hpp>
 
 namespace po = boost::program_options;

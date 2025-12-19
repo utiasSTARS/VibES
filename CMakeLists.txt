@@ -20,17 +20,15 @@ CPMAddPackage(
         EXCLUDE_FROM_ALL Yes
         SYSTEM
 )
-set(CMAKE_INSTALL_RPATH "/usr/local/lib")
 
-find_package(OpenMP REQUIRED)
-find_package(OpenCV REQUIRED)
+#find_package(OpenMP REQUIRED)
+#find_package(OpenCV 4.5 REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(Open3D REQUIRED)
 find_package(Boost 1.74 REQUIRED COMPONENTS filesystem system program_options)
 find_package(MetavisionSDK COMPONENTS base cv driver ui REQUIRED analytics)
 find_package(TIFF REQUIRED)
 
-include_directories(${EIGEN3_INCLUDE_DIR} ${TORCH_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
+include_directories(${EIGEN3_INCLUDE_DIR} ${Boost_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
 # Build HASTE AND INTEGRATE IT INTO THE PROJECT
@@ -44,27 +42,27 @@ add_executable(compensation demo/compensation.cpp)
 target_link_libraries(compensation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 add_executable(depth_estimation_iter evaluation/depth_estimation_iter.cpp)
-target_link_libraries(depth_estimation_iter PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(depth_estimation_iter PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 add_executable(multi_tracker demo/multi_tracker.cpp)
-target_link_libraries(multi_tracker PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(multi_tracker PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 add_executable(amiev_visualization evaluation/amiev_visualization.cpp)
-target_link_libraries(amiev_visualization PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(amiev_visualization PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 add_executable(frequency_estimation_visualizer evaluation/frequency_estimation_visualizer.cpp)
-target_link_libraries(frequency_estimation_visualizer PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(frequency_estimation_visualizer PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 add_executable(frequency_estimation evaluation/frequency_estimation.cpp)
-target_link_libraries(frequency_estimation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+target_link_libraries(frequency_estimation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 
 if (BUILD_METRICS)
 
     add_executable(edges_metrics evaluation/edges_metrics.cpp)
-    target_link_libraries(edges_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+    target_link_libraries(edges_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
     add_executable(variance_grad_metrics evaluation/variance_grad_metrics.cpp)
-    target_link_libraries(variance_grad_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC OpenMP::OpenMP_CXX gflags glog QuickGui)
+    target_link_libraries(variance_grad_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 endif ()
