@@ -200,7 +200,7 @@ double test_depth(int argc, char *argv[]) {
     std::atexit(print_on_exit);
 
     // Initialize parameters and camera
-    HARMEDA::ParamsLoader params(argc, argv);
+    VibES::ParamsLoader params(argc, argv);
     std::cout << params;
 
     const auto width = params.camera.geometry().width();

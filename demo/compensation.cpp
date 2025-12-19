@@ -22,12 +22,6 @@
 #include <sstream>
 #include <csignal>
 
-#ifdef STORE
-
-#include <metavision/sdk/driver/hdf5_event_file_writer.h>
-
-#endif
-
 #include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
 #include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
@@ -53,7 +47,7 @@ void print_on_exit() {
     std::cout << "\033[1;33mTotal processing time: " << elapsed_time << " ms\033[0m" << std::endl;
     std::cout << "\033[1;33mTotal events time: " << static_cast<double>(last_event_t - first_event_t) / 1e3
               << " ms\033[0m" << std::endl;
-    std::cout << "\033[1;34mExiting HARMEDA demo...\033[0m" << std::endl;
+    std::cout << "\033[1;34mExiting VibES demo...\033[0m" << std::endl;
 }
 
 void signal_handler(int signal) {
@@ -69,10 +63,8 @@ int main(int argc, char *argv[]) {
     std::atexit(print_on_exit);
 
     // Initialize parameters and camera
-    HARMEDA::ParamsLoader params(argc, argv);
+    VibES::ParamsLoader params(argc, argv);
     std::cout << params;
-
-//    params.camera.biases().set_from_file("/home/viciopoli/Documents/metavision/biases/biases_filtered.bias");
 
     // create folder if not exists
     std::string output_images = params.params->output_folder + "/compensated_events/";
@@ -126,32 +118,19 @@ int main(int argc, char *argv[]) {
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
 
-#ifdef STORE
-    std::filesystem::path out_hdf5_file_path = output_images + "/events.hdf5";
-    if (!out_hdf5_file_path.parent_path().empty() && !std::filesystem::exists(out_hdf5_file_path.parent_path())) {
-        std::filesystem::create_directories(out_hdf5_file_path.parent_path());
-    }
-    Metavision::HDF5EventFileWriter hdf5_writer(out_hdf5_file_path);
-    hdf5_writer.add_metadata_map_from_camera(params.camera);
-#endif
-
     // Setup display window (similar to original)
-    std::string window_name("HARMEDA Event Tracking");
+    std::string window_name("VibES Event Tracking");
     cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
     cv::resizeWindow(window_name, width, height);
     cv::moveWindow(window_name, 0, 0);
 
-#ifdef FANCY_VISUALIZATION
     int visualization_cut_off = width / 2; // Cut-off for visualization
-#endif
 
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
         if (tracker || params.params->nocompensation) {
-#ifdef FANCY_VISUALIZATION
             visualization_cut_off = x; // Update cut-off for visualization
-#endif
             return;
         }
         tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
@@ -170,21 +149,11 @@ int main(int argc, char *argv[]) {
     Metavision::Stage::EventBuffer compensated_events;
     unsigned short x_undistorted, y_undistorted;
 
-    // init profiler
-//    ProfileTimer::add_name("Event_Callback");
-//    ProfileTimer::add_name("NUFFTHelixEstimator_compute_thr");
-//    ProfileTimer::add_name("tracker_feed");
-//    ProfileTimer::add_name("tracker_getRelEstimate");
-
-    bool not_in_frame = 0;
     long long total_events = 0;
     std::once_flag init_flag;
     // Main event processing callback
     params.camera.cd().add_callback([&](const Metavision::EventCD *begin, const Metavision::EventCD *end) {
-#ifdef TIMING
-        {
-            PROFILE_SCOPE("Event_Callback");
-#endif
+
         std::call_once(init_flag, [&]() {
             start_time = std::chrono::steady_clock::now();
             first_event_t = begin->t;
@@ -204,11 +173,6 @@ int main(int argc, char *argv[]) {
         for (const Metavision::EventCD *ev = begin; ev != end; ++ev) {
             last_event_t = ev->t;
 
-//                undistort(ev->x, ev->y, x_undistorted, y_undistorted, not_in_frame);
-//             make sure the undistorted coordinates are within the image bounds
-//                if (not_in_frame) {
-//                    continue; // Skip events that are out of bounds
-//                }
             undistort(ev->x, ev->y, x_undistorted, y_undistorted);
 //              make sure the undistorted coordinates are within the image bounds
             if (x_undistorted < 0 || x_undistorted >= width || y_undistorted < 0 || y_undistorted >= height) {
@@ -229,12 +193,10 @@ int main(int argc, char *argv[]) {
                 in_tracker = tracker->feed(event_to_build);
 
                 if (NUFFT_ESTIMATION_DONE) [[likely]] {
-#ifdef FANCY_VISUALIZATION
                     // if the event is in the left half of the image skip
                     if (event_to_build.x < visualization_cut_off) {
                         continue;
                     }
-#endif
                     if (tracker->getRelEstimate(event_to_build.t, current_t_sec, x_pred, y_pred)) {
                         auto x_new = static_cast<unsigned short>(x_undistorted - x_pred);
                         if (x_new < 0 || x_new >= width) {
@@ -279,22 +241,15 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-#ifdef TIMING
-        }
-#endif
 
         // Feed events to frame generator and rate estimator
         const auto *begin_comp = compensated_events.data();
         const auto *end_comp = begin_comp + compensated_events.size();
         total_events += std::distance(begin_comp, end_comp);
-#ifdef STORE
-        hdf5_writer.add_events(begin_comp, end_comp);
-#endif
+
         cd_frame_generator.add_events(begin_comp, end_comp);
         cd_rate_estimator.add_data(std::prev(end_comp)->t, std::distance(begin_comp, end_comp));
-
-//        std::cout<<"Number of events processed: " << compensated_events.size() << std::endl;
-    });
+        });
 
     // Start camera
     params.camera.start();
@@ -385,22 +340,6 @@ int main(int argc, char *argv[]) {
     }
 
     end_time = std::chrono::steady_clock::now();
-
-#ifdef TIMING
-    // Print final results
-    ProfileTimer::print_all_results();
-    ProfileTimer::print_results("Event_Callback", true, total_events);
-#endif
-
-#ifdef STORE
-    // print blue text
-    std::cout << "\033[1;34mWriting events to HDF5 file...\033[0m" << std::endl;
-    if (hdf5_writer.is_open()) {
-        std::cout << "\033[1;34mEvents written to: " << out_hdf5_file_path << "\033[0m" << std::endl;
-    }
-    // Close HDF5 writer
-    hdf5_writer.close();
-#endif
 
     // Cleanup
     if (params.camera.is_running()) {

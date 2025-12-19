@@ -23,7 +23,7 @@
 #include <opencv2/opencv.hpp>
 
 namespace po = boost::program_options;
-namespace HARMEDA {
+namespace VibES {
     struct Params {
         std::string input_path;
         std::string calib_file; // Path to camera calibration file

@@ -1,12 +1,3 @@
-//
-// Enhanced Event-based Motion Tracking with Proper Visualization
-// Based on Metavision SDK patterns
-//
-
-//#define FANCY_VISUALIZATION
-//#define STORE
-
-#include <metavision/sdk/core/algorithms/periodic_frame_generation_algorithm.h>
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
@@ -16,21 +7,11 @@
 #include <opencv2/imgproc.hpp>
 
 #include <mutex>
-#include <memory>
-#include <chrono>
-#include <iomanip>
 #include <sstream>
-#include <csignal>
-#include <thread>
 
 #include "visualizer/ev2image.hpp"
-
-
-#include "estimator/nufft_multiharmonics.hpp"
 #include "params_loader.hpp"
-#include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 #include "event_frontend/undistort.hpp"
-#include "haste_wrapper.hpp"
 #include "profiler.hpp"
 
 
@@ -45,7 +26,7 @@ namespace {
 
 int main(int argc, char *argv[]) {
     // Initialize parameters and camera
-    HARMEDA::ParamsLoader params(argc, argv);
+    VibES::ParamsLoader params(argc, argv);
     std::cout << params;
 
     const auto width = params.camera.geometry().width();
@@ -103,31 +84,17 @@ int main(int argc, char *argv[]) {
         unsigned short delta = end->t - begin->t;
         duration_for_amiev += delta;
         amiev_events.insert(amiev_events.end(), begin, end);
-        if (duration_for_amiev > 2000) { //29997) {
-            // do every 100
+        if (duration_for_amiev > 2000) {
             auto img = ev2img_metavision(amiev_events, height, width);
             duration_for_amiev = 0; // reset the duration for next chunk
-//            std::cout << "Processed " << compensated_images_amiev_vis.size() << " chunks of events." << std::endl;
 
             auto counter_str = std::to_string(counter);
             cv::imshow("Binary Image", img.img_bin);
-//            cv::imshow("Count Gray Image", img.img_cnt_gray);
             cv::imshow("Timestamp Image", img.img_ts);
             cv::imshow("Average Timestamp Image", img.img_avgts);
             cv::imshow("Count Color Image", img.img_cnt_color);
-//            cv::imshow("Timestamp Color Image", img.img_ts_color);
-//            cv::imshow("Average Timestamp Color Image", img.img_avgts_color);
             cv::waitKey(1); // Wait for key press to show each image
 
-//            cv::imwrite(params.params->output_folder + "/imgs/img_bin/img_" + counter_str + ".png", img.img_bin);
-//            cv::imwrite(params.params->output_folder + "/imgs/img_cnt_gray/img_" + counter_str + ".png", img.img_cnt_gray);
-//            cv::imwrite(params.params->output_folder + "/imgs/img_ts/img_" + counter_str + ".png", img.img_ts);
-//            cv::imwrite(params.params->output_folder + "/imgs/img_avgts/img_" + counter_str + ".png", img.img_avgts);
-//            cv::imwrite(params.params->output_folder + "/imgs/img_cnt_color/img_" + counter_str + ".png",
-//                        img.img_cnt_color);
-//            cv::imwrite(params.params->output_folder + "/imgs/img_ts_color/img_" + counter_str + ".png", img.img_ts_color);
-//            cv::imwrite(params.params->output_folder + "/imgs/img_avgts_color/img_" + counter_str + ".png",
-//                        img.img_avgts_color);
             counter++;
         }
     });

@@ -54,7 +54,7 @@ int main(int argc, char *argv[]) {
     std::atexit(print_on_exit);
 
     // Initialize parameters and camera
-    HARMEDA::ParamsLoader params(argc, argv);
+    VibES::ParamsLoader params(argc, argv);
     std::cout << params;
 
     const auto width = params.camera.geometry().width();
@@ -66,7 +66,7 @@ int main(int argc, char *argv[]) {
     // Initialize undistortion
     Undistort undistort(params.params->calib_file);
 
-    // Setup CD frame generator (similar to original)
+    // Setup CD frame generator
     std::mutex cd_frame_mutex;
     cv::Mat cd_frame;
     Metavision::timestamp cd_frame_ts{0};
@@ -99,33 +99,49 @@ int main(int argc, char *argv[]) {
     std::vector<double> Ax, Ay, Bx, By, omegas, offsets;
     std::mutex processing_mutex;
 
-    // Setup display window (similar to original)
-    std::string window_name("HARMEDA Event Tracking");
+    // Setup display window
+    std::string window_name("VibES Event Tracking");
     cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
     cv::resizeWindow(window_name, width, height);
     cv::moveWindow(window_name, 0, 0);
 
+    // --- MODIFICATION START ---
+    // Moved variable declarations here so they can be captured by the lambda
+    Metavision::Stage::EventBuffer compensated_events;
+    unsigned short x_undistorted, y_undistorted;
+    unsigned short t_centre_x = 0, t_centre_y = 0;
+
     std::vector<std::pair<unsigned short, unsigned short>> tracker_centers;
-    NUFFT_ESTIMATION_DONE = true; // Flag to indicate if NUFFT estimation is done
+    NUFFT_ESTIMATION_DONE = true;
+
     // Mouse callback for tracker initialization
     std::function<void(int, int)> mouse_callback = [&](const int x, const int y) {
         std::lock_guard<std::mutex> lock(processing_mutex);
+
+        // Optional: If you want to allow moving the tracker even if estimation isn't done,
+        // comment out this if-block. Keeping it preserves original logic safety.
         if (!NUFFT_ESTIMATION_DONE) {
             std::cout << "Working on the first tracker, please wait..." << std::endl;
-            return;
+            // return; // Uncommenting 'return' prevents re-clicking while processing
         }
+
         tracker_centers.emplace_back(x, y);
-        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(557, 242, TRACKER_RATE, first_event_t);
+
+        // Update visualization coordinates immediately
+        t_centre_x = x;
+        t_centre_y = y;
+
+        // Initialize tracker with CLICKED coordinates (x, y) instead of hardcoded values
+        tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(x, y, TRACKER_RATE, first_event_t);
+
         NUFFT_ESTIMATION_DONE = false;
+        std::cout << "Tracker initialized at (" << x << ", " << y << ")" << std::endl;
     };
+    // --- MODIFICATION END ---
 
     cv::setMouseCallback(window_name, receiveMouseEvent, &mouse_callback);
 
     bool osd = false; // On-screen display toggle
-
-    Metavision::Stage::EventBuffer compensated_events;
-    unsigned short x_undistorted, y_undistorted, t_centre_x, t_centre_y;
-
 
     std::once_flag init_flag;
     // Main event processing callback
@@ -154,7 +170,7 @@ int main(int argc, char *argv[]) {
             event_to_build.p = ev->p;
 
             // Process with tracker
-            if (!NUFFT_ESTIMATION_DONE && tracker->feed(event_to_build) &&
+            if (!NUFFT_ESTIMATION_DONE && tracker && tracker->feed(event_to_build) &&
                 nufft_estimator->feed(std::move(tracker->getCentroids()))) {
                 nufft_estimator->printResults();
                 NUFFTHelixEstimator::extractHarmonicParameters(nufft_estimator->getHarmonics(), Ax, Ay, Bx, By,
@@ -169,9 +185,8 @@ int main(int argc, char *argv[]) {
                 }
                 NUFFT_ESTIMATION_DONE = nufft_estimator->done();
             }
-
-
         }
+
         // Feed events to frame generator and rate estimator
         const auto *begin_comp = compensated_events.data();
         const auto *end_comp = begin_comp + compensated_events.size();
@@ -183,7 +198,7 @@ int main(int argc, char *argv[]) {
     params.camera.start();
     start_time = std::chrono::steady_clock::now();
 
-    // Main processing loop (similar to original)
+    // Main processing loop
     while (params.camera.is_running()) {
         // Display frame with thread safety
         {
@@ -204,9 +219,12 @@ int main(int argc, char *argv[]) {
 
                     // Add tracker info if available
                     if (tracker) {
-                        int i = 0;
                         const cv::Scalar main_color(128, 200, 128);
-                        tracker->getCurrentPosition(t_centre_x, t_centre_y);
+
+                        // Update position if tracker is running, otherwise use last clicked
+                        if(!NUFFT_ESTIMATION_DONE) {
+                            tracker->getCurrentPosition(t_centre_x, t_centre_y);
+                        }
 
                         cv::rectangle(display_frame,
                                       cv::Point(t_centre_x - half_size, t_centre_y - half_size + 1),
@@ -249,8 +267,8 @@ int main(int argc, char *argv[]) {
             case 'r': {
                 std::lock_guard<std::mutex> lock(processing_mutex);
                 nufft_estimator = std::make_shared<NUFFTHelixEstimator>(MIN_FREQUENCY, MAX_FREQUENCY, MAX_HARMONICS);
-                tracker = std::make_shared<HasteWrapper<Metavision::EventCD>>(810, 490, TRACKER_RATE, first_event_t);
-                NUFFT_ESTIMATION_DONE = false;
+                tracker.reset(); // Clear tracker to require new click
+                NUFFT_ESTIMATION_DONE = true; // Set to true to wait for click
                 std::cout << "Reset tracker" << std::endl;
             }
                 break;

@@ -26,7 +26,6 @@
 
 #include "haste/app/command_parser.hpp"
 #include "haste/tracking.hpp"
-//#include "estimator/iekf_sinusoid_fitter.hpp"
 #include "estimator/iekf_sinusoid_fitter_multi_harmonic.hpp"
 
 using TrackerPtr = std::shared_ptr<haste::HypothesisPatchTracker>;
@@ -42,7 +41,6 @@ namespace {
     constexpr int MAX_AMPLITUDE = 5000;
 }
 
-//#define STORE
 
 // Base class for template-independent code
 class HasteWrapperBase {
@@ -72,10 +70,6 @@ protected:
     const int initial_y_;
     Metavision::timestamp init_time_;
 
-#ifdef STORE
-    std::ofstream file_centroid_;
-#endif
-
     bool NUFFT_not_init = true;
 
 public:
@@ -94,9 +88,6 @@ public:
         last_x_.store(tracker_->x(), std::memory_order_relaxed);
         last_y_.store(tracker_->y(), std::memory_order_relaxed);
 
-#ifdef STORE
-        file_centroid_.open(output_folder + "/centroids.txt");
-#endif
     }
 
     void printFittersStatus() {
@@ -115,9 +106,6 @@ public:
 
     virtual ~HasteWrapperBase() {
         stop();
-#ifdef STORE
-        file_centroid_.close();
-#endif
     }
 
     void stop() {
@@ -159,9 +147,6 @@ public:
     }
 
     bool getRelEstimate(Metavision::timestamp t_query, double t, double &x, double &y) {
-//#ifdef TIMING
-//        PROFILE_FUNCTION();
-//#endif
         if (!x_fitter_ || !y_fitter_) {
             return false;
         }
@@ -256,12 +241,6 @@ protected:
 
         if (x == 0 && y == 0) return;
 
-#ifdef STORE
-        file_centroid_ << std::fixed << std::setprecision(6)
-                       << t << " " << x << " " << y << "\n";
-        file_centroid_.flush();
-#endif
-
         // Add to centroid queue with size limit
         {
             std::lock_guard<std::mutex> lock(centroids_mutex_);
@@ -276,14 +255,6 @@ protected:
             // Update fitters
             if (x_fitter_) {
                 x_fitter_->update(t, x);
-                double amplitude = x_fitter_->getAmplitude();
-//                color_.store(static_cast<int>(std::min(255.0,
-//                                                       std::max(0.0,
-//                                                                amplitude * 1000 / static_cast<double>(MAX_AMPLITUDE) *
-//                                                                255.0))),
-//                             std::memory_order_relaxed);
-//                color_.store(static_cast<int>(amplitude * 1000),
-//                             std::memory_order_relaxed);
                 last_x_.store(x_fitter_->getShift(), std::memory_order_relaxed);
             }
             if (y_fitter_) {
@@ -314,9 +285,6 @@ public:
     }
 
     bool feed(const T &event) {
-//#ifdef TIMING
-//        PROFILE_FUNCTION();
-//#endif
         if (inTracker(event)) {
             return event_stack_.push(event);
         }

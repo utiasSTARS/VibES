@@ -33,8 +33,8 @@ public:
         process_noise.setIdentity();
         process_noise(0, 0) = 1e0;
         process_noise(1, 1) = 1e0;
-        process_noise(2, 2) = 1e-3;
-        process_noise(3, 3) = 1e0;
+        process_noise(2, 2) = 1e-3; // 1e-2;
+        process_noise(3, 3) = 1e0; // 1e1;
 
         return {initial_state, initial_covariance, process_noise,
                 DEFAULT_MEASUREMENT_NOISE, iterations};
