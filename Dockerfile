@@ -14,27 +14,34 @@ RUN apt-get update && apt-get install -y \
     curl \
     unzip \
     vim \
-    software-properties-common
+    apt-utils \
+    libopencv-dev libboost-all-dev libusb-1.0-0-dev libprotobuf-dev protobuf-compiler \
+    libhdf5-dev hdf5-tools libglew-dev libglfw3-dev libcanberra-gtk-module ffmpeg \
+    software-properties-common libfftw3-dev libeigen3-dev libgflags2.2 libgflags-dev libgoogle-glog-dev
 
 # Create working directory
 RUN mkdir -p /VibES
 WORKDIR /VibES
 
 # Install dependencies
-RUN apt-get install -y libfftw3-dev
+RUN git clone https://github.com/prophesee-ai/openeb.git --branch 5.1.1
+RUN cd openeb &&  \
+    mkdir build && cd build &&  \
+    cmake .. -DCOMPILE_PYTHON3_BINDINGS=OFF &&  \
+    cmake --build . --config Release -- -j 4 && \
+    cmake --build . --target install
 
 # Install VibES
 COPY cmake /VibES/cmake
 COPY include /VibES/include
-COPY demo_old /VibES/demo
+COPY demo /VibES/demo
+COPY thirdparty /VibES/thirdparty
 COPY CMakeLists.txt /VibES/CMakeLists.txt
-COPY camera /VibES/camera
-COPY tests /VibES/tests
 
 # Build VibES
 RUN mkdir -p /VibES/build
 WORKDIR /VibES/build
 RUN cmake .. -DCMAKE_BUILD_TYPE=Release && make -j4
 
-# Run demo_old
-CMD ["./helix_vis_thread"]
+# Set entrypoint
+ENTRYPOINT ["./compensation", "-c", "/datasets/intrinsics.json", "-i", "/datasets/data/logo_vib.hdf5", "-o", "../results/logo/harmeda/", "--tracker-x", "557", "--tracker-y", "242"]

@@ -232,7 +232,7 @@ double test_depth(int argc, char *argv[]) {
         ));
     }
 
-    Metavision::Stage::EventBuffer compensated_events;
+   std::vector<Metavision::EventCD> compensated_events;
     unsigned short x_undistorted, y_undistorted;
     std::once_flag init_flag;
 

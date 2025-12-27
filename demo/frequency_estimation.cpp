@@ -22,7 +22,6 @@
 #include <metavision/sdk/core/utils/cd_frame_generator.h>
 #include <metavision/sdk/core/utils/rate_estimator.h>
 #include <metavision/sdk/ui/utils/event_loop.h>
-#include <metavision/sdk/core/pipeline/stage.h>
 #include <metavision/sdk/core/utils/misc.h>
 
 #include <opencv2/highgui/highgui.hpp>
@@ -90,8 +89,13 @@ int main(int argc, char *argv[]) {
     std::cout << params;
 
     // 3. Camera Geometry Setup
+#ifdef OPENEB
+    const auto width = params.camera.geometry().get_width();
+    const auto height = params.camera.geometry().get_height();
+#else
     const auto width = params.camera.geometry().width();
     const auto height = params.camera.geometry().height();
+#endif
 
     const int size = haste::HypothesisPatchTracker::kPatchSize;
     const int half_size = size / 2;
@@ -143,7 +147,7 @@ int main(int argc, char *argv[]) {
     cv::moveWindow(window_name, 0, 0);
 
     // State variables for visualization and tracking
-    Metavision::Stage::EventBuffer compensated_events;
+   std::vector<Metavision::EventCD> compensated_events;
     unsigned short x_undistorted, y_undistorted;
     unsigned short t_centre_x = 0, t_centre_y = 0;
 

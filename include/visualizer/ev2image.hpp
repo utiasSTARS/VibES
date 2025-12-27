@@ -16,7 +16,6 @@
 #ifndef PROJECT_EV2IMAGE_HPP
 #define PROJECT_EV2IMAGE_HPP
 
-#include <metavision/sdk/core/pipeline/stage.h>
 #include <opencv2/opencv.hpp>
 #include <vector>
 #include <cmath>
@@ -64,7 +63,7 @@ enum ImageType {
  * @param MAT_COLS Width of the sensor/image.
  * @return ImageResults Struct containing all generated OpenCV matrices.
  */
-inline ImageResults ev2img_metavision(Metavision::Stage::EventBuffer &evs, int MAT_ROWS, int MAT_COLS) {
+inline ImageResults ev2img_metavision(std::vector<Metavision::EventCD> &evs, int MAT_ROWS, int MAT_COLS) {
     ImageResults results;
 
     if (evs.empty()) {
@@ -152,7 +151,7 @@ inline ImageResults ev2img_metavision(Metavision::Stage::EventBuffer &evs, int M
  * @param height Sensor height.
  * @param type The specific type of visualization required.
  */
-inline void ev2img_metavision(Metavision::Stage::EventBuffer &evs, cv::Mat &output, int width, int height, ImageType type) {
+inline void ev2img_metavision(std::vector<Metavision::EventCD> &evs, cv::Mat &output, int width, int height, ImageType type) {
     if (evs.empty()) {
         if(output.empty() || output.cols != width || output.rows != height) {
             output = cv::Mat::zeros(height, width, (type == COUNT_GRAY) ? CV_16UC1 : ((type == TS_GRAY || type == AVERAGE_TS_GRAY) ? CV_32FC1 : CV_8UC1));

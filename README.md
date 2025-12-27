@@ -52,7 +52,7 @@ Ensure FFTW3 and the Metavision SDK are installed.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y libfftw3-dev
+sudo apt-get install -y libfftw3-dev libeigen3-dev libgflags2 libgflags-dev
 ```
 
 ### 2. Local Build (C++20)
@@ -65,58 +65,39 @@ make -j$(nproc)
 
 ### 3. Docker (Recommended)
 
-Build and run with X11 forwarding for visualization:
+Run with X11 forwarding for visualization, mount the dataset directory:
 
 ```bash
-docker build -t vibes .
-docker run --net=host --rm --privileged \
-  -e DISPLAY=$DISPLAY \
-  -v /tmp/.X11-unix:/tmp/.X11-unix \
-  -it vibes ./helix_vis_thread_vis
+docker docker run --net=host --rm -v /PATH_TO/event_harmeda/vibes_dataset/:/datasets --privileged -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix -it viciopoli/vibes:latest 
 ```
+
+If you `/bin/bash` into the container different executables can be run.
+Example:
+
+```bash
+./compensation -c /datasets/intrinsics.json -i /datasets/data/logo_vib.hdf5 -o ../results/logo/harmeda/ --tracker-x 557 --tracker-y 242
+```
+
+Press o to enable the overlay visualization.
 
 ---
 
 ## 💻 Usage
 
 ### Core Executables
+* **`compensation`**: Real-time vibration estimation and motion rectification.
+* **`multi_tracker`**: Multi-feature tracking using the HASTE backend.
+* **`frequency_estimation`**: Offline vibration frequency analysis.
 
-* `compensation` – Real-time vibration estimation and motion rectification
-* `multi_tracker` – Multi-feature tracking using the HASTE backend
-* `depth_estimation` – Relative depth from vibration-induced parallax
-* `frequency_estimation` – Offline vibration frequency analysis
+### Running the Compensation Tool
+The primary tool is `compensation`. It requires an initial feature location (x, y) to begin tracking the vibration.
 
-### Examples
-
-**Live camera with visualization**
-
+**Basic Syntax:**
 ```bash
-./build/helix_vis_thread_vis camera
+./compensation -c <intrinsics.json> -i <file.hdf5> --tracker-x <x> --tracker-y <y>
 ```
 
-**Process a recording**
-
-```bash
-./build/helix_vis_thread /path/to/recording.aedat4
-```
-
----
-
-## 📊 Evaluation & Metrics
-
-To enable quantitative evaluation (Entropy, NIQE, edge metrics):
-
-```bash
-cmake .. -DBUILD_METRICS=ON
-make -j
-```
-
-This builds:
-
-* `edges_metrics`
-* `variance_grad_metrics`
-
-for systematic performance analysis.
+If `-i` is not provided, the program will attempt to connect to a live camera.
 
 ---
 

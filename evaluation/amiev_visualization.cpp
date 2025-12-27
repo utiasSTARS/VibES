@@ -102,7 +102,7 @@ int main(int argc, char *argv[]) {
                              });
 
     // 4. Setup Custom Accumulation Buffers
-    Metavision::Stage::EventBuffer amiev_events;
+   std::vector<Metavision::EventCD> amiev_events;
     Metavision::timestamp first_ts_in_batch = -1;
     int counter = 0;
 

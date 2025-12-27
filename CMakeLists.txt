@@ -24,7 +24,31 @@ CPMAddPackage(
 find_package(OpenCV 4.5 REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Boost 1.74 REQUIRED COMPONENTS filesystem system program_options)
-find_package(MetavisionSDK COMPONENTS base cv driver ui REQUIRED analytics)
+
+# -----------------------------------------------------------------------------
+# Metavision SDK / OpenEB Fallback Logic
+# -----------------------------------------------------------------------------
+# 1. Try to find the full SDK (including 'cv' and 'driver')
+#    We use QUIET so it doesn't fail the build immediately if not found.
+find_package(MetavisionSDK COMPONENTS base cv driver ui QUIET)
+
+# 2. Check if the previous attempt succeeded
+if(MetavisionSDK_FOUND)
+    message(STATUS "Full MetavisionSDK found.")
+    # Use the standard driver component
+    set(METAVISION_DRIVER_LIB MetavisionSDK::driver)
+else()
+    message(STATUS "Full MetavisionSDK not found. Falling back to OpenEB modules (base, stream, ui).")
+
+    # 3. If failed, try the fallback (OpenEB version) with REQUIRED
+    find_package(MetavisionSDK COMPONENTS base stream ui REQUIRED)
+
+    # 4. Set the flag and switch the driver library to 'stream'
+    add_compile_definitions(OPENEB)
+    set(METAVISION_DRIVER_LIB MetavisionSDK::stream)
+endif()
+# -----------------------------------------------------------------------------
+
 find_package(TIFF REQUIRED)
 
 include_directories(${EIGEN3_INCLUDE_DIR} ${Boost_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
@@ -37,27 +61,31 @@ add_subdirectory(thirdparty/haste/thirdparty/quickgui)
 include_directories(thirdparty/haste/include)
 
 # Executables
+
 add_executable(compensation demo/compensation.cpp)
-target_link_libraries(compensation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
+# Replaced MetavisionSDK::driver with ${METAVISION_DRIVER_LIB}
+target_link_libraries(compensation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base ${METAVISION_DRIVER_LIB} MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 add_executable(multi_tracker demo/multi_tracker.cpp)
-target_link_libraries(multi_tracker PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
+# Note: multi_tracker only used base/ui, so no change needed here (unless it actually requires stream/driver logic)
+target_link_libraries(multi_tracker PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base ${METAVISION_DRIVER_LIB} MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 add_executable(frequency_estimation demo/frequency_estimation.cpp)
-target_link_libraries(frequency_estimation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
+# Note: frequency_estimation only used base/ui, so no change needed here
+target_link_libraries(frequency_estimation PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base ${METAVISION_DRIVER_LIB} MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 if (BUILD_METRICS)
 
     add_executable(depth_estimation_iter evaluation/depth_estimation_iter.cpp)
-    target_link_libraries(depth_estimation_iter PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
+    target_link_libraries(depth_estimation_iter PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base ${METAVISION_DRIVER_LIB} MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
     add_executable(amiev_visualization evaluation/amiev_visualization.cpp)
-    target_link_libraries(amiev_visualization PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
+    target_link_libraries(amiev_visualization PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base ${METAVISION_DRIVER_LIB} MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
     add_executable(edges_metrics evaluation/edges_metrics.cpp)
-    target_link_libraries(edges_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
+    target_link_libraries(edges_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base ${METAVISION_DRIVER_LIB} MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
     add_executable(variance_grad_metrics evaluation/variance_grad_metrics.cpp)
-    target_link_libraries(variance_grad_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base MetavisionSDK::cv MetavisionSDK::driver MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
+    target_link_libraries(variance_grad_metrics PRIVATE finufft ${OpenCV_LIBS} MetavisionSDK::base ${METAVISION_DRIVER_LIB} MetavisionSDK::ui Boost::filesystem Boost::system Boost::program_options PUBLIC gflags glog QuickGui)
 
 endif ()

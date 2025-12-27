@@ -23,7 +23,11 @@
 #include <filesystem>
 
 #include <boost/program_options.hpp>
+#ifdef OPENEB
+#include <metavision/sdk/stream/camera.h>
+#else
 #include <metavision/sdk/driver/camera.h>
+#endif
 
 namespace po = boost::program_options;
 
