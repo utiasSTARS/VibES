@@ -1,165 +1,121 @@
-#pragma once
+/**
+ * @file utils.hpp
+ * @brief Common utility structures and helper functions for UI and signal processing.
+ *
+ * This file contains shared data structures (like Centroid), OpenCV UI helpers,
+ * and mathematical conversion templates used throughout the tracking pipeline.
+ *
+ * @author Vincenzo Polizzi - STARS Lab
+ * @date Dec 27 2025
+ */
 
+#ifndef PROJECT_UTILS_HPP
+#define PROJECT_UTILS_HPP
+
+#include <algorithm>
+#include <sstream>
+#include <vector>
+#include <tuple>
+#include <cmath>
+#include <optional>
 #include <chrono>
-#include <string>
-#include <unordered_map>
-#include <mutex>
-#include <iostream>
-#include <iomanip>
+#include <thread>
+#include <functional>
+#include <opencv2/highgui.hpp> // Required for cv::waitKey and Mouse events
 
-class ProfileTimer {
-private:
-    std::chrono::high_resolution_clock::time_point start_time;
-    std::string scope_name;
+/**
+ * @struct Centroid
+ * @brief Lightweight representation of a cluster center or tracked object.
+ *
+ * Used to pass simplified event data between the tracker (HASTE) and the
+ * estimator (NUFFT).
+ */
+struct Centroid {
+    float t;           ///< Timestamp in seconds.
+    unsigned short x;  ///< X coordinate (pixel).
+    unsigned short y;  ///< Y coordinate (pixel).
 
-    struct TimerData {
-        long long total_ns = 0;
-        size_t call_count = 0;
+    /**
+     * @brief Constructor for easy emplacement.
+     */
+    Centroid(double t_sec, double x_pos, double y_pos)
+        : t(static_cast<float>(t_sec)),
+          x(static_cast<unsigned short>(x_pos)),
+          y(static_cast<unsigned short>(y_pos)) {}
 
-        void add_measurement(long long ns) {
-            total_ns += ns;
-            ++call_count;
-        }
-    };
-
-    // Thread-safe access to timer data
-    static std::mutex timer_mutex;
-    static std::unordered_map<std::string, TimerData> full_timer;
-
-public:
-    explicit ProfileTimer(const std::string &name) : scope_name(name) {
-        // Ensure timer entry exists
-        {
-            std::lock_guard<std::mutex> lock(timer_mutex);
-            if (full_timer.find(scope_name) == full_timer.end()) {
-                full_timer[scope_name] = TimerData{};
-            }
-        }
-        start_time = std::chrono::high_resolution_clock::now();
-    }
-
-    // Disable copy/move to prevent timing issues
-    ProfileTimer(const ProfileTimer &) = delete;
-
-    ProfileTimer &operator=(const ProfileTimer &) = delete;
-
-    ProfileTimer(ProfileTimer &&) = delete;
-
-    ProfileTimer &operator=(ProfileTimer &&) = delete;
-
-    static void add_name(const std::string &name) {
-        std::lock_guard<std::mutex> lock(timer_mutex);
-        if (full_timer.find(name) == full_timer.end()) {
-            full_timer[name] = TimerData{};
-        }
-    }
-
-    static void print_results(const std::string &name, bool show_average = false, long long total_events = 0) {
-        std::lock_guard<std::mutex> lock(timer_mutex);
-
-        auto it = full_timer.find(name);
-        if (it == full_timer.end()) {
-            std::cout << "[PROFILE] Timer '" << name << "' not found" << std::endl;
-            return;
-        }
-
-        const auto &data = it->second;
-
-        if (total_events > 0) {
-            std::cout << "[PROFILE] " << name << ": "
-                      << std::fixed << std::setprecision(2)
-                      << (data.total_ns / 1e6) << " ms, "
-                      << data.call_count << " calls, "
-                      << (data.total_ns / total_events) << " ns/event"
-                      << std::endl;
-            return;
-        }
-
-        if (show_average && data.call_count > 0) {
-            long long avg_ns = data.total_ns / data.call_count;
-            std::cout << "[PROFILE] " << name << ": "
-                      << std::fixed << std::setprecision(2)
-                      << avg_ns << " ns/call (avg over " << data.call_count << " calls)"
-                      << std::endl;
-        } else {
-            std::cout << "[PROFILE] " << name << ": "
-                      << std::fixed << std::setprecision(2)
-                      << data.total_ns << " ns, "
-                      << (data.total_ns / 1e6) << " ms, "
-                      << data.call_count << " calls"
-                      << std::endl;
-        }
-    }
-
-    static void print_all_results() {
-        std::lock_guard<std::mutex> lock(timer_mutex);
-
-        if (full_timer.empty()) {
-            std::cout << "[PROFILE] No timing data available" << std::endl;
-            return;
-        }
-
-        std::cout << "[PROFILE] All timing results:" << std::endl;
-        for (const auto &[name, data]: full_timer) {
-            std::cout << "  " << name << ": "
-                      << std::fixed << std::setprecision(2)
-                      << (data.total_ns / 1e6) << " ms ("
-                      << data.call_count << " calls, "
-                      << (data.call_count > 0 ? data.total_ns / data.call_count : 0)
-                      << " ns/call avg)" << std::endl;
-        }
-    }
-
-    static void reset(const std::string &name = "") {
-        std::lock_guard<std::mutex> lock(timer_mutex);
-
-        if (name.empty()) {
-            full_timer.clear();
-        } else {
-            auto it = full_timer.find(name);
-            if (it != full_timer.end()) {
-                it->second = TimerData{};
-            }
-        }
-    }
-
-    static size_t get_call_count(const std::string &name) {
-        std::lock_guard<std::mutex> lock(timer_mutex);
-        auto it = full_timer.find(name);
-        return (it != full_timer.end()) ? it->second.call_count : 0;
-    }
-
-    static long long get_total_time_ns(const std::string &name) {
-        std::lock_guard<std::mutex> lock(timer_mutex);
-        auto it = full_timer.find(name);
-        return (it != full_timer.end()) ? it->second.total_ns : 0;
-    }
-
-    ~ProfileTimer() noexcept {
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-
-        std::lock_guard<std::mutex> lock(timer_mutex);
-        full_timer[scope_name].add_measurement(duration.count());
-    }
+    // Default constructor
+    Centroid() : t(0), x(0), y(0) {}
 };
 
-// Static member definitions
-std::mutex ProfileTimer::timer_mutex;
-std::unordered_map<std::string, ProfileTimer::TimerData> ProfileTimer::full_timer;
+/**
+ * @brief Handles OpenCV UI events with consistent timing.
+ *
+ * Wraps `cv::waitKey` but ensures that the function takes *at least*
+ * `delay_ms` to execute. This helps maintain a maximum frame rate limit
+ * when the processing loop is faster than the desired display rate.
+ *
+ * @param delay_ms Minimum duration to wait in milliseconds.
+ * @return int The ASCII code of the key pressed, or -1 if no key was pressed.
+ */
+inline int processUI(int delay_ms) {
+    auto then = std::chrono::high_resolution_clock::now();
 
-// Convenience macro for easier usage
-#define PROFILE_SCOPE(name) ProfileTimer _profile_timer(name)
-#define PROFILE_FUNCTION() ProfileTimer _profile_timer(__FUNCTION__)
+    // OpenCV waitKey handles window events (redraw, resize, input)
+    int key = cv::waitKey(delay_ms);
 
-// RAII helper for conditional profiling
-class ConditionalProfiler {
-    std::unique_ptr<ProfileTimer> timer;
+    auto now = std::chrono::high_resolution_clock::now();
 
-public:
-    explicit ConditionalProfiler(const std::string &name, bool enabled) {
-        if (enabled) {
-            timer = std::make_unique<ProfileTimer>(name);
-        }
+    // Calculate how much time we actually spent in waitKey
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - then).count();
+
+    // If waitKey returned early (or was faster than expected), sleep the difference
+    // to enforce a stable frame pacing.
+    if (elapsed < delay_ms) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms - elapsed));
     }
-};
+
+    return key;
+}
+
+/**
+ * @brief Bridge function to connect OpenCV C-style mouse callbacks to C++ std::functions.
+ *
+ * Usage:
+ * @code
+ * std::function<void(int, int)> my_callback = [&](int x, int y) { ... };
+ * cv::setMouseCallback("Window", receiveMouseEvent, &my_callback);
+ * @endcode
+ *
+ * @param event The OpenCV mouse event type (e.g., EVENT_LBUTTONDOWN).
+ * @param x Mouse X coordinate.
+ * @param y Mouse Y coordinate.
+ * @param flags Event flags (Ctrl, Shift, etc.).
+ * @param userdata Pointer to the `std::function<void(int,int)>` object.
+ */
+inline void receiveMouseEvent(int event, int x, int y, int flags, void *userdata) {
+    auto *callback = reinterpret_cast<std::function<void(int, int)> *>(userdata);
+
+    if (event == cv::EVENT_LBUTTONDOWN && callback) {
+        (*callback)(x, y);
+    }
+}
+
+/**
+ * @brief Converts Angular Frequency (rad/s) to Hertz (Hz).
+ * @tparam T Floating point type (float, double).
+ */
+template<typename T>
+inline T rad2Hz(T rad) {
+    return rad / (2 * M_PI);
+}
+
+/**
+ * @brief Converts Hertz (Hz) to Angular Frequency (rad/s).
+ * @tparam T Floating point type (float, double).
+ */
+template<typename T>
+inline T Hz2rad(T hz) {
+    return hz * (2 * M_PI);
+}
+
+#endif  // PROJECT_UTILS_HPP

@@ -2,7 +2,7 @@
 
 # Path to your folder containing events_*.hdf5
 DATASET_DIR=${1:-"/path/to/your/dataset"}
-SCRIPT_PATH=${2:-"/path/to/your/kde_script.py"}
+SCRIPT_PATH=${2:-"./metrics/kde.py"}
 DOWNSAMPLE_RATE=${3:-60}  # Default downsample rate
 
 # Batch size

@@ -1,7 +1,20 @@
-//
-// Created by viciopoli on 08/08/25.
-// Fixed version with proper image registration and processing
-//
+/**
+ * @file image_processor.cpp
+ * @brief Evaluation utility for vibration analysis using Computer Vision.
+ *
+ * This tool quantifies the overlap between "vibration" pixels (detected from events)
+ * and "structural" pixels (from standard grayscale frames).
+ *
+ * Pipeline:
+ * 1. **Preprocessing:** Otsu thresholding and Canny edge detection on the reference gray image.
+ * 2. **Registration:** Aligns the event-based "vibration" image to the gray image using ECC (Enhanced Correlation Coefficient).
+ * 3. **Morphology:** Cleans up noise using dilation/closing and area filtering (bwareaopen).
+ * 4. **Analysis:** Counts overlapping pixels to determine a "Match Ratio".
+ *
+ * @author Vincenzo Polizzi - STARS Lab
+ * @date Dec 27 2025
+ */
+
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
@@ -9,31 +22,35 @@
 #include <vector>
 #include <string>
 #include <fstream>
+#include <numeric>
 
 using namespace cv;
 using namespace std;
 
 class ImageProcessor {
 private:
-    const int IMG_NUM = 700;
-    const int SEARCH_RADIUS = 2;
+    // Configuration
+    const int IMG_NUM = 700;        ///< Total number of frames to process.
+    const int SEARCH_RADIUS = 2;    ///< Pixel radius for relaxed matching (tolerance).
 
-    vector<int> grey_num;
-    vector<int> vib_match_num_in_gray;
-    vector<int> vib_no_match_num;
-    vector<int> vib_match_num;
-    vector<int> vib_all_num;
+    // Statistics Buffers
+    vector<int> grey_num;              ///< Count of structural pixels in the gray image.
+    vector<int> vib_match_num_in_gray; ///< Count of vibration pixels that match structure.
+    vector<int> vib_no_match_num;      ///< Count of vibration pixels that do NOT match structure (noise).
+    vector<int> vib_match_num;         ///< Total vibration pixels considered matches.
+    vector<int> vib_all_num;           ///< Total vibration pixels detected.
 
-    // Update paths to match MATLAB structure
+    // Data Paths (Configure these before running)
     string frame_gray_path = "PATH_TO_AMIEV_FRAMES/";
     string frame_novib_path = "PATH_TO_AMIEV_GRAY_NO_VIB/";
     string frame_vib_path = "PATH_TO_AMIEV_GRAY_VIB/";
 
-    // Store the transformation matrix for registration
+    // Registration state
     Mat transformation_matrix;
 
 public:
     ImageProcessor() {
+        // Pre-allocate memory
         grey_num.resize(IMG_NUM, 0);
         vib_match_num_in_gray.resize(IMG_NUM, 0);
         vib_no_match_num.resize(IMG_NUM, 0);
@@ -44,36 +61,52 @@ public:
         transformation_matrix = Mat::eye(2, 3, CV_32F);
     }
 
+    /**
+     * @brief Applies a fixed binary threshold.
+     * @param thresh Threshold value normalized [0, 1].
+     */
     Mat applyThreshold(const Mat &image, double thresh) {
         Mat binary;
         threshold(image, binary, thresh * 255, 255, THRESH_BINARY);
         return binary;
     }
 
+    /**
+     * @brief Applies Otsu's binarization algorithm.
+     * Automatically finds the optimal threshold to minimize intra-class variance.
+     */
     Mat applyOtsuThreshold(const Mat &image) {
         Mat binary;
         threshold(image, binary, 0, 255, THRESH_BINARY + THRESH_OTSU);
         return binary;
     }
 
+    /**
+     * @brief Performs morphological closing and dilation to connect fragmented edges.
+     */
     Mat morphologicalOperations(const Mat &image) {
         Mat result = image.clone();
 
-        // Close operation with square kernel (7x7)
+        // 1. Close: Dilation -> Erosion (Fill holes)
         Mat kernel_square = getStructuringElement(MORPH_RECT, Size(7, 7));
         morphologyEx(result, result, MORPH_CLOSE, kernel_square);
 
-        // Dilate with vertical line (3x1) - 90 degrees
+        // 2. Dilate Vertical (Connect vertical gaps)
         Mat kernel_line_v = getStructuringElement(MORPH_RECT, Size(1, 3));
         dilate(result, result, kernel_line_v);
 
-        // Dilate with horizontal line (3x1) - 0 degrees
+        // 3. Dilate Horizontal (Connect horizontal gaps)
         Mat kernel_line_h = getStructuringElement(MORPH_RECT, Size(3, 1));
         dilate(result, result, kernel_line_h);
 
         return result;
     }
 
+    /**
+     * @brief Removes small connected components (noise/speckles).
+     * Equivalent to MATLAB's bwareaopen.
+     * @param minArea Minimum area in pixels to keep a component.
+     */
     Mat bwareaopen(const Mat &binary, int minArea) {
         Mat result = Mat::zeros(binary.size(), CV_8U);
         vector<vector<Point>> contours;
@@ -87,9 +120,14 @@ public:
         return result;
     }
 
+    /**
+     * @brief Removes large connected components (background/artifacts).
+     * @param maxArea Maximum area in pixels to keep a component.
+     */
     Mat bwareaopenlarge(const Mat &binary, int maxArea) {
         Mat result = Mat::zeros(binary.size(), CV_8U);
         vector<vector<Point>> contours;
+        // Use RETR_LIST to catch nested contours if necessary
         findContours(binary, contours, RETR_LIST, CHAIN_APPROX_SIMPLE);
 
         for (size_t i = 0; i < contours.size(); i++) {
@@ -100,31 +138,30 @@ public:
         return result;
     }
 
+    /**
+     * @brief Aligns the 'moving' image to the 'fixed' image using ECC.
+     * ECC (Enhanced Correlation Coefficient) is robust to illumination changes.
+     */
     Mat registerImages(const Mat &fixed, const Mat &moving, bool update_transform = true) {
         try {
-            // Convert images to appropriate format
             Mat moving_f, fixed_f;
             moving.convertTo(moving_f, CV_32F);
             fixed.convertTo(fixed_f, CV_32F);
 
-            // Create proper 2x3 affine matrix
+            // 2x3 Affine Matrix [a11 a12 b1; a21 a22 b2]
             Mat warp_matrix = Mat::eye(2, 3, CV_32F);
 
-            // Set termination criteria
+            // Termination: 1000 iterations or epsilon 1e-5
             TermCriteria criteria(TermCriteria::COUNT + TermCriteria::EPS, 1000, 1e-5);
 
             try {
-                // Perform registration
                 findTransformECC(fixed_f, moving_f, warp_matrix, MOTION_AFFINE, criteria);
-                cout << "ECC registration successful" << endl;
+                // cout << "ECC registration successful" << endl; // Verbose off
             } catch (const Exception &e) {
                 cout << "ECC registration failed, using identity transform" << endl;
-                // warp_matrix remains as identity
             }
 
-            // Apply transformation
             Mat registered;
-            warp_matrix.convertTo(warp_matrix, CV_32F); // Ensure correct type
             warpAffine(moving, registered, warp_matrix, fixed.size());
 
             return registered;
@@ -135,53 +172,54 @@ public:
         }
     }
 
+    /**
+     * @brief Loads and preprocesses the ground truth gray image.
+     */
     Mat processGrayImage(int index) {
-        // Build filename with 4-digit zero padding
         string filename = "image_" + to_string(index) + ".jpg";
         string gray_path = frame_gray_path + filename;
 
-        cout << "Loading gray image: " << gray_path << endl;
+        cout << "Loading reference: " << gray_path << endl;
         Mat gray_img = imread(gray_path, IMREAD_COLOR);
 
         if (gray_img.empty()) {
-            cout << "Could not load gray image: " << gray_path << endl;
-            throw std::runtime_error("Failed to load gray image");
+            throw std::runtime_error("Failed to load gray image: " + gray_path);
         }
 
-        // Convert to grayscale
         Mat gray;
         cvtColor(gray_img, gray, COLOR_BGR2GRAY);
 
-        // Apply Otsu thresholding (equivalent to graythresh + im2bw)
+        // 1. Otsu Thresholding
         Mat gray_thresh = applyOtsuThreshold(gray);
 
-        // Invert (~gray_edge in MATLAB)
+        // 2. Invert (assuming structure is dark on light background, or vice versa depending on intent)
         Mat gray_edge;
         bitwise_not(gray_thresh, gray_edge);
 
-        // Apply bwareaopenlarge (remove large areas > 100000)
-        gray_edge = bwareaopenlarge(gray_edge, 100000);
+        // 3. Filter blobs by size
+        gray_edge = bwareaopenlarge(gray_edge, 100000); // Remove massive blobs
+        gray_edge = bwareaopen(gray_edge, 100);         // Remove noise
 
-        // Apply bwareaopen (remove small areas < 100)
-        gray_edge = bwareaopen(gray_edge, 100);
-
-        // Apply edge detection
+        // 4. Edge Detection
         Mat canny_edges;
         Canny(gray_edge, canny_edges, 50, 150);
 
-        // Convert back to binary format for consistency
+        // 5. Final Binary Mask
         Mat result;
         threshold(canny_edges, result, 127, 255, THRESH_BINARY);
-
-        // show the processed gray image
-        imshow("Processed Gray Image", result);
-        waitKey(1);
 
         return result;
     }
 
+    /**
+     * @brief Processes a single pair of Vibration/No-Vibration frames.
+     *
+     * 1. Loads images.
+     * 2. Thresholds and cleans them.
+     * 3. Registers the vibration image to the ground truth.
+     * 4. Computes overlap statistics.
+     */
     void processImagePair(int i, Mat gray_img) {
-        // Build filenames
         string novib_path = frame_novib_path + to_string(i) + ".png";
         string vib_path = frame_vib_path + to_string(i) + ".png";
 
@@ -189,67 +227,54 @@ public:
         Mat vib = imread(vib_path, IMREAD_COLOR);
 
         if (novib.empty() || vib.empty()) {
-            cout << "Could not load images for index " << i << endl;
+            cout << "Skipping missing index " << i << endl;
             return;
         }
 
-        // Convert to grayscale
         Mat novib_gray, vib_gray;
         cvtColor(novib, novib_gray, COLOR_BGR2GRAY);
         cvtColor(vib, vib_gray, COLOR_BGR2GRAY);
 
-        // Apply thresholding with fixed values from MATLAB
+        // Thresholding
         Mat vib_edge = applyThreshold(vib_gray, 0.22);
         Mat novib_edge = applyThreshold(novib_gray, 0.26);
 
-        // Morphological operations on novib_edge
+        // Morphology
         novib_edge = morphologicalOperations(novib_edge);
 
-        // Median filtering
+        // Filtering
         medianBlur(vib_edge, vib_edge, 3);
         medianBlur(novib_edge, novib_edge, 3);
-
-        // Remove small areas
         novib_edge = bwareaopen(novib_edge, 100);
 
-        // Register vib_edge to gray_img
+        // Registration: Align vibration events to the gray image structure
         Mat mv_vib_edge = registerImages(vib_edge, gray_img);
 
-        // Create visualizations
+        // --- Visualization Composing ---
         Mat imgcolor = Mat::zeros(vib_edge.rows, vib_edge.cols, CV_8UC3);
-        vector<Mat> channels1(3);
-        channels1[0] = Mat::zeros(vib_edge.size(), CV_8U);  // Blue
-        channels1[1] = novib_edge;  // Green
-        channels1[2] = vib_edge;    // Red (original vib_edge)
+        vector<Mat> channels1 = {Mat::zeros(vib_edge.size(), CV_8U), novib_edge, vib_edge};
         merge(channels1, imgcolor);
 
         Mat imgcolor2 = Mat::zeros(vib_edge.rows, vib_edge.cols, CV_8UC3);
-        vector<Mat> channels2(3);
-        channels2[0] = Mat::zeros(vib_edge.size(), CV_8U);  // Blue
-        channels2[1] = gray_img;    // Green
-        channels2[2] = mv_vib_edge; // Red (registered vib_edge)
+        vector<Mat> channels2 = {Mat::zeros(vib_edge.size(), CV_8U), gray_img, mv_vib_edge};
         merge(channels2, imgcolor2);
 
-        Mat novib_color, vib_color;
-        cvtColor(novib_edge, novib_color, COLOR_GRAY2BGR);
-        cvtColor(vib_edge, vib_color, COLOR_GRAY2BGR);
+        Mat display1, display2, full_display;
+        Mat novib_c, vib_c;
+        cvtColor(novib_edge, novib_c, COLOR_GRAY2BGR);
+        cvtColor(vib_edge, vib_c, COLOR_GRAY2BGR);
 
-        // Display results in subplots
-        Mat display1, display2;
-        hconcat(vector<Mat>{novib_color, vib_color}, display1);
+        hconcat(vector<Mat>{novib_c, vib_c}, display1);
         hconcat(vector<Mat>{imgcolor, imgcolor2}, display2);
-        Mat full_display;
         vconcat(vector<Mat>{display1, display2}, full_display);
 
-        // Resize for display
         resize(full_display, full_display, Size(full_display.cols / 2, full_display.rows / 2));
         imshow("Processing Results", full_display);
         waitKey(1);
 
-        // Count vibration pixels (equivalent to find(mv_vib_edge==1))
+        // --- Statistics Calculation ---
         vib_all_num[i - 1] = countNonZero(mv_vib_edge);
 
-        // Matching analysis
         Mat mv_vib_edge_tmp = mv_vib_edge.clone();
         int rows = gray_img.rows;
         int cols = gray_img.cols;
@@ -257,27 +282,27 @@ public:
         grey_num[i - 1] = 0;
         vib_match_num_in_gray[i - 1] = 0;
 
+        // Iterate through ground truth pixels
         for (int ii = 0; ii < rows; ii++) {
             for (int jj = 0; jj < cols; jj++) {
-                if (gray_img.at<uchar>(ii, jj) == 255) { // Changed from novib_edge to gray_img
+                // If this pixel is structural (white in gray_img)
+                if (gray_img.at<uchar>(ii, jj) == 255) {
                     grey_num[i - 1]++;
 
-                    // Define search region
+                    // Search for a matching vibration pixel within radius
                     int up = max(0, ii - SEARCH_RADIUS);
                     int down = min(rows - 1, ii + SEARCH_RADIUS);
                     int left = max(0, jj - SEARCH_RADIUS);
                     int right = min(cols - 1, jj + SEARCH_RADIUS);
 
-                    // Extract region
                     Rect search_region(left, up, right - left + 1, down - up + 1);
                     Mat region = mv_vib_edge(search_region);
 
-                    // Check for matches (equivalent to find(mv_vib_edge(...)==1))
                     if (countNonZero(region) > 0) {
                         vib_match_num_in_gray[i - 1]++;
                     }
 
-                    // Clear the region in temporary image
+                    // Prevent double counting
                     mv_vib_edge_tmp(search_region) = 0;
                 }
             }
@@ -286,97 +311,64 @@ public:
         vib_no_match_num[i - 1] = countNonZero(mv_vib_edge_tmp);
         vib_match_num[i - 1] = vib_all_num[i - 1] - vib_no_match_num[i - 1];
 
-        // Progress indicator
-        if (i % 100 == 0 || i <= 10) {
-            cout << "Processed " << i << "/" << IMG_NUM << " images" << endl;
-            cout << "  Grey pixels: " << grey_num[i - 1]
-                 << ", Vib matches in gray: " << vib_match_num_in_gray[i - 1]
-                 << ", Total vib pixels: " << vib_all_num[i - 1] << endl;
+        if (i % 50 == 0) {
+            cout << "Processed " << i << "/" << IMG_NUM
+                 << " | Ratio: " << (float)vib_match_num_in_gray[i-1]/grey_num[i-1] << endl;
         }
     }
 
+    /**
+     * @brief Generates a simple line plot of the matching ratio.
+     */
     void plotResults() {
-        // Calculate match ratios
         vector<double> match_ratios;
         for (int i = 0; i < IMG_NUM; i++) {
-            if (grey_num[i] > 0) {
-                match_ratios.push_back(static_cast<double>(vib_match_num_in_gray[i]) / grey_num[i]);
-            } else {
-                match_ratios.push_back(0.0);
-            }
+            match_ratios.push_back(grey_num[i] > 0 ? (double)vib_match_num_in_gray[i] / grey_num[i] : 0.0);
         }
 
-        // Create a plot using OpenCV
-        int plot_width = 1200;
-        int plot_height = 600;
-        Mat plot_img = Mat::ones(plot_height, plot_width, CV_8UC3) * 255;
+        int W = 1200, H = 600;
+        Mat plot_img = Mat::ones(H, W, CV_8UC3) * 255;
 
-        if (!match_ratios.empty()) {
-            double max_ratio = *max_element(match_ratios.begin(), match_ratios.end());
-            double min_ratio = *min_element(match_ratios.begin(), match_ratios.end());
+        if (match_ratios.empty()) return;
 
-            cout << "Match ratio range: " << min_ratio << " to " << max_ratio << endl;
+        double max_val = *max_element(match_ratios.begin(), match_ratios.end());
+        if (max_val <= 0) max_val = 1.0;
 
-            if (max_ratio > 0) {
-                // Draw axes
-                line(plot_img, Point(50, plot_height - 50), Point(plot_width - 50, plot_height - 50), Scalar(0, 0, 0),
-                     2);
-                line(plot_img, Point(50, plot_height - 50), Point(50, 50), Scalar(0, 0, 0), 2);
-
-                // Plot data
-                for (size_t i = 1; i < match_ratios.size(); i++) {
-                    Point pt1(50 + static_cast<int>((i - 1) * (plot_width - 100) / match_ratios.size()),
-                              plot_height - 50 -
-                              static_cast<int>(match_ratios[i - 1] / max_ratio * (plot_height - 100)));
-                    Point pt2(50 + static_cast<int>(i * (plot_width - 100) / match_ratios.size()),
-                              plot_height - 50 - static_cast<int>(match_ratios[i] / max_ratio * (plot_height - 100)));
-                    line(plot_img, pt1, pt2, Scalar(255, 0, 0), 2);
-                }
-
-                // Add title and labels
-                putText(plot_img, "Match Ratios (vib_match_num_in_gray / grey_num)",
-                        Point(plot_width / 2 - 200, 30), FONT_HERSHEY_SIMPLEX, 0.7, Scalar(0, 0, 0), 2);
-                putText(plot_img, "Index", Point(plot_width / 2 - 20, plot_height - 10),
-                        FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
-                putText(plot_img, "Ratio", Point(10, plot_height / 2),
-                        FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0), 1);
-            }
+        // Draw Plot
+        for (size_t i = 1; i < match_ratios.size(); i++) {
+            Point pt1(50 + (i - 1) * (W - 100) / match_ratios.size(), H - 50 - (match_ratios[i - 1] / max_val * (H - 100)));
+            Point pt2(50 + i * (W - 100) / match_ratios.size(), H - 50 - (match_ratios[i] / max_val * (H - 100)));
+            line(plot_img, pt1, pt2, Scalar(255, 0, 0), 2);
         }
 
+        putText(plot_img, "Match Ratio (Detected / Ground Truth)", Point(W/3, 30), FONT_HERSHEY_SIMPLEX, 0.7, Scalar(0), 2);
         imshow("Match Ratios", plot_img);
         waitKey(0);
     }
 
     void run() {
-        cout << "Starting image processing..." << endl;
+        cout << "=== Image Processing Evaluation Start ===" << endl;
 
-        // Process gray image (first loop in MATLAB)
+        // 1. Process Reference
         Mat gray_img = processGrayImage(1);
-        cout << "Gray image processed successfully" << endl;
 
-        // Process all image pairs (second loop in MATLAB)
-        for (int i = 500; i <= IMG_NUM; i++) {
+        // 2. Process Sequence
+        // Note: Loop start adjusted to 1 for standard sequence processing
+        for (int i = 1; i <= IMG_NUM; i++) {
             processImagePair(i, gray_img);
         }
 
-        // Plot results
+        // 3. Output
         plotResults();
 
-        cout << "Processing complete!" << endl;
-
-        // Save results to file
         ofstream results_file("evaluation_results.csv");
-        results_file << "Index,GreyNum,VibMatchInGray,VibNoMatch,VibMatch,VibAll,Ratio\n";
+        results_file << "Index,GreyNum,VibMatch,Ratio\n";
         for (int i = 0; i < IMG_NUM; i++) {
-            double ratio = (grey_num[i] > 0) ?
-                           static_cast<double>(vib_match_num_in_gray[i]) / grey_num[i] : 0.0;
-            results_file << i + 1 << "," << grey_num[i] << "," << vib_match_num_in_gray[i]
-                         << "," << vib_no_match_num[i] << "," << vib_match_num[i]
-                         << "," << vib_all_num[i] << "," << ratio << "\n";
+            double ratio = (grey_num[i] > 0) ? (double)vib_match_num_in_gray[i] / grey_num[i] : 0.0;
+            results_file << i + 1 << "," << grey_num[i] << "," << vib_match_num_in_gray[i] << "," << ratio << "\n";
         }
         results_file.close();
-
-        cout << "Results saved to evaluation_results.csv" << endl;
+        cout << "Saved evaluation_results.csv" << endl;
     }
 };
 
@@ -385,9 +377,8 @@ int main() {
         ImageProcessor processor;
         processor.run();
     } catch (const exception &e) {
-        cerr << "Error: " << e.what() << endl;
+        cerr << "Fatal Error: " << e.what() << endl;
         return -1;
     }
-
     return 0;
 }
