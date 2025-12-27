@@ -112,6 +112,26 @@ If `-i` is not provided, the program will attempt to connect to a live camera.
 
 ---
 
+## 📂 Dataset Download
+To reproduce the results or run the examples, download the dataset from [Hugging Face](https://huggingface.co/datasets/viciopoli/VibES).
+
+### Using Git (Recommended) 
+
+Ensure you have git-lfs installed.
+
+```bash
+# Install Git LFS if needed
+sudo apt-get install git-lfs
+git lfs install
+
+# Clone the dataset
+git clone https://huggingface.co/datasets/viciopoli/VibES vibes_dataset
+```
+
+Files can also be downloaded manually from the [Hugging Face](https://huggingface.co/datasets/viciopoli/VibES).
+
+---
+
 ## 📚 Citation
 
 If you use VibES in your research, please cite:
