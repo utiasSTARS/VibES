@@ -46,16 +46,27 @@ VibES is a lightweight framework that enables **event cameras to sense persisten
 
 ## 🛠️ Installation
 
-### 1. System Dependencies
+### Local Setup
 
-Ensure FFTW3 and the Metavision SDK are installed.
+#### 1. Clone the Repository
+
+```bash
+git clone git@github.com:utiasSTARS/VibES.git --branch main
+cd VibES
+git submodule update --init --recursive
+```
+
+
+#### 2. System Dependencies
+
+  Ensure FFTW3 and the Metavision SDK or [OpenEB](https://github.com/prophesee-ai/openeb/tree/5.1.1) are installed
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y libfftw3-dev libeigen3-dev libgflags2 libgflags-dev
 ```
 
-### 2. Local Build (C++20)
+#### 3. Build (C++20)
 
 ```bash
 mkdir build && cd build
@@ -63,7 +74,7 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
 
-### 3. Docker (Recommended)
+### Docker (Recommended)
 
 Run with X11 forwarding for visualization, mount the dataset directory:
 
