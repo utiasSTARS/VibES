@@ -27,12 +27,13 @@ public:
         }
 
         if (A.size() > 1) {
-            throw std::invalid_argument("Maximum of 1 harmoni supported");
+            throw std::invalid_argument("Maximum of 1 harmonic supported");
         }
 
-        // Better theta init from atan2(B, A)
-
         StateVector5 initial_state;
+        // We initialize theta to 0.0 here.
+        // The update() function will fast-forward this to (omega * start_time)
+        // upon the first valid measurement.
         initial_state << A[0], B[0], omega[0], 0.0, C[0];
 
         // output the initial state
@@ -47,19 +48,19 @@ public:
         StateCovariance5 initial_covariance = StateCovariance5::Identity();
         initial_covariance(0, 0) = 1e2;  // A amplitude
         initial_covariance(1, 1) = 1e2;  // B amplitude
-        initial_covariance(2, 2) = 1e1;  // omega frequency (relaxed)
+        initial_covariance(2, 2) = 1e1;  // omega frequency
         initial_covariance(3, 3) = 1e1;  // theta angular position
-        initial_covariance(4, 4) = 1e4;  // C DC offset
+        initial_covariance(4, 4) = 1e3;  // C DC offset
 
         StateCovariance5 process_noise = StateCovariance5::Identity();
-        process_noise(0, 0) = 1e1;  // A process noise
-        process_noise(1, 1) = 1e1;  // B process noise
-        process_noise(2, 2) = 1e-3; // omega process noise (small - frequency should be stable)
-        process_noise(3, 3) = 1e-3;  // theta process noise (larger - phase can drift)
-        process_noise(4, 4) = 1e3;  // C process noise
+        process_noise(0, 0) = 1e0;  // A process noise
+        process_noise(1, 1) = 1e0;  // B process noise
+        process_noise(2, 2) = 1e-3; // omega process noise
+        process_noise(3, 3) = 1e-3; // theta process noise
+        process_noise(4, 4) = 1e0;  // C process noise
 
-        return IEKFSinusoidFitter(initial_state, initial_covariance, process_noise,
-                                  measurement_noise_variance, max_iterations, convergence_threshold);
+        return {initial_state, initial_covariance, process_noise,
+                measurement_noise_variance, max_iterations, convergence_threshold};
     }
 
     using StateVector5 = Eigen::Matrix<double, 5, 1>;
@@ -88,20 +89,18 @@ public:
     void update(double t, double y) {
         measurement_count_++;
 
-
         if (last_time_ < 0.0) {
+            state5_(3) += state5_(2) * t;
             last_time_ = t;
-            return; // Skip first update
+            is_initialized_ = true;
+            return; // Skip prediction/update on the priming step
         }
 
         double delta_t = t - last_time_;
         last_time_ = t;
 
-        if (!is_initialized_) {
-            state5_(3) = std::atan2(y - state5_(4), state5_(0)); // theta aligned to first measurement
-            is_initialized_ = true;
-        }
-
+        // REMOVED: The block that attempted to self-initialize theta from y
+        // and caused the phase mismatch.
 
         if (delta_t < 0) {
             std::cerr << "[Warning] Negative delta_t encountered, skipping update." << std::endl;
@@ -116,8 +115,7 @@ public:
             return state5_(4);
         }
 
-        const double theta = state5_(3) + state5_(2) * (t - last_time_); // Predict theta at time
-
+        const double theta = state5_(3) + state5_(2) * (t - last_time_);
         return state5_(0) * std::sin(theta) + state5_(1) * std::cos(theta) + state5_(4);
     }
 
@@ -126,25 +124,18 @@ public:
             return 0.0;
         }
 
-        const double theta = state5_(3) + state5_(2) * (t - last_time_); // Predict theta at time
-
+        const double theta = state5_(3) + state5_(2) * (t - last_time_);
         return state5_(0) * std::sin(theta) + state5_(1) * std::cos(theta);
     }
 
+    // Getters
     double getShift() const { return state5_(4); }
-
     double getFrequency() const { return state5_(2) / (2 * M_PI); }
-
     double getAmplitude() const { return std::sqrt(state5_(0) * state5_(0) + state5_(1) * state5_(1)); }
-
     double getPhase() const { return std::atan2(state5_(1), state5_(0)); }
-
     double getTheta() const { return state5_(3); }
-
     bool is_initialized() const { return is_initialized_; }
-
     bool uses_dual_sinusoid() const { return use_dual_sinusoid_; }
-
     int getMeasurementCount() const { return measurement_count_; }
 
     void print_frequencies() const {
@@ -199,14 +190,14 @@ private:
     Eigen::Matrix<double, 5, 1> K_temp5_;
     StateVector5 eta_prev5_;
     StateCovariance5 identity_matrix5_;
-    StateTransition5 F_temp5_;  // State transition Jacobian
+    StateTransition5 F_temp5_;
 
     void initialize_common() {
         H_temp5_.setZero();
         K_temp5_.setZero();
         eta_prev5_.setZero();
         identity_matrix5_.setIdentity();
-        F_temp5_.setIdentity();  // Initialize as identity
+        F_temp5_.setIdentity();
     }
 
 
