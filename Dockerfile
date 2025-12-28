@@ -31,6 +31,9 @@ RUN cd openeb &&  \
     cmake --build . --config Release -- -j 4 && \
     cmake --build . --target install
 
+ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
+ENV HDF5_PLUGIN_PATH="/usr/local/hdf5/lib/plugin:${HDF5_PLUGIN_PATH}"
+
 # Install VibES
 COPY cmake /VibES/cmake
 COPY include /VibES/include
@@ -44,4 +47,5 @@ WORKDIR /VibES/build
 RUN cmake .. -DCMAKE_BUILD_TYPE=Release && make -j4
 
 # Set entrypoint
-ENTRYPOINT ["./compensation", "-c", "/datasets/intrinsics.json", "-i", "/datasets/data/logo_vib.hdf5", "-o", "../results/logo/harmeda/", "--tracker-x", "557", "--tracker-y", "242"]
+ENTRYPOINT ["./compensation"]
+CMD [ "-c", "/datasets/intrinsics.json", "-i", "/datasets/data/logo_vib.hdf5", "-o", "../results/logo/harmeda/", "--tracker-x", "557", "--tracker-y", "242"]
