@@ -79,7 +79,7 @@ make -j$(nproc)
 Run with X11 forwarding for visualization, mount the dataset directory:
 
 ```bash
-docker docker run --net=host --rm -v /PATH_TO/event_harmeda/vibes_dataset/:/datasets --privileged -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix -it viciopoli/vibes:latest 
+docker run --net=host --rm -v /PATH_TO/event_harmeda/vibes_dataset/:/datasets --privileged -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix -it viciopoli/vibes:latest 
 ```
 
 If you `/bin/bash` into the container different executables can be run.
