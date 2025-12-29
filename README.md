@@ -51,7 +51,7 @@ VibES is a lightweight framework that enables **event cameras to sense persisten
 #### 1. Clone the Repository
 
 ```bash
-git clone git@github.com:utiasSTARS/VibES.git --branch main
+git clone git@github.com:utiasSTARS/VibES.git --branch vibes
 cd VibES
 git submodule update --init --recursive
 ```
